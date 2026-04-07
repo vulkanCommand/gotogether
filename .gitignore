@@ -1,24 +1,28 @@
-# Logs
-logs
+# dependencies
+node_modules/
+mobile-app/node_modules/
+
+# expo
+mobile-app/.expo/
+mobile-app/.expo-shared/
+.expo/
+
+# builds
+dist/
+build/
+
+# logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# env
+.env
+.env.local
+.env.*
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# os
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
