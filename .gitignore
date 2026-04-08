@@ -26,3 +26,4 @@ yarn-error.log*
 # os
 .DS_Store
 Thumbs.db
+backend/firebase-admin.json
