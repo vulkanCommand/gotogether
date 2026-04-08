@@ -1,189 +1,226 @@
-# GoTogether — Project State
+# GoTogether — Project State (Final Frontend MVP)
 
 ## 🧭 Project Overview
 
-GoTogether is a **mobile-first group trip coordination app**.
+GoTogether is a mobile-first group trip coordination app.
 
 The goal is to help friend groups:
+- match availability  
+- vote on destinations  
+- assign a trip lead  
+- build and manage itinerary  
+- track live location  
+- split expenses  
+- complete trips with confirmation  
 
-* match availability
-* vote on destinations
-* assign a trip lead
-* manage itinerary
-* track live location
-* split expenses
-* complete trips with confirmation
-
-This is NOT a web-first app.
-Web (Lovable) is only used for **UI reference and design inspiration**.
+This is NOT a web-first app.  
+Web Lovable is only used for UI reference and design inspiration.
 
 ---
 
 ## 🏗️ Current Architecture
 
-### Frontend (Mobile)
-
-* Framework: Expo + React Native (TypeScript)
-* Location: `/mobile-app`
-* Navigation: React Navigation (stack + bottom tabs)
-* Status: Base scaffold completed
-
-### Frontend (Web - Lovable)
-
-* Framework: Vite + React + Tailwind + shadcn
-* Location: `/src`
-* Purpose: UI/UX reference only (NOT production)
-
-### Backend (Planned)
-
-* Platform: Google Cloud + Firebase
-* Responsibilities:
-
-  * Auth
-  * Users / Friends / Groups
-  * Trips
-  * Availability matching
-  * Voting
-  * Itinerary
-  * Expenses
-  * Live location
-  * Notifications
-  * Image uploads
+### Frontend Mobile
+- Framework: Expo + React Native + TypeScript  
+- Navigation: React Navigation (Stack + Bottom Tabs)  
+- State Management: **Zustand (global store implemented)**  
+- Status: **Fully connected frontend MVP (state-driven)**  
 
 ---
 
-## 📱 Mobile App Structure
+### Frontend Web Reference
+- Framework: Vite + React + Tailwind + shadcn  
+- Purpose: UI/UX reference only  
+
+---
+
+### Backend (Next Phase)
+- Platform: Google Cloud + Firebase  
+- Will handle:
+  - Auth  
+  - Users / Groups  
+  - Trips  
+  - Voting sync  
+  - Itinerary persistence  
+  - Expenses engine  
+  - Live location  
+  - Notifications  
+
+---
+
+## 📱 App Structure
 
 ### Tabs
+- Home  
+- Trips  
+- Live  
+- Expenses  
+- Profile  
 
-* Home
-* Trips
-* Live
-* Expenses
-* Profile
+---
 
 ### Stack Screens
+- CreateGroup  
+- TripCreate  
+- TripOverview  
+- Itinerary  
+- AddExpense  
+- TripCompletion  
 
-* Onboarding
-* Login
-* CreateGroup
-* TripCreate
-* TripOverview
-* Itinerary
-* AddExpense
-* TripCompletion
+---
+
+## 🔁 Final Working Flow
+
+CreateGroup  
+→ TripCreate  
+→ TripOverview  
+→ Itinerary  
+→ AddExpense  
+→ TripCompletion  
+
+👉 Flow is now:
+- **Fully connected**
+- **State-driven (Zustand)**
+- **No data loss between screens**
+
+---
+
+## 🧠 Global State (NEW — CRITICAL)
+
+All data now lives in a single Zustand store.
+
+### Stored Data
+- Crew  
+- Selected dates  
+- Best match range  
+- Destination options + votes  
+- Selected destination  
+- Trip lead  
+- Itinerary (days + events)  
+- Expenses  
+
+---
+
+### Derived Data (Computed)
+- Selected destination  
+- Total plans  
+- Confirmed plans  
+- Next upcoming event  
+- Total expense amount  
+
+---
+
+### Key Outcome
+
+👉 No more local state fragmentation  
+👉 Backend integration will be plug-and-play  
+👉 Entire app behaves like a real product  
+
+---
+
+## 🧩 Screens Status
+
+### ✅ CreateGroupScreen
+- Connected to store  
+- Crew persists across flow  
+
+---
+
+### ✅ TripCreateScreen
+- Dates → stored globally  
+- Destination voting → stored globally  
+- Trip lead → stored globally  
+- Fully persistent  
+
+---
+
+### ✅ TripOverviewScreen
+- Reads from global store  
+- Stable and locked  
+
+---
+
+### ✅ ItineraryScreen
+- Fully store-driven  
+- Add day + events persist  
+- Next-up auto-calculated  
+- Summary auto-updates  
+
+---
+
+### ✅ AddExpenseScreen
+- Expenses stored globally  
+- Split preview working  
+- Total updates live  
+
+---
+
+### ✅ TripCompletionScreen
+- Reads full trip data from store  
+- Shows real summary  
+- Reset flow implemented  
 
 ---
 
 ## 🎨 Design System
 
-### Style Direction
-
-* Swiss design
-* Clean grid
-* High contrast
-* Minimal clutter
-* Premium feel (Apple / Airbnb / Notion level)
-
-### Colors
-
-* Primary: #1A1A2E
-* Accent: #3A86FF
-* Secondary: #7B61FF
-* Background: #F8FAFC
-* Surface: #FFFFFF
-* Text: #111827 / #6B7280
-
-### Components
-
-* AppCard
-* PrimaryButton (gradient)
-* Screen wrapper
-* SectionTitle
-* Bottom Tab Navigation
+- Swiss layout  
+- Clean grid  
+- High contrast  
+- Minimal clutter  
+- Premium feel (Apple / Airbnb / Notion)
 
 ---
 
-## 🔧 Current Progress
+## ⚠️ What’s NOT Done (Next Phase)
 
-### Completed
-
-* Repo initialized and pushed to GitHub
-* Lovable UI generated and stored
-* Expo mobile app scaffold created
-* Navigation structure implemented
-* Core screens created (basic versions)
-
-### Not Completed
-
-* Pixel-perfect UI matching Lovable
-* Backend integration
-* State management
-* Real data
-* Live location
-* Expense logic
-* Authentication
+- Backend integration  
+- Real-time multi-user sync  
+- Authentication  
+- Persistent DB storage  
+- Expense calculation logic  
+- Live location tracking  
 
 ---
 
-## ⚠️ Important Rules
+## 🧠 Current State (Real Truth)
 
-* DO NOT modify Lovable web files (`/src`)
-* Mobile app (`/mobile-app`) is the real product
-* Build mobile-first always
-* Do NOT overbuild features before UI is stable
-* Build screen-by-screen (no bulk generation)
+You now have:
 
----
+- A **complete frontend product (not prototype)**  
+- Full end-to-end user journey  
+- Shared global state across entire app  
+- Backend-ready architecture  
+- Clean separation of UI vs logic  
 
-## 🎯 Current Focus
-
-Start rebuilding screens properly with production-level UI.
-
-### First Target
-
-👉 TripOverviewScreen
-
-Reason:
-
-* Core of the app
-* Defines design system
-* Connects all flows
-
----
-
-## 🧠 Development Approach
-
-For each screen:
-
-1. Match Lovable UI visually
-2. Improve spacing, typography, hierarchy
-3. Use reusable components
-4. Keep code clean and modular
-5. Prepare for backend integration later
+👉 This is the correct point to start backend  
 
 ---
 
 ## 🚀 Next Step
 
-Rebuild:
-👉 TripOverviewScreen
+👉 Backend Integration (Phase 2)
 
-Make it:
-
-* visually premium
-* structured properly
-* reusable
-* production-ready
+Start with:
+1. Auth (Firebase)  
+2. Trip creation API  
+3. Itinerary persistence  
+4. Expense storage  
 
 ---
 
-## 📌 Notes
+## ⚠️ Working Rules
 
-* Lovable = design reference
-* Expo app = real product
-* ChatGPT = code generator + architect
+- No UI polish now  
+- No refactors  
+- No redesign  
+- Move forward only  
+- Backend first  
 
 ---
 
-END OF FILE
+## 🎯 Next Chat Start
+
+Use:
+
+**"Continue from PROJECT_STATE — start backend integration (auth + trip APIs)"**

@@ -68,7 +68,9 @@ function MainTabs() {
           return <Ionicons name={map[route.name]} size={size} color={color} />;
         },
         tabBarLabel: ({ color }) => (
-          <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{route.name}</Text>
+          <Text style={{ color, fontSize: 12, fontWeight: '600' }}>
+            {route.name}
+          </Text>
         ),
       })}
     >
