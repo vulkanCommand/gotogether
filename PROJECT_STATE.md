@@ -1,4 +1,4 @@
-# GoTogether — Project State (Final Frontend MVP)
+# GoTogether — Project State (Frontend + Backend v1)
 
 ## 🧭 Project Overview
 
@@ -23,32 +23,94 @@ Web Lovable is only used for UI reference and design inspiration.
 ### Frontend Mobile
 - Framework: Expo + React Native + TypeScript  
 - Navigation: React Navigation (Stack + Bottom Tabs)  
-- State Management: **Zustand (global store implemented)**  
-- Status: **Fully connected frontend MVP (state-driven)**  
+- State Management: Zustand (global store implemented)  
+- Status: Fully connected frontend MVP (state-driven)
 
 ---
 
-### Frontend Web Reference
-- Framework: Vite + React + Tailwind + shadcn  
-- Purpose: UI/UX reference only  
+### Backend (NEW — IMPLEMENTED)
+
+- Language: Go  
+- Framework: Gin  
+- Auth: Firebase (ID Token based authentication)  
+- Database: PostgreSQL (Google Cloud SQL)  
+- Hosting Target: Google Cloud Run  
+- Repo Structure: Monorepo (`mobile-app + backend`)
 
 ---
 
-### Backend (Next Phase)
-- Platform: Google Cloud + Firebase  
-- Will handle:
-  - Auth  
-  - Users / Groups  
-  - Trips  
-  - Voting sync  
-  - Itinerary persistence  
-  - Expenses engine  
-  - Live location  
-  - Notifications  
+## 🔐 Authentication Flow (WORKING)
+
+Flow:
+
+Mobile App (later)  
+→ Firebase login  
+→ ID Token  
+→ Backend (`Authorization: Bearer <token>`)  
+→ Firebase Admin verification  
+→ User synced into DB  
 
 ---
 
-## 📱 App Structure
+## 🗄️ Database (LIVE)
+
+### users
+- id (SERIAL)
+- firebase_uid (UNIQUE)
+- email
+- name
+- created_at
+
+### trips
+- id (SERIAL)
+- name
+- destination
+- start_date
+- end_date
+- created_by (FK → users.id)
+- created_at
+
+---
+
+## 🔌 Backend APIs (WORKING)
+
+### Health
+- `GET /health`
+
+---
+
+### Auth/User
+- `GET /api/me`
+  - verifies Firebase token
+  - auto-creates user in DB
+  - returns user object
+
+---
+
+### Trips
+
+- `POST /api/trips`
+  - creates trip
+  - links to authenticated user
+
+- `GET /api/trips`
+  - returns all trips for logged-in user
+
+---
+
+## 🔁 Verified Backend Flow
+
+- Firebase login → token generated  
+- Backend verifies token  
+- User auto-inserted into DB  
+- Trip created via API  
+- Trip fetched via API  
+
+End-to-end backend flow is working
+
+---
+
+## 📱 App Structure (Frontend)
 
 ### Tabs
 - Home  
@@ -69,7 +131,7 @@ Web Lovable is only used for UI reference and design inspiration.
 
 ---
 
-## 🔁 Final Working Flow
+## 🔁 Frontend Flow (CONNECTED)
 
 CreateGroup  
 → TripCreate  
@@ -78,149 +140,84 @@ CreateGroup
 → AddExpense  
 → TripCompletion  
 
-👉 Flow is now:
-- **Fully connected**
-- **State-driven (Zustand)**
-- **No data loss between screens**
+- Fully state-driven (Zustand)  
+- No data loss  
 
 ---
 
-## 🧠 Global State (NEW — CRITICAL)
+## 🧠 Global State (Frontend)
 
-All data now lives in a single Zustand store.
-
-### Stored Data
+### Stored
 - Crew  
-- Selected dates  
-- Best match range  
-- Destination options + votes  
+- Dates  
+- Destination votes  
 - Selected destination  
 - Trip lead  
-- Itinerary (days + events)  
+- Itinerary  
 - Expenses  
 
 ---
 
-### Derived Data (Computed)
-- Selected destination  
-- Total plans  
-- Confirmed plans  
-- Next upcoming event  
-- Total expense amount  
-
----
-
-### Key Outcome
-
-👉 No more local state fragmentation  
-👉 Backend integration will be plug-and-play  
-👉 Entire app behaves like a real product  
-
----
-
-## 🧩 Screens Status
-
-### ✅ CreateGroupScreen
-- Connected to store  
-- Crew persists across flow  
-
----
-
-### ✅ TripCreateScreen
-- Dates → stored globally  
-- Destination voting → stored globally  
-- Trip lead → stored globally  
-- Fully persistent  
-
----
-
-### ✅ TripOverviewScreen
-- Reads from global store  
-- Stable and locked  
-
----
-
-### ✅ ItineraryScreen
-- Fully store-driven  
-- Add day + events persist  
-- Next-up auto-calculated  
-- Summary auto-updates  
-
----
-
-### ✅ AddExpenseScreen
-- Expenses stored globally  
-- Split preview working  
-- Total updates live  
-
----
-
-### ✅ TripCompletionScreen
-- Reads full trip data from store  
-- Shows real summary  
-- Reset flow implemented  
-
----
-
-## 🎨 Design System
-
-- Swiss layout  
-- Clean grid  
-- High contrast  
-- Minimal clutter  
-- Premium feel (Apple / Airbnb / Notion)
-
----
-
-## ⚠️ What’s NOT Done (Next Phase)
-
-- Backend integration  
-- Real-time multi-user sync  
-- Authentication  
-- Persistent DB storage  
-- Expense calculation logic  
-- Live location tracking  
-
----
-
-## 🧠 Current State (Real Truth)
+## 🎯 Current System State
 
 You now have:
 
-- A **complete frontend product (not prototype)**  
-- Full end-to-end user journey  
-- Shared global state across entire app  
-- Backend-ready architecture  
-- Clean separation of UI vs logic  
+- Complete mobile frontend (production-like)  
+- Working backend (auth + trips)  
+- Real database persistence  
+- Real authentication system  
+- Clean API structure  
+- Backend-ready frontend  
 
-👉 This is the correct point to start backend  
+This is not a prototype anymore  
+This is a working product foundation  
 
 ---
 
-## 🚀 Next Step
+## ⚠️ What’s NOT Done
 
-👉 Backend Integration (Phase 2)
+### Backend
+- Trip details API (`GET /trips/:id`)
+- Itinerary persistence
+- Expenses persistence
+- Multi-user trip sharing
+- Role management (trip lead, members)
 
-Start with:
-1. Auth (Firebase)  
-2. Trip creation API  
-3. Itinerary persistence  
-4. Expense storage  
+### Infra
+- Cloud Run deployment
+- Secret Manager integration
+- Firebase config in mobile app
+
+### Frontend
+- API integration (currently Zustand only)
+- Auth UI (login/signup)
+- Replace mock data with backend calls
+
+---
+
+## 🚀 Next Phase
+
+### Backend
+- Trip details API
+- Itinerary APIs
+- Expense APIs
+
+### Frontend Integration
+- Connect Zustand → backend APIs
+- Replace local state with server sync
 
 ---
 
 ## ⚠️ Working Rules
 
-- No UI polish now  
+- No UI polish  
 - No refactors  
 - No redesign  
 - Move forward only  
-- Backend first  
+- Backend first, then integration  
 
 ---
 
 ## 🎯 Next Chat Start
 
-Use:
-
-**"Continue from PROJECT_STATE — start backend integration (auth + trip APIs)"**
+**Continue from PROJECT_STATE — connect frontend to backend (trips API integration)**

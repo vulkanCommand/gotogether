@@ -14,7 +14,6 @@ import (
 )
 
 func main() {
-	// Load .env file
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("No .env file found")
@@ -31,6 +30,7 @@ func main() {
 	api.Use(middleware.AuthMiddleware())
 
 	api.GET("/me", handlers.GetMe)
+	api.POST("/trips", handlers.CreateTrip)
 
 	port := os.Getenv("PORT")
 	if port == "" {

@@ -5,3 +5,13 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS trips (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

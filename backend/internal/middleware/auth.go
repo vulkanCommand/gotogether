@@ -13,7 +13,6 @@ import (
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
-
 		if header == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing token"})
 			c.Abort()
@@ -21,13 +20,13 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		parts := strings.Split(header, "Bearer ")
-		if len(parts) != 2 {
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token format"})
 			c.Abort()
 			return
 		}
 
-		token := parts[1]
+		token := strings.TrimSpace(parts[1])
 
 		decoded, err := auth.FirebaseAuth.VerifyIDToken(context.Background(), token)
 		if err != nil {
@@ -37,6 +36,19 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		c.Set("uid", decoded.UID)
+
+		if email, ok := decoded.Claims["email"].(string); ok {
+			c.Set("email", email)
+		} else {
+			c.Set("email", "")
+		}
+
+		if name, ok := decoded.Claims["name"].(string); ok {
+			c.Set("name", name)
+		} else {
+			c.Set("name", "")
+		}
+
 		c.Next()
 	}
 }
