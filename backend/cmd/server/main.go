@@ -31,6 +31,8 @@ func main() {
 
 	api.GET("/me", handlers.GetMe)
 	api.POST("/trips", handlers.CreateTrip)
+	api.GET("/trips", handlers.GetTrips)
+	api.GET("/trips/:id", handlers.GetTripByID)
 
 	port := os.Getenv("PORT")
 	if port == "" {

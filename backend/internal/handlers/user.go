@@ -11,6 +11,7 @@ import (
 
 func GetMe(c *gin.Context) {
 	uid, _ := c.Get("uid")
+	println("DEBUG UID:", uid)
 	email, _ := c.Get("email")
 	name, _ := c.Get("name")
 

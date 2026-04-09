@@ -1,9 +1,8 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { trips } from '../data/mock';
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import SectionTitle from '../components/SectionTitle';
@@ -16,7 +15,54 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
+type Trip = {
+  id: number;
+  name: string;
+  destination: string;
+  start_date: string;
+  end_date: string;
+  members_count: number;
+};
+
 export default function TripsScreen({ navigation }: Props) {
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const TOKEN = 'PASTE_YOUR_TOKEN_HERE'; // temporary for testing
+
+  useEffect(() => {
+    fetchTrips();
+  }, []);
+
+  const fetchTrips = async () => {
+    try {
+      const res = await fetch('http://10.0.2.2:8080/api/trips', {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+        },
+      });
+
+      const data = await res.json();
+      setTrips(data.trips || []);
+    } catch (err) {
+      console.log('Failed to fetch trips', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDateRange = (start: string, end: string) => {
+    return `${start} → ${end}`;
+  };
+
+  if (loading) {
+    return (
+      <Screen>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <SectionTitle
@@ -31,17 +77,21 @@ export default function TripsScreen({ navigation }: Props) {
         >
           <AppCard style={styles.card}>
             <Text style={styles.title}>{trip.name}</Text>
-            <Text style={styles.meta}>{trip.date}</Text>
+            <Text style={styles.meta}>
+              {formatDateRange(trip.start_date, trip.end_date)}
+            </Text>
 
             <View style={styles.bottom}>
               <Text style={styles.destination}>{trip.destination}</Text>
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>{trip.progress}</Text>
+                <Text style={styles.badgeText}>Active</Text>
               </View>
             </View>
 
             <View style={styles.footerRow}>
-              <Text style={styles.members}>{trip.members} members</Text>
+              <Text style={styles.members}>
+                {trip.members_count} members
+              </Text>
               <Text style={styles.openText}>Open trip</Text>
             </View>
           </AppCard>
