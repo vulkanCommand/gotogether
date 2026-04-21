@@ -1,38 +1,104 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import SectionTitle from '../components/SectionTitle';
-import { expenses } from '../data/mock';
+import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
+import { useTripStore } from '../store/tripStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
+import { apiRequest } from '../config/api';
 
-export default function ExpensesScreen() {
+type Props = CompositeScreenProps<
+  BottomTabScreenProps<MainTabParamList, 'Expenses'>,
+  NativeStackScreenProps<RootStackParamList>
+>;
+
+export default function ExpensesScreen({ navigation }: Props) {
+  const currentTrip = useTripStore((state) => state.currentTrip);
+  const expenses = useTripStore((state) => state.expenses);
+  const setExpenses = useTripStore((state) => state.setExpenses);
+  const totalExpenseAmount = useTripStore((state) => state.totalExpenseAmount);
+  const [loading, setLoading] = useState(false);
+
+  const fetchExpenses = useCallback(async () => {
+    if (!currentTrip?.id) {
+      setExpenses([]);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const data = await apiRequest<{ expenses: typeof expenses }>(`/api/trips/${currentTrip.id}/expenses`);
+      setExpenses(Array.isArray(data.expenses) ? data.expenses : []);
+    } catch (error) {
+      console.log('Fetch expenses failed', error);
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentTrip?.id, setExpenses]);
+
+  useEffect(() => {
+    fetchExpenses();
+  }, [fetchExpenses]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchExpenses();
+    }, [fetchExpenses])
+  );
+
   return (
     <Screen>
       <SectionTitle title="Expenses" subtitle="Track who paid, who owes, and what is settled." />
 
+      {loading ? (
+        <AppCard>
+          <ActivityIndicator size="small" color={colors.accent} />
+        </AppCard>
+      ) : null}
+
       <AppCard>
-        <Text style={styles.oweLabel}>You owe</Text>
-        <Text style={styles.oweAmount}>$42.00</Text>
+        <Text style={styles.oweLabel}>Total logged</Text>
+        <Text style={styles.oweAmount}>${totalExpenseAmount().toFixed(2)}</Text>
       </AppCard>
 
-      {expenses.map((item) => (
-        <AppCard key={item.id}>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.meta}>Paid by {item.payer}</Text>
-            </View>
-            <Text style={styles.amount}>{item.amount}</Text>
-          </View>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{item.split}</Text>
-          </View>
+      {!currentTrip ? (
+        <AppCard>
+          <Text style={styles.emptyTitle}>No trip selected</Text>
+          <Text style={styles.emptyText}>Open a trip first, then add expenses to it.</Text>
         </AppCard>
-      ))}
+      ) : expenses.length === 0 ? (
+        <AppCard>
+          <Text style={styles.emptyTitle}>No expenses yet</Text>
+          <Text style={styles.emptyText}>Add your first shared cost to start tracking expenses.</Text>
+        </AppCard>
+      ) : (
+        expenses.map((item) => (
+          <AppCard key={item.id}>
+            <View style={styles.rowBetween}>
+              <View style={styles.leftBlock}>
+                <Text style={styles.title}>{item.title}</Text>
+                <Text style={styles.meta}>Paid by {item.paidBy || 'Trip lead'}</Text>
+              </View>
+              <Text style={styles.amount}>${item.amount.toFixed(2)}</Text>
+            </View>
 
-      <Pressable style={styles.cta}>
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{item.splitMethod}</Text>
+            </View>
+
+            {item.notes ? <Text style={styles.notes}>{item.notes}</Text> : null}
+          </AppCard>
+        ))
+      )}
+
+      <Pressable style={styles.cta} onPress={() => navigation.navigate('AddExpense')}>
         <Text style={styles.ctaText}>Add Expense</Text>
       </Pressable>
     </Screen>
@@ -54,7 +120,12 @@ const styles = StyleSheet.create({
   rowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  leftBlock: {
+    flex: 1,
+    paddingRight: spacing.sm,
   },
   title: {
     fontSize: 16,
@@ -82,6 +153,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.accent,
+  },
+  notes: {
+    marginTop: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  emptyText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: colors.textSecondary,
   },
   cta: {
     backgroundColor: colors.primary,

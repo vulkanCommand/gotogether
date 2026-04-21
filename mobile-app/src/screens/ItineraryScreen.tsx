@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -9,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
@@ -21,6 +23,7 @@ import {
   ItineraryEventStatus,
   useTripStore,
 } from '../store/tripStore';
+import { apiRequest } from '../config/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Itinerary'>;
 
@@ -101,21 +104,21 @@ const buildDefaultDays = (tripTitle: string): ItineraryDay[] => [
 ];
 
 export default function ItineraryScreen({ navigation }: Props) {
+  const currentTrip = useTripStore((state) => state.currentTrip);
   const bestMatchRange = useTripStore((state) => state.bestMatchRange);
   const selectedDates = useTripStore((state) => state.selectedDates);
   const crew = useTripStore((state) => state.crew);
   const tripLead = useTripStore((state) => state.tripLead);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
   const setItineraryDays = useTripStore((state) => state.setItineraryDays);
-  const addDay = useTripStore((state) => state.addDay);
-  const addEventToDay = useTripStore((state) => state.addEventToDay);
   const selectedDestination = useTripStore((state) => state.selectedDestination);
   const totalPlans = useTripStore((state) => state.totalPlans);
   const totalConfirmedPlans = useTripStore((state) => state.totalConfirmedPlans);
   const nextUp = useTripStore((state) => state.nextUp);
 
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedDayId, setSelectedDayId] = useState<string>('day-1');
+  const [selectedDayId, setSelectedDayId] = useState<string>('');
+  const [loading, setLoading] = useState(false);
 
   const [newTitle, setNewTitle] = useState('');
   const [newTime, setNewTime] = useState('');
@@ -125,7 +128,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [newStatus, setNewStatus] = useState<ItineraryEventStatus>('upcoming');
 
   const destination = selectedDestination();
-  const tripTitle = destination?.name ?? 'Your Trip';
+  const tripTitle = currentTrip?.name ?? destination?.name ?? 'Your Trip';
   const crewCount = crew.length > 0 ? crew.length : 4;
   const leadName = tripLead?.name ?? 'Trip lead pending';
   const computedNextUp = nextUp();
@@ -139,11 +142,54 @@ export default function ItineraryScreen({ navigation }: Props) {
     return numeric;
   }, [selectedDates]);
 
-  useEffect(() => {
-    if (itineraryDays.length === 0) {
-      setItineraryDays(buildDefaultDays(tripTitle));
+  const fetchItinerary = useCallback(async () => {
+    if (!currentTrip?.id) {
+      setItineraryDays([]);
+      return;
     }
-  }, [itineraryDays.length, setItineraryDays, tripTitle]);
+
+    try {
+      setLoading(true);
+      const data = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
+      setItineraryDays(Array.isArray(data.days) ? data.days : []);
+    } catch (error) {
+      console.log('Fetch itinerary failed', error);
+      setItineraryDays([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentTrip?.id, setItineraryDays]);
+
+  const saveItinerary = useCallback(
+    async (days: ItineraryDay[]) => {
+      if (!currentTrip?.id) {
+        return false;
+      }
+
+      try {
+        await apiRequest(`/api/trips/${currentTrip.id}/itinerary`, {
+          method: 'PUT',
+          body: JSON.stringify({ days }),
+        });
+        return true;
+      } catch (error: any) {
+        console.log('Save itinerary failed', error);
+        Alert.alert('Save failed', error?.message || 'Could not save itinerary');
+        return false;
+      }
+    },
+    [currentTrip?.id]
+  );
+
+  useEffect(() => {
+    fetchItinerary();
+  }, [fetchItinerary]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchItinerary();
+    }, [fetchItinerary])
+  );
 
   useEffect(() => {
     if (itineraryDays.length > 0 && !itineraryDays.some((day) => day.id === selectedDayId)) {
@@ -153,7 +199,7 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const tripMeta = [
     bestMatchRange || 'Dates pending',
-    destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending',
+    currentTrip?.destination ?? (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
   ].join(' • ');
 
   const resetForm = () => {
@@ -171,38 +217,58 @@ export default function ItineraryScreen({ navigation }: Props) {
     setModalVisible(true);
   };
 
-  const handleAddPlan = () => {
+  const handleAddPlan = async () => {
     if (!newTitle.trim() || !newTime.trim()) {
       return;
     }
 
-    addEventToDay(selectedDayId, {
-      id: `event-${Date.now()}`,
-      title: newTitle.trim(),
-      time: newTime.trim(),
-      location: newLocation.trim() || 'Location TBD',
-      notes: newNote.trim() || 'No notes added yet.',
-      attendees: [newAttendees.trim() || `${crewCount} attending`],
-      status: newStatus,
-    });
+    const updatedDays = itineraryDays.map((day) =>
+      day.id === selectedDayId
+        ? {
+            ...day,
+            events: [
+              ...day.events,
+              {
+                id: `event-${Date.now()}`,
+                title: newTitle.trim(),
+                time: newTime.trim(),
+                location: newLocation.trim() || 'Location TBD',
+                notes: newNote.trim() || 'No notes added yet.',
+                attendees: [newAttendees.trim() || `${crewCount} attending`],
+                status: newStatus,
+              },
+            ],
+          }
+        : day
+    );
 
-    setModalVisible(false);
-    resetForm();
+    const saved = await saveItinerary(updatedDays);
+    if (saved) {
+      setItineraryDays(updatedDays);
+      setModalVisible(false);
+      resetForm();
+    }
   };
 
-  const handleAddDay = () => {
+  const handleAddDay = async () => {
     const nextIndex = itineraryDays.length;
     const matchedDayNumber = sortedSelectedDates[nextIndex];
-    const fallbackDateLabel = matchedDayNumber
-      ? `April ${matchedDayNumber}`
-      : formatFallbackDateLabel(nextIndex);
+    const fallbackDateLabel = matchedDayNumber ? `April ${matchedDayNumber}` : formatFallbackDateLabel(nextIndex);
 
-    addDay({
-      id: `day-${Date.now()}`,
-      title: `Day ${nextIndex + 1}`,
-      dateLabel: fallbackDateLabel,
-      events: [],
-    });
+    const updatedDays = [
+      ...itineraryDays,
+      {
+        id: `day-${Date.now()}`,
+        title: `Day ${nextIndex + 1}`,
+        dateLabel: fallbackDateLabel,
+        events: [],
+      },
+    ];
+
+    const saved = await saveItinerary(updatedDays);
+    if (saved) {
+      setItineraryDays(updatedDays);
+    }
   };
 
   return (
@@ -215,6 +281,12 @@ export default function ItineraryScreen({ navigation }: Props) {
           title="Itinerary"
           subtitle="Build the day-by-day plan, keep the next move visible, and carry the trip flow into expenses."
         />
+
+        {loading ? (
+          <AppCard>
+            <Text style={styles.emptyPlanTitle}>Loading itinerary...</Text>
+          </AppCard>
+        ) : null}
 
         <AppCard>
           <View style={styles.headerTop}>

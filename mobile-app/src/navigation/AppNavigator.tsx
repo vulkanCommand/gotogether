@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,11 +18,14 @@ import TripOverviewScreen from '../screens/TripOverviewScreen';
 import ItineraryScreen from '../screens/ItineraryScreen';
 import AddExpenseScreen from '../screens/AddExpenseScreen';
 import TripCompletionScreen from '../screens/TripCompletionScreen';
+import { useAuthStore } from '../store/authStore';
 
 export type RootStackParamList = {
   Onboarding: undefined;
   Login: undefined;
-  MainTabs: undefined;
+  MainTabs: {
+    screen?: keyof MainTabParamList;
+  } | undefined;
   CreateGroup: undefined;
   TripCreate: undefined;
   TripOverview: undefined;
@@ -68,9 +71,7 @@ function MainTabs() {
           return <Ionicons name={map[route.name]} size={size} color={color} />;
         },
         tabBarLabel: ({ color }) => (
-          <Text style={{ color, fontSize: 12, fontWeight: '600' }}>
-            {route.name}
-          </Text>
+          <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{route.name}</Text>
         ),
       })}
     >
@@ -83,18 +84,40 @@ function MainTabs() {
   );
 }
 
+function BootScreen() {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
+      <ActivityIndicator size="large" color={colors.accent} />
+    </View>
+  );
+}
+
 export default function AppNavigator() {
+  const token = useAuthStore((state) => state.token);
+  const authChecked = useAuthStore((state) => state.authChecked);
+
+  if (!authChecked) {
+    return <BootScreen />;
+  }
+
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="MainTabs" component={MainTabs} />
-      <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
-      <Stack.Screen name="TripCreate" component={TripCreateScreen} />
-      <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
-      <Stack.Screen name="Itinerary" component={ItineraryScreen} />
-      <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
-      <Stack.Screen name="TripCompletion" component={TripCompletionScreen} />
+      {token ? (
+        <>
+          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
+          <Stack.Screen name="TripCreate" component={TripCreateScreen} />
+          <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
+          <Stack.Screen name="Itinerary" component={ItineraryScreen} />
+          <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
+          <Stack.Screen name="TripCompletion" component={TripCompletionScreen} />
+        </>
+      ) : (
+        <>
+          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+          <Stack.Screen name="Login" component={LoginScreen} />
+        </>
+      )}
     </Stack.Navigator>
   );
 }

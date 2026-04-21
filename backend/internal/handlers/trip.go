@@ -13,34 +13,14 @@ import (
 )
 
 func CreateTrip(c *gin.Context) {
-	if db.DB == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "database not connected",
-		})
-		return
-	}
-
-	uidValue, exists := c.Get("uid")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "missing authenticated user",
-		})
-		return
-	}
-
-	uid, ok := uidValue.(string)
-	if !ok || strings.TrimSpace(uid) == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "invalid authenticated user",
-		})
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
 		return
 	}
 
 	var req models.CreateTripRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid request body",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
@@ -50,46 +30,26 @@ func CreateTrip(c *gin.Context) {
 	req.EndDate = strings.TrimSpace(req.EndDate)
 
 	if req.Name == "" || req.Destination == "" || req.StartDate == "" || req.EndDate == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "name, destination, start_date, and end_date are required",
-		})
-		return
-	}
-
-	var createdBy int
-	err := db.DB.QueryRow(`
-		SELECT id
-		FROM users
-		WHERE firebase_uid = $1
-	`, uid).Scan(&createdBy)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to find authenticated user",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name, destination, start_date, and end_date are required"})
 		return
 	}
 
 	tx, err := db.DB.Begin()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to start transaction",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
 		return
 	}
-	defer tx.Rollback()
+	defer rollbackQuietly(tx)
 
 	var trip models.Trip
 	err = tx.QueryRow(`
 		INSERT INTO trips (name, destination, start_date, end_date, created_by)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, name, destination, start_date::text, end_date::text, created_by
-	`, req.Name, req.Destination, req.StartDate, req.EndDate, createdBy).
+	`, req.Name, req.Destination, req.StartDate, req.EndDate, userID).
 		Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to create trip",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trip", "details": err.Error()})
 		return
 	}
 
@@ -97,62 +57,22 @@ func CreateTrip(c *gin.Context) {
 		INSERT INTO trip_members (trip_id, user_id, role)
 		VALUES ($1, $2, 'lead')
 		ON CONFLICT (trip_id, user_id) DO NOTHING
-	`, trip.ID, createdBy)
+	`, trip.ID, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to create trip member",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trip member", "details": err.Error()})
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to save trip",
-		})
+	if !commitOrRespond(c, tx) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "trip created",
-		"trip":    trip,
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "trip created", "trip": trip})
 }
 
 func GetTrips(c *gin.Context) {
-	if db.DB == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "database not connected",
-		})
-		return
-	}
-
-	uidValue, exists := c.Get("uid")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "missing authenticated user",
-		})
-		return
-	}
-
-	uid, ok := uidValue.(string)
-	if !ok || strings.TrimSpace(uid) == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "invalid authenticated user",
-		})
-		return
-	}
-
-	var userID int
-	err := db.DB.QueryRow(`
-		SELECT id
-		FROM users
-		WHERE firebase_uid = $1
-	`, uid).Scan(&userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to find authenticated user",
-		})
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
 		return
 	}
 
@@ -177,10 +97,7 @@ func GetTrips(c *gin.Context) {
 		ORDER BY t.start_date ASC, t.id ASC
 	`, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to fetch trips",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch trips", "details": err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -188,86 +105,35 @@ func GetTrips(c *gin.Context) {
 	trips := make([]models.TripListItem, 0)
 	for rows.Next() {
 		var trip models.TripListItem
-		if err := rows.Scan(
-			&trip.ID,
-			&trip.Name,
-			&trip.Destination,
-			&trip.StartDate,
-			&trip.EndDate,
-			&trip.CreatedBy,
-			&trip.MembersCount,
-		); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "failed to read trips",
-				"details": err.Error(),
-			})
+		if err := rows.Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &trip.MembersCount); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read trips", "details": err.Error()})
 			return
 		}
 		trips = append(trips, trip)
 	}
-
 	if err := rows.Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed while reading trips",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed while reading trips", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"trips": trips,
-	})
+	c.JSON(http.StatusOK, gin.H{"trips": trips})
 }
 
 func GetTripByID(c *gin.Context) {
-	if db.DB == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "database not connected",
-		})
-		return
-	}
-
-	uidValue, exists := c.Get("uid")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "missing authenticated user",
-		})
-		return
-	}
-
-	uid, ok := uidValue.(string)
-	if !ok || strings.TrimSpace(uid) == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "invalid authenticated user",
-		})
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
 		return
 	}
 
 	tripIDParam := strings.TrimSpace(c.Param("id"))
 	tripID, err := strconv.Atoi(tripIDParam)
 	if err != nil || tripID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid trip id",
-		})
-		return
-	}
-
-	var userID int
-	err = db.DB.QueryRow(`
-		SELECT id
-		FROM users
-		WHERE firebase_uid = $1
-	`, uid).Scan(&userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to find authenticated user",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trip id"})
 		return
 	}
 
 	var trip models.Trip
 	var membersCount int
-
 	err = db.DB.QueryRow(`
 		SELECT
 			t.id,
@@ -289,28 +155,13 @@ func GetTripByID(c *gin.Context) {
 				)
 		  )
 		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by
-	`, tripID, userID).Scan(
-		&trip.ID,
-		&trip.Name,
-		&trip.Destination,
-		&trip.StartDate,
-		&trip.EndDate,
-		&trip.CreatedBy,
-		&membersCount,
-	)
-
+	`, tripID, userID).Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &membersCount)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "trip not found",
-			})
+			c.JSON(http.StatusNotFound, gin.H{"error": "trip not found"})
 			return
 		}
-
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "failed to fetch trip",
-			"details": err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch trip", "details": err.Error()})
 		return
 	}
 

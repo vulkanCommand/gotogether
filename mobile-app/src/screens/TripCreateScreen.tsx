@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -10,6 +10,7 @@ import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { CrewMember, DestinationOption, useTripStore } from '../store/tripStore';
 import { members as mockMembers } from '../data/mock';
+import { apiRequest, ApiTrip } from '../config/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCreate'>;
 
@@ -68,8 +69,11 @@ export default function TripCreateScreen({ navigation }: Props) {
   const voteDestination = useTripStore((state) => state.voteDestination);
   const setTripLead = useTripStore((state) => state.setTripLead);
   const hydratePlannerDefaults = useTripStore((state) => state.hydratePlannerDefaults);
+  const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
+  const resetPlannerState = useTripStore((state) => state.resetPlannerState);
 
   const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   const fallbackCrew = useMemo<CrewMember[]>(
     () =>
@@ -95,11 +99,7 @@ export default function TripCreateScreen({ navigation }: Props) {
   useEffect(() => {
     hydratePlannerDefaults({
       crew: fallbackCrew,
-      selectedDates: ['11', '12', '13'],
-      bestMatchRange: 'Apr 11 – Apr 13',
       destinationOptions: destinationSeed,
-      selectedDestinationId: destinationSeed[0].id,
-      tripLead: fallbackCrew[0] ?? null,
     });
 
     if (crew.length === 0) {
@@ -140,12 +140,6 @@ export default function TripCreateScreen({ navigation }: Props) {
       setDestinationOptions(destinationSeed);
     }
   }, [destinationOptions.length, setDestinationOptions]);
-
-  useEffect(() => {
-    if (!selectedDestinationId && destinationSeed[0]) {
-      setSelectedDestinationId(destinationSeed[0].id);
-    }
-  }, [selectedDestinationId, setSelectedDestinationId]);
 
   useEffect(() => {
     if (!tripLead && plannerCrew.length > 0) {
@@ -193,13 +187,55 @@ export default function TripCreateScreen({ navigation }: Props) {
     setTripLead(member);
   };
 
-  const goNext = () => {
+  const goNext = async () => {
+    if (step === 0 && activeDates.length === 0) {
+      Alert.alert('Select dates', 'Choose at least one date before continuing.');
+      return;
+    }
+
+    if (step === 1 && !selectedDestination) {
+      Alert.alert('Select destination', 'Choose one destination before continuing.');
+      return;
+    }
+
     if (step < 2) {
       setStep((current) => current + 1);
       return;
     }
 
-    navigation.navigate('TripOverview');
+    if (!selectedDestination || !matchedRange || activeDates.length === 0) {
+      Alert.alert('Trip incomplete', 'Please finish dates and destination first.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      resetPlannerState();
+      setCrew(plannerCrew);
+      setSelectedDates(activeDates.map(String));
+      setBestMatchRange(matchedRange);
+      setDestinationOptions(destinationOptions);
+      setSelectedDestinationId(selectedDestination.id);
+      setTripLead(tripLead ?? plannerCrew[0] ?? null);
+
+      const created = await apiRequest<{ trip: ApiTrip }>('/api/trips', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: `${selectedDestination.name} Trip`,
+          destination: selectedDestination.name,
+          start_date: `2026-04-${String(activeDates[0]).padStart(2, '0')}`,
+          end_date: `2026-04-${String(activeDates[activeDates.length - 1]).padStart(2, '0')}`,
+        }),
+      });
+
+      setCurrentTrip(created.trip);
+      navigation.navigate('TripOverview');
+    } catch (error: any) {
+      console.log('Create trip failed', error);
+      Alert.alert('Trip creation failed', error?.message || 'Could not save trip to backend');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const goBack = () => {
@@ -335,8 +371,8 @@ export default function TripCreateScreen({ navigation }: Props) {
               </Text>
 
               <View style={styles.availabilityList}>
-                {availabilityRows.map((item) => (
-                  <View key={item.name} style={styles.availabilityRow}>
+                {availabilityRows.map((item, index) => (
+                  <View key={`${item.name}-${index}`} style={styles.availabilityRow}>
                     <Text style={styles.availabilityName}>{item.name}</Text>
                     <View
                       style={[

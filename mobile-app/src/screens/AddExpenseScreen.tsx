@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,10 +17,12 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { useTripStore } from '../store/tripStore';
+import { apiRequest } from '../config/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddExpense'>;
 
 export default function AddExpenseScreen({ navigation }: Props) {
+  const currentTrip = useTripStore((state) => state.currentTrip);
   const crew = useTripStore((state) => state.crew);
   const expenses = useTripStore((state) => state.expenses);
   const tripLead = useTripStore((state) => state.tripLead);
@@ -28,58 +32,104 @@ export default function AddExpenseScreen({ navigation }: Props) {
 
   const destination = selectedDestination();
   const crewList = crew.length > 0 ? crew : [];
-  const payerFallback = tripLead?.name ?? crewList[0]?.name ?? 'Trip Lead';
+  const fallbackPayer = tripLead?.name ?? crewList[0]?.name ?? 'Trip Lead';
 
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [paidBy, setPaidBy] = useState(payerFallback);
-  const [splitMethod, setSplitMethod] = useState<'Equal split' | 'Custom split'>('Equal split');
+  const [paidBy, setPaidBy] = useState(fallbackPayer);
+  const [splitMethod, setSplitMethod] = useState<'Equal split' | 'Custom split'>(
+    'Equal split'
+  );
   const [notes, setNotes] = useState('');
 
   const parsedAmount = Number(amount);
   const safeAmount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
   const memberCount = crewList.length > 0 ? crewList.length : 1;
 
+  const payerOptions = useMemo(() => {
+    if (crewList.length > 0) {
+      return crewList.map((member) => member.name);
+    }
+
+    if (tripLead?.name) {
+      return [tripLead.name];
+    }
+
+    return ['Trip Lead'];
+  }, [crewList, tripLead]);
+
   const splitPreview = useMemo(() => {
-    const eachAmount = safeAmount > 0 ? Number((safeAmount / memberCount).toFixed(2)) : 0;
+    const eachAmount =
+      safeAmount > 0 ? Number((safeAmount / memberCount).toFixed(2)) : 0;
 
     const sourceMembers =
       crewList.length > 0
         ? crewList
-        : [{ id: 'fallback-1', name: payerFallback }];
+        : [{ id: 'fallback-1', name: fallbackPayer }];
 
     return sourceMembers.map((member) => ({
       memberId: member.id,
       memberName: member.name,
       amount: eachAmount,
     }));
-  }, [crewList, memberCount, payerFallback, safeAmount]);
+  }, [crewList, memberCount, fallbackPayer, safeAmount]);
 
-  const handleSaveExpense = () => {
+  const handleSaveExpense = async () => {
+    if (!currentTrip?.id) {
+      Alert.alert('No trip selected', 'Open a trip before adding expenses.');
+      return;
+    }
+
     if (!title.trim() || safeAmount <= 0) {
       return;
     }
 
-    addExpense({
-      id: `expense-${Date.now()}`,
-      title: title.trim(),
-      amount: Number(safeAmount.toFixed(2)),
-      paidBy: paidBy.trim() || payerFallback,
-      splitMethod,
-      notes: notes.trim(),
-      createdAt: new Date().toISOString(),
-      splitPreview,
-    });
+    try {
+      const payload = {
+        title: title.trim(),
+        amount: Number(safeAmount.toFixed(2)),
+        paidBy,
+        splitMethod,
+        notes: notes.trim(),
+        splitPreview,
+      };
 
-    navigation.navigate('TripCompletion');
+      const response = await apiRequest<{ expense: any }>(`/api/trips/${currentTrip.id}/expenses`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      addExpense({
+        id: response.expense.id,
+        title: response.expense.title ?? payload.title,
+        amount: response.expense.amount ?? payload.amount,
+        paidBy: response.expense.paidBy ?? paidBy,
+        splitMethod: response.expense.splitMethod ?? splitMethod,
+        notes: response.expense.notes ?? payload.notes,
+        createdAt: response.expense.createdAt || new Date().toISOString(),
+        splitPreview: Array.isArray(response.expense.splitPreview)
+          ? response.expense.splitPreview
+          : splitPreview,
+      });
+
+      navigation.navigate('MainTabs', {
+        screen: 'Expenses',
+      });
+    } catch (error: any) {
+      console.log('Save expense failed', error);
+      Alert.alert('Save failed', error?.message || 'Could not save expense');
+    }
   };
 
   return (
     <Screen>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
+      >
         <SectionTitle
           title="Add Expense"
-          subtitle="Capture one shared cost, preview the split, and carry the trip into final completion."
+          subtitle="Capture one shared cost, preview the split, and save it to the trip."
         />
 
         <AppCard>
@@ -87,7 +137,7 @@ export default function AddExpenseScreen({ navigation }: Props) {
             <View style={styles.headerInfo}>
               <Text style={styles.eyebrow}>Trip context</Text>
               <Text style={styles.tripTitle}>
-                {destination?.name ?? 'Current trip'}
+                {currentTrip?.name ?? destination?.name ?? 'Current trip'}
               </Text>
               <Text style={styles.tripMeta}>
                 {crewList.length > 0 ? `${crewList.length} crew members` : 'Crew pending'} •{' '}
@@ -97,7 +147,9 @@ export default function AddExpenseScreen({ navigation }: Props) {
 
             <View style={styles.totalPill}>
               <Text style={styles.totalPillLabel}>Total</Text>
-              <Text style={styles.totalPillValue}>${totalExpenseAmount().toFixed(2)}</Text>
+              <Text style={styles.totalPillValue}>
+                ${totalExpenseAmount().toFixed(2)}
+              </Text>
             </View>
           </View>
         </AppCard>
@@ -122,13 +174,32 @@ export default function AddExpenseScreen({ navigation }: Props) {
             style={styles.input}
           />
 
-          <TextInput
-            value={paidBy}
-            onChangeText={setPaidBy}
-            placeholder="Paid by"
-            placeholderTextColor={colors.textSecondary}
-            style={styles.input}
-          />
+          <Text style={styles.fieldLabel}>Paid by</Text>
+          <View style={styles.payerOptions}>
+            {payerOptions.map((name, index) => {
+              const selected = paidBy === name;
+
+              return (
+                <Pressable
+                  key={`${name}-${index}`}
+                  onPress={() => setPaidBy(name)}
+                  style={[
+                    styles.payerChip,
+                    selected && styles.payerChipSelected,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.payerChipText,
+                      selected && styles.payerChipTextSelected,
+                    ]}
+                  >
+                    {name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
           <TextInput
             value={notes}
@@ -148,17 +219,23 @@ export default function AddExpenseScreen({ navigation }: Props) {
               const selected = splitMethod === option;
 
               return (
-                <View
+                <Pressable
                   key={option}
-                  style={[styles.optionCard, selected && styles.optionCardSelected]}
+                  onPress={() => setSplitMethod(option)}
+                  style={[
+                    styles.optionCard,
+                    selected && styles.optionCardSelected,
+                  ]}
                 >
                   <Text
-                    onPress={() => setSplitMethod(option)}
-                    style={[styles.optionText, selected && styles.optionTextSelected]}
+                    style={[
+                      styles.optionText,
+                      selected && styles.optionTextSelected,
+                    ]}
                   >
                     {option}
                   </Text>
-                </View>
+                </Pressable>
               );
             })}
           </View>
@@ -166,7 +243,8 @@ export default function AddExpenseScreen({ navigation }: Props) {
           <View style={styles.helperCard}>
             <Text style={styles.helperTitle}>Current behavior</Text>
             <Text style={styles.helperText}>
-              Equal split preview is live now. Custom split can stay as a UI option until backend logic is added later.
+              Payer is now selected from the crew. Equal split preview is live now.
+              Custom split can stay as a UI option until backend logic is added later.
             </Text>
           </View>
         </AppCard>
@@ -189,18 +267,24 @@ export default function AddExpenseScreen({ navigation }: Props) {
             {splitPreview.map((item) => (
               <View key={item.memberId} style={styles.previewRow}>
                 <Text style={styles.previewName}>{item.memberName}</Text>
-                <Text style={styles.previewAmount}>${item.amount.toFixed(2)}</Text>
+                <Text style={styles.previewAmount}>
+                  ${item.amount.toFixed(2)}
+                </Text>
               </View>
             ))}
           </View>
         </AppCard>
 
         <View style={styles.actions}>
-          <PrimaryButton title="Save Expense and Continue" onPress={handleSaveExpense} />
+          <PrimaryButton title="Save Expense" onPress={handleSaveExpense} />
           <PrimaryButton
-            title="Back to Itinerary"
+            title="Back to Expenses"
             variant="secondary"
-            onPress={() => navigation.goBack()}
+            onPress={() =>
+              navigation.navigate('MainTabs', {
+                screen: 'Expenses',
+              })
+            }
           />
         </View>
       </ScrollView>
@@ -281,6 +365,44 @@ const styles = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: 'top',
     marginBottom: 0,
+  },
+
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+
+  payerOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+
+  payerChip: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+
+  payerChipSelected: {
+    backgroundColor: '#EEF4FF',
+    borderColor: '#C7DAFF',
+  },
+
+  payerChipText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+
+  payerChipTextSelected: {
+    color: colors.accent,
   },
 
   optionRow: {

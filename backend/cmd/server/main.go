@@ -14,15 +14,14 @@ import (
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("No .env file found")
+	_ = godotenv.Load()
+
+	auth.InitFirebase()
+	if err := db.InitDB(); err != nil {
+		log.Fatalf("failed to initialize database: %v", err)
 	}
 
 	r := gin.Default()
-
-	auth.InitFirebase()
-	db.InitDB()
 
 	r.GET("/health", handlers.HealthHandler)
 
@@ -33,6 +32,10 @@ func main() {
 	api.POST("/trips", handlers.CreateTrip)
 	api.GET("/trips", handlers.GetTrips)
 	api.GET("/trips/:id", handlers.GetTripByID)
+	api.GET("/trips/:id/itinerary", handlers.GetTripItinerary)
+	api.PUT("/trips/:id/itinerary", handlers.SaveTripItinerary)
+	api.GET("/trips/:id/expenses", handlers.GetTripExpenses)
+	api.POST("/trips/:id/expenses", handlers.CreateTripExpense)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -40,5 +43,7 @@ func main() {
 	}
 
 	log.Println("Server running on port", port)
-	r.Run(":" + port)
+	if err := r.Run(":" + port); err != nil {
+		log.Fatalf("server failed to start: %v", err)
+	}
 }

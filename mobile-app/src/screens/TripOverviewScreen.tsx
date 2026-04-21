@@ -17,6 +17,7 @@ const heroImage =
 
 export default function TripOverviewScreen({ navigation }: Props) {
   const {
+    currentTrip,
     crew,
     bestMatchRange,
     destinationOptions,
@@ -108,18 +109,18 @@ export default function TripOverviewScreen({ navigation }: Props) {
           <View style={styles.headerTop}>
             <View style={styles.titleBlock}>
               <Text style={styles.trip}>
-                {selectedDestination?.name ?? 'Your Trip'}
+                {currentTrip?.name ?? selectedDestination?.name ?? 'Your Trip'}
               </Text>
               <Text style={styles.meta}>
-                {(bestMatchRange || 'Dates not selected') +
+                {(currentTrip ? `${currentTrip.start_date} → ${currentTrip.end_date}` : bestMatchRange || 'Dates not selected') +
                   ' • ' +
-                  (selectedDestination?.name ?? 'Destination pending')}
+                  (currentTrip?.destination ?? selectedDestination?.name ?? 'Destination pending')}
               </Text>
             </View>
 
             <View style={styles.badge}>
               <Text style={styles.badgeText}>
-                {crew.length || 0} people
+                {currentTrip?.members_count ?? crew.length ?? 0} people
               </Text>
             </View>
           </View>
@@ -186,7 +187,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
           <View style={styles.statsRow}>
             <StatCard value={String(itineraryDays.length)} label="Days" />
             <StatCard value={String(totalPlans)} label="Plans" />
-            <StatCard value={String(crew.length)} label="Crew" />
+            <StatCard value={String(currentTrip?.members_count ?? crew.length)} label="Crew" />
           </View>
 
           <SectionCard style={styles.nextPlanCard}>
