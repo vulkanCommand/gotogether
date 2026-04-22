@@ -10,6 +10,7 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -114,7 +115,7 @@ export default function LiveScreen() {
 
   return (
     <Screen>
-      <SectionTitle title="Live" subtitle="Track the trip crew on a real map with current locations." />
+      <SectionTitle title="Live" subtitle="Track the trip crew on a real map with current locations." action={<NotificationBell />} />
 
       {!currentTrip ? (
         <AppCard>

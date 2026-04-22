@@ -7,6 +7,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -70,7 +71,7 @@ export default function TripsScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <SectionTitle title="Trips" subtitle="All your planning spaces in one place." />
+      <SectionTitle title="Trips" subtitle="All your planning spaces in one place." action={<NotificationBell />} />
 
       {error ? (
         <AppCard style={styles.card}>

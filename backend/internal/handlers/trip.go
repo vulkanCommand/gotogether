@@ -268,6 +268,32 @@ func GetTripByID(c *gin.Context) {
 	})
 }
 
+func CompleteTrip(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+	if !ensureTripLeadAccess(c, tripID, userID) {
+		return
+	}
+
+	if _, err := db.DB.Exec(`
+		UPDATE trips
+		SET completed_at = CURRENT_TIMESTAMP, completed_by_user_id = $2
+		WHERE id = $1
+	`, tripID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to complete trip", "details": err.Error()})
+		return
+	}
+
+	createTripNotifications(tripID, userID, "Trip completed", "The trip lead marked the trip complete.", "trip", true)
+	c.JSON(http.StatusOK, gin.H{"completed": true})
+}
+
 func memberRoleForUser(userID int, leadUserID int) string {
 	if userID == leadUserID {
 		return "lead"

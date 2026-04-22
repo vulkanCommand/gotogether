@@ -6,6 +6,7 @@ import { signOut } from 'firebase/auth';
 import Screen from '../components/Screen';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { deleteMyAccount, fetchFriends } from '../config/api';
 import { firebaseAuth } from '../config/firebase';
@@ -61,9 +62,9 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen>
+    <Screen showFooter>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <SectionTitle title="Settings" subtitle="Account actions and permission shortcuts." />
+        <SectionTitle title="Settings" subtitle="Account actions and permission shortcuts." action={<NotificationBell />} />
 
         <PrimaryButton title="Grant permissions again" variant="secondary" onPress={() => navigation.navigate('PermissionsSetup')} />
         <PrimaryButton title="Refresh friends" variant="secondary" onPress={refreshFriends} />

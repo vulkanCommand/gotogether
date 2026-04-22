@@ -6,6 +6,7 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -130,9 +131,9 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   };
 
   return (
-    <Screen>
+    <Screen showFooter>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <SectionTitle title="Add Split" subtitle="Choose the group, payer, event link, then split it equally or custom." />
+        <SectionTitle title="Add Split" subtitle="Choose the group, payer, event link, then split it equally or custom." action={<NotificationBell />} />
 
         <AppCard>
           <View style={styles.headerRow}>

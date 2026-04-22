@@ -6,6 +6,7 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
 import { colors } from '../theme/colors';
@@ -86,11 +87,12 @@ export default function CreateGroupScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen>
+    <Screen showFooter>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <SectionTitle
           title="Create Group"
           subtitle="Start with your contacts who already use the app, then move into trip planning."
+          action={<NotificationBell />}
         />
 
         <AppCard>

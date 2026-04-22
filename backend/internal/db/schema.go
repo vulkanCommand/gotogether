@@ -138,6 +138,27 @@ var schemaStatements = []string{
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE (trip_id, user_id)
 	)`,
+	`CREATE TABLE IF NOT EXISTS trip_member_setup (
+		id SERIAL PRIMARY KEY,
+		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		available_dates TEXT NOT NULL DEFAULT '',
+		lead_vote_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		completed_at TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (trip_id, user_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS notifications (
+		id SERIAL PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		trip_id INTEGER REFERENCES trips(id) ON DELETE CASCADE,
+		title TEXT NOT NULL,
+		body TEXT NOT NULL,
+		kind TEXT NOT NULL DEFAULT 'activity',
+		requires_action BOOLEAN NOT NULL DEFAULT FALSE,
+		cleared_at TIMESTAMP,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
 	`CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))`,
 	`CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone)`,
 	`CREATE INDEX IF NOT EXISTS idx_friendships_user_id ON friendships (user_id)`,
@@ -145,6 +166,8 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_expense_groups_trip_id ON expense_groups (trip_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_expenses_group_id ON expenses (expense_group_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_expense_splits_expense_id ON expense_splits (expense_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, cleared_at, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_trip_member_setup_trip_user ON trip_member_setup (trip_id, user_id)`,
 }
 
 func ensureSchema(db *sql.DB) error {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -108,6 +109,11 @@ func SaveTripItinerary(c *gin.Context) {
 				return
 			}
 		}
+	}
+
+	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+		return
 	}
 
 	if !commitOrRespond(c, tx) {
@@ -263,12 +269,13 @@ func CreateItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	event, err := insertItineraryEvent(dayID, req)
+	event, err := insertItineraryEvent(tripID, dayID, req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	createTripNotifications(tripID, userID, "New itinerary event", event.Title+" was added to the trip plan.", "itinerary", false)
 	c.JSON(http.StatusCreated, gin.H{"event": event})
 }
 
@@ -317,6 +324,7 @@ func UpdateItineraryEvent(c *gin.Context) {
 		return
 	}
 
+	createTripNotifications(tripID, userID, "Itinerary event updated", title+" was updated.", "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -344,6 +352,7 @@ func DeleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
+	createTripNotifications(tripID, userID, "Itinerary event deleted", "The trip lead deleted an itinerary event.", "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
@@ -412,13 +421,83 @@ func CompleteItineraryEvent(c *gin.Context) {
 		}
 	}
 
+	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+		return
+	}
+
 	if !commitOrRespond(c, tx) {
 		return
 	}
 
+	createTripNotifications(tripID, userID, "Event completed", "The trip lead marked an itinerary event complete.", "itinerary", true)
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "event completed but itinerary reload failed", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"days": days})
+}
+
+func UndoCompleteItineraryEvent(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+	if !ensureTripLeadAccess(c, tripID, userID) {
+		return
+	}
+
+	eventID := parseNumericID(c.Param("eventId"))
+	if eventID <= 0 || !eventBelongsToTrip(eventID, tripID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+		return
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	if _, err := tx.Exec(`
+		UPDATE itinerary_events e
+		SET status = 'upcoming'
+		FROM itinerary_days d
+		WHERE e.itinerary_day_id = d.id AND d.trip_id = $1 AND e.status = 'active'
+	`, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh active event", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE itinerary_events
+		SET status = 'active', completed_at = NULL, completed_by_user_id = NULL
+		WHERE id = $1
+	`, eventID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to undo event completion", "details": err.Error()})
+		return
+	}
+
+	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
+		return
+	}
+
+	createTripNotifications(tripID, userID, "Event reopened", "The trip lead reopened an itinerary event.", "itinerary", false)
+	days, err := loadTripItinerary(tripID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "event reopened but itinerary reload failed", "details": err.Error()})
 		return
 	}
 
@@ -507,7 +586,7 @@ func loadTripItinerary(tripID int) ([]models.ItineraryDayPayload, error) {
 	return days, nil
 }
 
-func insertItineraryEvent(dayID int, req models.ItineraryEventPayload) (models.ItineraryEventPayload, error) {
+func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayload) (models.ItineraryEventPayload, error) {
 	title := strings.TrimSpace(req.Title)
 	timeLabel := strings.TrimSpace(req.Time)
 	location := strings.TrimSpace(req.Location)
@@ -529,10 +608,21 @@ func insertItineraryEvent(dayID int, req models.ItineraryEventPayload) (models.I
 		SELECT EXISTS (
 			SELECT 1
 			FROM itinerary_events e
-			WHERE e.itinerary_day_id = $1 AND e.status = 'active'
+			INNER JOIN itinerary_days d ON d.id = e.itinerary_day_id
+			WHERE d.trip_id = $1 AND e.status = 'active'
 		)
-	`, dayID).Scan(&hasActive); err == nil && !hasActive && status == "upcoming" && nextOrder == 0 {
+	`, tripID).Scan(&hasActive); err == nil && !hasActive && status == "upcoming" {
 		status = "active"
+	}
+	if status == "active" {
+		if _, err := db.DB.Exec(`
+			UPDATE itinerary_events e
+			SET status = 'upcoming'
+			FROM itinerary_days d
+			WHERE e.itinerary_day_id = d.id AND d.trip_id = $1 AND e.status = 'active'
+		`, tripID); err != nil {
+			return models.ItineraryEventPayload{}, err
+		}
 	}
 
 	var eventID int
@@ -561,6 +651,30 @@ func dayBelongsToTrip(dayID int, tripID int) bool {
 	var exists bool
 	err := db.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM itinerary_days WHERE id = $1 AND trip_id = $2)`, dayID, tripID).Scan(&exists)
 	return err == nil && exists
+}
+
+func normalizeTripActiveEventTx(tx *sql.Tx, tripID int) error {
+	_, err := tx.Exec(`
+		WITH ranked AS (
+			SELECT
+				e.id,
+				ROW_NUMBER() OVER (
+					ORDER BY
+						CASE WHEN e.status = 'active' THEN 0 ELSE 1 END,
+						d.day_order ASC,
+						e.event_order ASC,
+						e.id ASC
+				) AS rn
+			FROM itinerary_events e
+			INNER JOIN itinerary_days d ON d.id = e.itinerary_day_id
+			WHERE d.trip_id = $1 AND e.status <> 'completed'
+		)
+		UPDATE itinerary_events e
+		SET status = CASE WHEN ranked.rn = 1 THEN 'active' ELSE 'upcoming' END
+		FROM ranked
+		WHERE e.id = ranked.id
+	`, tripID)
+	return err
 }
 
 func normalizeEventStatus(value string) string {

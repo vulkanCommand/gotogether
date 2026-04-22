@@ -8,6 +8,7 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -78,6 +79,7 @@ export default function HomeScreen({ navigation }: Props) {
         <SectionTitle
           title="Home"
           subtitle={`Welcome ${user?.name || user?.email || 'back'}`}
+          action={<NotificationBell />}
         />
 
         <AppCard>

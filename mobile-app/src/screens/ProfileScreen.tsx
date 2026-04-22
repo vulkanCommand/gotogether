@@ -10,6 +10,7 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -113,9 +114,12 @@ export default function ProfileScreen({ navigation }: Props) {
           title="Profile"
           subtitle="Your travel identity and connected friends."
           action={
-            <Pressable style={styles.iconButton} onPress={() => navigation.navigate('Settings')}>
-              <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <NotificationBell />
+              <Pressable style={styles.iconButton} onPress={() => navigation.navigate('Settings')}>
+                <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
+              </Pressable>
+            </View>
           }
         />
 
@@ -201,6 +205,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surface,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   header: {
     flexDirection: 'row',

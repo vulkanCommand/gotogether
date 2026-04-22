@@ -7,11 +7,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
-import { ExpenseGroup, useTripStore } from '../store/tripStore';
+import { CurrentTrip, ExpenseGroup, useTripStore } from '../store/tripStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { createExpenseGroup, fetchExpenseGroups } from '../config/api';
+import { createExpenseGroup, fetchExpenseGroups, fetchTripDetails, fetchTrips } from '../config/api';
 import PrimaryButton from '../components/PrimaryButton';
 
 type Props = CompositeScreenProps<
@@ -25,26 +26,33 @@ export default function ExpensesScreen({ navigation }: Props) {
   const expenseGroups = useTripStore((state) => state.expenseGroups);
   const setExpenses = useTripStore((state) => state.setExpenses);
   const setExpenseGroups = useTripStore((state) => state.setExpenseGroups);
+  const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
+  const setCrew = useTripStore((state) => state.setCrew);
   const totalExpenseAmount = useTripStore((state) => state.totalExpenseAmount);
+  const [tripSections, setTripSections] = useState<Array<{ trip: CurrentTrip; groups: ExpenseGroup[] }>>([]);
   const [loading, setLoading] = useState(false);
   const [groupModalVisible, setGroupModalVisible] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
 
   const refreshGroups = useCallback(async () => {
-    if (!currentTrip?.id) {
-      setExpenseGroups([]);
-      setExpenses([]);
-      return;
-    }
-
     try {
       setLoading(true);
-      const data = await fetchExpenseGroups(currentTrip.id);
-      const groups = Array.isArray(data.groups) ? data.groups : [];
-      setExpenseGroups(groups as ExpenseGroup[]);
-      setExpenses(groups.flatMap((group) => group.expenses ?? []));
+      const tripData = await fetchTrips();
+      const trips = Array.isArray(tripData.trips) ? tripData.trips : [];
+      const sections = await Promise.all(
+        trips.map(async (trip) => {
+          const groupData = await fetchExpenseGroups(trip.id);
+          return { trip: trip as CurrentTrip, groups: (groupData.groups ?? []) as ExpenseGroup[] };
+        })
+      );
+      setTripSections(sections);
+      const activeTripId = currentTrip?.id ?? sections[0]?.trip.id;
+      const activeGroups = sections.find((section) => section.trip.id === activeTripId)?.groups ?? [];
+      setExpenseGroups(activeGroups);
+      setExpenses(activeGroups.flatMap((group) => group.expenses ?? []));
     } catch (error) {
       console.log('Fetch expense groups failed', error);
+      setTripSections([]);
       setExpenseGroups([]);
       setExpenses([]);
     } finally {
@@ -79,10 +87,25 @@ export default function ExpensesScreen({ navigation }: Props) {
 
   const groupTotal = (group: ExpenseGroup) =>
     (group.expenses ?? []).reduce((sum, expense) => sum + expense.amount, 0);
+  const allTripsTotal = tripSections.reduce(
+    (sum, section) => sum + section.groups.reduce((groupSum, group) => groupSum + groupTotal(group), 0),
+    0
+  );
+
+  const openGroup = async (trip: CurrentTrip, group: ExpenseGroup) => {
+    try {
+      const details = await fetchTripDetails(trip.id);
+      setCurrentTrip(details.trip);
+      setCrew(details.members.map((member) => ({ id: String(member.id), name: member.name, role: member.role })));
+    } catch {
+      setCurrentTrip(trip);
+    }
+    navigation.navigate('AddExpense', { groupId: group.id });
+  };
 
   return (
     <Screen>
-      <SectionTitle title="Expenses" subtitle="Open a trip group, then add equal or custom splits." />
+      <SectionTitle title="Expenses" subtitle="Open a trip group, then add equal or custom splits." action={<NotificationBell />} />
 
       {loading ? (
         <AppCard>
@@ -92,10 +115,10 @@ export default function ExpensesScreen({ navigation }: Props) {
 
       <AppCard>
         <Text style={styles.oweLabel}>Total logged</Text>
-        <Text style={styles.oweAmount}>${totalExpenseAmount().toFixed(2)}</Text>
+        <Text style={styles.oweAmount}>${(tripSections.length > 0 ? allTripsTotal : totalExpenseAmount()).toFixed(2)}</Text>
         <View style={styles.summaryRow}>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryValue}>{expenseGroups.length}</Text>
+            <Text style={styles.summaryValue}>{tripSections.reduce((sum, section) => sum + section.groups.length, 0)}</Text>
             <Text style={styles.summaryLabel}>Groups</Text>
           </View>
           <View style={styles.summaryCard}>
@@ -105,36 +128,28 @@ export default function ExpensesScreen({ navigation }: Props) {
         </View>
       </AppCard>
 
-      {!currentTrip ? (
-        <AppCard>
-          <Text style={styles.emptyTitle}>No trip selected</Text>
-          <Text style={styles.emptyText}>Open a trip first, then add expenses to it.</Text>
-        </AppCard>
-      ) : expenseGroups.length === 0 ? (
+      {tripSections.length === 0 ? (
         <AppCard>
           <Text style={styles.emptyTitle}>No expense groups yet</Text>
-          <Text style={styles.emptyText}>Trip expenses will be created automatically when the backend syncs.</Text>
+          <Text style={styles.emptyText}>Create a trip first. Its expense group appears here automatically.</Text>
         </AppCard>
       ) : (
-        expenseGroups.map((group) => (
-          <AppCard key={group.id}>
-            <Pressable onPress={() => navigation.navigate('AddExpense', { groupId: group.id })}>
-              <View style={styles.rowBetween}>
-                <View style={styles.leftBlock}>
-                  <Text style={styles.title}>{group.name}</Text>
-                  <Text style={styles.meta}>
-                    {(group.expenses ?? []).length} split{(group.expenses ?? []).length === 1 ? '' : 's'}
-                  </Text>
+        tripSections.map((section) => (
+          <AppCard key={section.trip.id}>
+            <Text style={styles.tripHeading}>{section.trip.name}</Text>
+            <Text style={styles.meta}>{section.trip.destination}</Text>
+            {section.groups.map((group) => (
+              <Pressable key={group.id} style={styles.groupCard} onPress={() => openGroup(section.trip, group)}>
+                <View style={styles.rowBetween}>
+                  <View style={styles.leftBlock}>
+                    <Text style={styles.title}>{group.name}</Text>
+                    <Text style={styles.meta}>
+                      {(group.expenses ?? []).length} split{(group.expenses ?? []).length === 1 ? '' : 's'}
+                    </Text>
+                  </View>
+                  <Text style={styles.amount}>${groupTotal(group).toFixed(2)}</Text>
                 </View>
-                <Text style={styles.amount}>${groupTotal(group).toFixed(2)}</Text>
-              </View>
-            </Pressable>
-
-            {(group.expenses ?? []).slice(0, 3).map((item) => (
-              <View key={item.id} style={styles.expensePreview}>
-                <Text style={styles.previewTitle}>{item.title}</Text>
-                <Text style={styles.previewAmount}>${item.amount.toFixed(2)}</Text>
-              </View>
+              </Pressable>
             ))}
           </AppCard>
         ))
@@ -193,6 +208,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: colors.textPrimary,
+  },
+  tripHeading: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  groupCard: {
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    padding: spacing.md,
   },
   meta: {
     marginTop: 4,

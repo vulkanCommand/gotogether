@@ -128,3 +128,26 @@ CREATE TABLE IF NOT EXISTS trip_live_locations (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (trip_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS trip_member_setup (
+    id SERIAL PRIMARY KEY,
+    trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    available_dates TEXT NOT NULL DEFAULT '',
+    lead_vote_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    completed_at TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (trip_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    trip_id INTEGER REFERENCES trips(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'activity',
+    requires_action BOOLEAN NOT NULL DEFAULT FALSE,
+    cleared_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

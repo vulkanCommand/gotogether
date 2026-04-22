@@ -7,11 +7,12 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { useTripStore } from '../store/tripStore';
-import { API_BASE_URL, createTripPhoto, fetchTripPhotos } from '../config/api';
+import { API_BASE_URL, completeTrip, createTripPhoto, fetchTripPhotos } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCompletion'>;
@@ -120,17 +121,25 @@ export default function TripCompletionScreen({ navigation }: Props) {
       (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
   ].join(' • ');
 
-  const handleFinish = () => {
-    resetTrip();
-    navigation.navigate('MainTabs');
+  const handleFinish = async () => {
+    try {
+      if (currentTrip?.id) {
+        await completeTrip(currentTrip.id);
+      }
+      resetTrip();
+      navigation.navigate('MainTabs');
+    } catch (error: any) {
+      Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
+    }
   };
 
   return (
-    <Screen>
+    <Screen showFooter>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <SectionTitle
           title="Trip Completion"
           subtitle="Finish the trip with the final summary and a shared photo gallery."
+          action={<NotificationBell />}
         />
 
         <AppCard style={styles.heroCard}>

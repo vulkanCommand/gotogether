@@ -7,11 +7,12 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { useTripStore } from '../store/tripStore';
-import { deleteTripCover, fetchTripDetails, tripCoverFileUrl, updateTripCover } from '../config/api';
+import { ItineraryDay, useTripStore } from '../store/tripStore';
+import { apiRequest, deleteTripCover, fetchTripDetails, fetchTripSetupStatus, tripCoverFileUrl, updateTripCover } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripOverview'>;
@@ -29,6 +30,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
     itineraryDays,
     setCrew,
     setCurrentTrip,
+    setItineraryDays,
     setTripLead,
   } = useTripStore();
   const token = useAuthStore((state) => state.token);
@@ -52,10 +54,17 @@ export default function TripOverviewScreen({ navigation }: Props) {
       if (lead) {
         setTripLead({ id: String(lead.id), name: lead.name, role: lead.role });
       }
+      const setup = await fetchTripSetupStatus(currentTrip.id);
+      if (setup.required) {
+        navigation.replace('TripSetup');
+        return;
+      }
+      const itinerary = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
+      setItineraryDays(Array.isArray(itinerary.days) ? itinerary.days : []);
     } catch (error) {
       console.log('Fetch trip details failed', error);
     }
-  }, [currentTrip?.id, setCrew, setCurrentTrip, setTripLead]);
+  }, [currentTrip?.id, navigation, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
 
   useEffect(() => {
     hydrateTrip();
@@ -67,6 +76,19 @@ export default function TripOverviewScreen({ navigation }: Props) {
   );
 
   const totalPlans = itineraryDays.reduce((sum, day) => sum + day.events.length, 0);
+  const nextPlan = useMemo(() => {
+    for (const day of itineraryDays) {
+      const active = day.events.find((event) => event.status === 'active');
+      if (active) {
+        return { day: day.title, event: active };
+      }
+      const upcoming = day.events.find((event) => event.status === 'upcoming');
+      if (upcoming) {
+        return { day: day.title, event: upcoming };
+      }
+    }
+    return null;
+  }, [itineraryDays]);
 
   const tripName = currentTrip?.name ?? selectedDestination?.name ?? 'Your Trip';
   const tripDates = currentTrip ? `${currentTrip.start_date} - ${currentTrip.end_date}` : bestMatchRange || 'Dates pending';
@@ -129,9 +151,9 @@ export default function TripOverviewScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen>
+    <Screen showFooter>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <SectionTitle title="Trip Overview" subtitle="Everything your crew needs in one place." />
+        <SectionTitle title="Trip Overview" subtitle="Everything your crew needs in one place." action={<NotificationBell />} />
 
         <Pressable onPress={pickTripCover} disabled={!canEditTrip}>
           <Image source={heroSource} style={styles.hero} />
@@ -158,6 +180,20 @@ export default function TripOverviewScreen({ navigation }: Props) {
             <StatCard value={String(currentTrip?.members_count ?? crew.length)} label="Crew" />
             <StatCard value={String(itineraryDays.length)} label="Days" />
             <StatCard value={String(totalPlans)} label="Plans" />
+          </View>
+
+          <View style={styles.nextCard}>
+            <Text style={styles.leadLabel}>Next up</Text>
+            {nextPlan ? (
+              <>
+                <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
+                <Text style={styles.nextMeta}>
+                  {nextPlan.day} • {nextPlan.event.time} • {nextPlan.event.location}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.nextMeta}>No upcoming itinerary event yet.</Text>
+            )}
           </View>
 
           <View style={styles.memberList}>
@@ -285,6 +321,25 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: '#EEF4FF',
     padding: spacing.md,
+  },
+  nextCard: {
+    marginTop: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+    padding: spacing.md,
+  },
+  nextTitle: {
+    marginTop: 6,
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  nextMeta: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    lineHeight: 20,
   },
   leadLabel: {
     fontSize: 12,

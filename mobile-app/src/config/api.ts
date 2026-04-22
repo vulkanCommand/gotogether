@@ -82,6 +82,16 @@ export type ApiTripPhoto = {
   uploaded_at: string;
 };
 
+export type ApiNotification = {
+  id: number;
+  tripId: number;
+  title: string;
+  body: string;
+  kind: string;
+  requiresAction: boolean;
+  createdAt: string;
+};
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
   let data: any = {};
@@ -241,6 +251,46 @@ export async function fetchTripDetails(tripId: number) {
   return apiRequest<ApiTripDetails>(`/api/trips/${tripId}`);
 }
 
+export async function fetchTrips() {
+  return apiRequest<{ trips: ApiTrip[] }>('/api/trips');
+}
+
+export async function fetchTripSetupStatus(tripId: number) {
+  return apiRequest<{
+    viewerRole: string;
+    required: boolean;
+    availableDates: string[];
+    leadVoteUserId: number;
+    completedAt: string;
+  }>(`/api/trips/${tripId}/setup-status`);
+}
+
+export async function saveTripSetupStatus(
+  tripId: number,
+  payload: { availableDates: string[]; leadVoteUserId: number }
+) {
+  return apiRequest<{ completed: boolean }>(`/api/trips/${tripId}/setup-status`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchNotifications() {
+  return apiRequest<{ notifications: ApiNotification[] }>('/api/notifications');
+}
+
+export async function clearNotification(notificationId: number) {
+  return apiRequest<{ cleared: boolean }>(`/api/notifications/${notificationId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function clearAllNotifications() {
+  return apiRequest<{ cleared: boolean }>('/api/notifications', {
+    method: 'DELETE',
+  });
+}
+
 export async function fetchExpenseGroups(tripId: number) {
   return apiRequest<{ groups: ApiExpenseGroup[] }>(`/api/trips/${tripId}/expense-groups`);
 }
@@ -300,6 +350,12 @@ export async function updateTripCover(
 export async function deleteTripCover(tripId: number) {
   return apiRequest<{ removed: boolean }>(`/api/trips/${tripId}/cover`, {
     method: 'DELETE',
+  });
+}
+
+export async function completeTrip(tripId: number) {
+  return apiRequest<{ completed: boolean }>(`/api/trips/${tripId}/complete`, {
+    method: 'POST',
   });
 }
 

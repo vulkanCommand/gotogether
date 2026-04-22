@@ -11,10 +11,12 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Location from 'expo-location';
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -125,8 +127,9 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [newTime, setNewTime] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [newNote, setNewNote] = useState('');
-  const [newAttendees, setNewAttendees] = useState('');
+  const [selectedAttendeeIds, setSelectedAttendeeIds] = useState<string[]>([]);
   const [newStatus, setNewStatus] = useState<ItineraryEventStatus>('upcoming');
+  const [locationStatus, setLocationStatus] = useState('');
 
   const destination = selectedDestination();
   const tripTitle = currentTrip?.name ?? destination?.name ?? 'Your Trip';
@@ -206,11 +209,12 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const resetForm = () => {
     setNewTitle('');
-    setNewTime('');
+    setNewTime('9:00 AM');
     setNewLocation('');
     setNewNote('');
-    setNewAttendees('');
+    setSelectedAttendeeIds(crew.map((member) => member.id));
     setNewStatus('upcoming');
+    setLocationStatus('');
   };
 
   const openAddPlanModal = (dayId: string) => {
@@ -231,9 +235,38 @@ export default function ItineraryScreen({ navigation }: Props) {
     setNewTime(event.time);
     setNewLocation(event.location);
     setNewNote(event.notes);
-    setNewAttendees(event.attendees.join(', '));
+    setSelectedAttendeeIds(
+      crew.filter((member) => event.attendees.includes(member.name)).map((member) => member.id)
+    );
     setNewStatus(event.status);
     setModalVisible(true);
+  };
+
+  const selectedAttendeeNames = () => {
+    const selected = crew.filter((member) => selectedAttendeeIds.includes(member.id)).map((member) => member.name);
+    return selected.length > 0 ? selected : crew.map((member) => member.name);
+  };
+
+  const toggleAttendee = (memberId: string) => {
+    setSelectedAttendeeIds((current) =>
+      current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId]
+    );
+  };
+
+  const selectAllAttendees = () => {
+    setSelectedAttendeeIds(crew.map((member) => member.id));
+  };
+
+  const validateLocation = async () => {
+    if (!newLocation.trim()) {
+      return;
+    }
+    try {
+      const matches = await Location.geocodeAsync(newLocation.trim());
+      setLocationStatus(matches.length > 0 ? 'Map location found' : 'No map result. It will be saved as text.');
+    } catch {
+      setLocationStatus('No map result. It will be saved as text.');
+    }
   };
 
   const handleAddPlan = async () => {
@@ -250,7 +283,7 @@ export default function ItineraryScreen({ navigation }: Props) {
       time: newTime.trim(),
       location: newLocation.trim() || 'Location TBD',
       notes: newNote.trim() || 'No notes added yet.',
-      attendees: [newAttendees.trim() || `${crewCount} attending`],
+      attendees: selectedAttendeeNames(),
       status: newStatus,
     };
 
@@ -345,8 +378,33 @@ export default function ItineraryScreen({ navigation }: Props) {
     }
   };
 
+  const handleUndoCompleteEvent = async (eventId: string) => {
+    if (!currentTrip?.id) {
+      return;
+    }
+    try {
+      const response = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary/events/${eventId}/undo-complete`, {
+        method: 'POST',
+      });
+      setItineraryDays(response.days);
+    } catch (error: any) {
+      Alert.alert('Undo failed', error?.message || 'Could not reopen event');
+    }
+  };
+
+  const timeHours = ['1','2','3','4','5','6','7','8','9','10','11','12'];
+  const timeMinutes = ['00','15','30','45'];
+  const timePeriods = ['AM','PM'];
+  const setTimePart = (part: 'hour' | 'minute' | 'period', value: string) => {
+    const match = newTime.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/i);
+    const hour = part === 'hour' ? value : match?.[1] || '9';
+    const minute = part === 'minute' ? value : match?.[2] || '00';
+    const period = part === 'period' ? value : (match?.[3] || 'AM').toUpperCase();
+    setNewTime(`${hour}:${minute} ${period}`);
+  };
+
   return (
-    <Screen>
+    <Screen showFooter>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -354,6 +412,7 @@ export default function ItineraryScreen({ navigation }: Props) {
         <SectionTitle
           title="Itinerary"
           subtitle="Build the day-by-day plan, keep the next move visible, and carry the trip flow into expenses."
+          action={<NotificationBell />}
         />
 
         {loading ? (
@@ -464,6 +523,7 @@ export default function ItineraryScreen({ navigation }: Props) {
                       onEdit={() => openEditPlanModal(day.id, plan.id)}
                       onDelete={() => handleDeleteEvent(plan.id)}
                       onComplete={() => handleCompleteEvent(plan.id)}
+                      onUndoComplete={() => handleUndoCompleteEvent(plan.id)}
                     />
                   ))
                 ) : (
@@ -513,13 +573,12 @@ export default function ItineraryScreen({ navigation }: Props) {
               style={styles.input}
             />
 
-            <TextInput
-              value={newTime}
-              onChangeText={setNewTime}
-              placeholder="Time, for example 4:30 PM"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.input}
-            />
+            <Text style={styles.statusLabel}>Time</Text>
+            <View style={styles.timePicker}>
+              <TimeColumn values={timeHours} selected={newTime.match(/^(\d{1,2})/)?.[1] || '9'} onSelect={(value) => setTimePart('hour', value)} />
+              <TimeColumn values={timeMinutes} selected={newTime.match(/:(\d{2})/)?.[1] || '00'} onSelect={(value) => setTimePart('minute', value)} />
+              <TimeColumn values={timePeriods} selected={(newTime.match(/(AM|PM)$/i)?.[1] || 'AM').toUpperCase()} onSelect={(value) => setTimePart('period', value)} />
+            </View>
 
             <TextInput
               value={newLocation}
@@ -528,14 +587,25 @@ export default function ItineraryScreen({ navigation }: Props) {
               placeholderTextColor={colors.textSecondary}
               style={styles.input}
             />
+            <Pressable style={styles.locationButton} onPress={validateLocation}>
+              <Text style={styles.locationButtonText}>Check map location</Text>
+            </Pressable>
+            {locationStatus ? <Text style={styles.locationStatus}>{locationStatus}</Text> : null}
 
-            <TextInput
-              value={newAttendees}
-              onChangeText={setNewAttendees}
-              placeholder="Attendees, for example 4 attending"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.input}
-            />
+            <Text style={styles.statusLabel}>Attendees</Text>
+            <Pressable style={styles.selectAllButton} onPress={selectAllAttendees}>
+              <Text style={styles.selectAllText}>Select all</Text>
+            </Pressable>
+            <View style={styles.attendeeGrid}>
+              {crew.map((member) => {
+                const selected = selectedAttendeeIds.includes(member.id);
+                return (
+                  <Pressable key={member.id} style={[styles.attendeeChip, selected && styles.attendeeChipSelected]} onPress={() => toggleAttendee(member.id)}>
+                    <Text style={[styles.attendeeText, selected && styles.attendeeTextSelected]}>{member.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
             <TextInput
               value={newNote}
@@ -596,6 +666,29 @@ function SummaryPill({ value }: { value: string }) {
   );
 }
 
+function TimeColumn({
+  values,
+  selected,
+  onSelect,
+}: {
+  values: string[];
+  selected: string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <ScrollView style={styles.timeColumn} showsVerticalScrollIndicator={false}>
+      {values.map((value) => {
+        const active = value === selected;
+        return (
+          <Pressable key={value} style={[styles.timeOption, active && styles.timeOptionSelected]} onPress={() => onSelect(value)}>
+            <Text style={[styles.timeOptionText, active && styles.timeOptionTextSelected]}>{value}</Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 function PlanRow({
   plan,
   isLast,
@@ -603,6 +696,7 @@ function PlanRow({
   onEdit,
   onDelete,
   onComplete,
+  onUndoComplete,
 }: {
   plan: {
     id: string;
@@ -618,6 +712,7 @@ function PlanRow({
   onEdit: () => void;
   onDelete: () => void;
   onComplete: () => void;
+  onUndoComplete: () => void;
 }) {
   const markerStyle =
     plan.status === 'completed'
@@ -678,11 +773,15 @@ function PlanRow({
 
         {canManage ? (
           <View style={styles.planActions}>
-            {plan.status !== 'completed' ? (
+            {plan.status === 'completed' ? (
+              <Pressable style={styles.actionChip} onPress={onUndoComplete}>
+                <Text style={styles.actionChipText}>Undo</Text>
+              </Pressable>
+            ) : (
               <Pressable style={styles.actionChip} onPress={onComplete}>
                 <Text style={styles.actionChipText}>Complete</Text>
               </Pressable>
-            ) : null}
+            )}
             <Pressable style={styles.actionChip} onPress={onEdit}>
               <Text style={styles.actionChipText}>Edit</Text>
             </Pressable>
@@ -1055,6 +1154,87 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 14,
     color: colors.textPrimary,
+  },
+  timePicker: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    height: 118,
+  },
+  timeColumn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: '#FFFFFF',
+  },
+  timeOption: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  timeOptionSelected: {
+    backgroundColor: '#EEF4FF',
+  },
+  timeOptionText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  timeOptionTextSelected: {
+    color: colors.accent,
+  },
+  locationButton: {
+    alignSelf: 'flex-start',
+    borderRadius: radius.pill,
+    backgroundColor: '#EEF4FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  locationButtonText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  locationStatus: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  selectAllButton: {
+    alignSelf: 'flex-start',
+    borderRadius: radius.pill,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  selectAllText: {
+    color: colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  attendeeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  attendeeChip: {
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  attendeeChipSelected: {
+    borderColor: '#C7DAFF',
+    backgroundColor: '#EEF4FF',
+  },
+  attendeeText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  attendeeTextSelected: {
+    color: colors.accent,
   },
   notesInput: {
     minHeight: 92,

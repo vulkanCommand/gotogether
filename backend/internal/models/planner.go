@@ -67,3 +67,18 @@ type ExpenseGroupResponse struct {
 type CreateExpenseGroupRequest struct {
 	Name string `json:"name"`
 }
+
+type NotificationResponse struct {
+	ID             int    `json:"id"`
+	TripID         int    `json:"tripId"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+	Kind           string `json:"kind"`
+	RequiresAction bool   `json:"requiresAction"`
+	CreatedAt      string `json:"createdAt"`
+}
+
+type TripMemberSetupRequest struct {
+	AvailableDates []string `json:"availableDates"`
+	LeadVoteUserID int      `json:"leadVoteUserId"`
+}
