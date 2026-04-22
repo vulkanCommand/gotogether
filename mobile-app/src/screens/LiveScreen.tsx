@@ -14,7 +14,7 @@ import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { fetchTripLiveLocations, updateTripLocation, userProfileImageFileUrl } from '../config/api';
+import { apiRequest, fetchTripLiveLocations, updateTripLocation, userProfileImageFileUrl } from '../config/api';
 import { useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -44,10 +44,14 @@ const defaultRegion = {
 
 export default function LiveScreen() {
   const currentTrip = useTripStore((state) => state.currentTrip);
+  const itineraryDays = useTripStore((state) => state.itineraryDays);
+  const setItineraryDays = useTripStore((state) => state.setItineraryDays);
   const token = useAuthStore((state) => state.token);
   const [loading, setLoading] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [locations, setLocations] = useState<LiveMember[]>([]);
+  const [destinationCoordinate, setDestinationCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [destinationStatus, setDestinationStatus] = useState('');
 
   const refreshLiveMap = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -76,13 +80,15 @@ export default function LiveScreen() {
 
       const response = await fetchTripLiveLocations(currentTrip.id);
       setLocations(response.locations);
+      const itinerary = await apiRequest<{ days: typeof itineraryDays }>(`/api/trips/${currentTrip.id}/itinerary`);
+      setItineraryDays(Array.isArray(itinerary.days) ? itinerary.days : []);
     } catch (error) {
       console.log('Live map refresh failed', error);
       setLocations([]);
     } finally {
       setLoading(false);
     }
-  }, [currentTrip?.id]);
+  }, [currentTrip?.id, setItineraryDays]);
 
   useEffect(() => {
     refreshLiveMap();
@@ -99,7 +105,69 @@ export default function LiveScreen() {
     [locations]
   );
 
+  const activeDestination = useMemo(() => {
+    for (const day of itineraryDays) {
+      const activeEvent = day.events.find((event) => event.status === 'active');
+      if (activeEvent?.location) {
+        return { dayTitle: day.title, event: activeEvent };
+      }
+      const upcomingEvent = day.events.find((event) => event.status === 'upcoming');
+      if (upcomingEvent?.location) {
+        return { dayTitle: day.title, event: upcomingEvent };
+      }
+    }
+    return null;
+  }, [itineraryDays]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const geocodeDestination = async () => {
+      const locationText = activeDestination?.event.location?.trim();
+      if (!locationText) {
+        setDestinationCoordinate(null);
+        setDestinationStatus('No active event location yet.');
+        return;
+      }
+
+      try {
+        setDestinationStatus('Finding event destination...');
+        const results = await Location.geocodeAsync(locationText);
+        if (cancelled) {
+          return;
+        }
+        const first = results[0];
+        if (first) {
+          setDestinationCoordinate({ latitude: first.latitude, longitude: first.longitude });
+          setDestinationStatus('');
+        } else {
+          setDestinationCoordinate(null);
+          setDestinationStatus('Could not map this event location yet.');
+        }
+      } catch {
+        if (!cancelled) {
+          setDestinationCoordinate(null);
+          setDestinationStatus('Could not map this event location yet.');
+        }
+      }
+    };
+
+    geocodeDestination();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDestination?.event.location]);
+
   const region = useMemo(() => {
+    if (destinationCoordinate) {
+      return {
+        latitude: destinationCoordinate.latitude,
+        longitude: destinationCoordinate.longitude,
+        latitudeDelta: 0.08,
+        longitudeDelta: 0.08,
+      };
+    }
+
     const firstLocation = mappableLocations[0];
     if (!firstLocation || firstLocation.latitude === null || firstLocation.longitude === null) {
       return defaultRegion;
@@ -111,7 +179,11 @@ export default function LiveScreen() {
       latitudeDelta: 0.08,
       longitudeDelta: 0.08,
     };
-  }, [mappableLocations]);
+  }, [destinationCoordinate, mappableLocations]);
+
+  const hasMapPins = mappableLocations.length > 0 || destinationCoordinate !== null;
+  const selfLocation = mappableLocations.find((member) => member.is_current_user);
+  const selfDistance = selfLocation && destinationCoordinate ? distanceMiles(selfLocation, destinationCoordinate) : null;
 
   return (
     <Screen>
@@ -127,8 +199,16 @@ export default function LiveScreen() {
           <View style={styles.mapWrap}>
             {loading ? <ActivityIndicator size="large" color={colors.accent} /> : null}
 
-            {!loading && mappableLocations.length > 0 ? (
+            {!loading && hasMapPins ? (
               <MapView style={styles.map} initialRegion={region} region={region}>
+                {destinationCoordinate ? (
+                  <Marker
+                    coordinate={destinationCoordinate}
+                    title={activeDestination?.event.title || 'Active destination'}
+                    description={activeDestination?.event.location}
+                    pinColor="#2563EB"
+                  />
+                ) : null}
                 {mappableLocations.map((member, index) => (
                   <Marker
                     key={member.user_id}
@@ -164,6 +244,24 @@ export default function LiveScreen() {
           </View>
 
           <AppCard>
+            <Text style={styles.sectionLabel}>Active destination</Text>
+            {activeDestination ? (
+              <>
+                <Text style={styles.destinationTitle}>{activeDestination.event.title}</Text>
+                <Text style={styles.destinationMeta}>
+                  {activeDestination.dayTitle} - {activeDestination.event.time}
+                </Text>
+                <Text style={styles.destinationMeta}>{activeDestination.event.location}</Text>
+                <Text style={styles.distanceText}>
+                  {selfDistance !== null ? `${formatMiles(selfDistance)} from you` : destinationStatus || 'Share your location to see your distance.'}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.emptyText}>Add an itinerary event location to show the live destination.</Text>
+            )}
+          </AppCard>
+
+          <AppCard>
             <Text style={styles.sectionLabel}>Crew status</Text>
             {locations.length === 0 ? (
               <Text style={styles.emptyText}>No crew locations are available yet.</Text>
@@ -172,9 +270,9 @@ export default function LiveScreen() {
                 <View key={member.user_id} style={styles.memberRow}>
                   <View>
                     <Text style={styles.memberName}>{member.name || member.email}</Text>
-                    <Text style={styles.memberMeta}>
+                  <Text style={styles.memberMeta}>
                       {member.latitude !== null && member.longitude !== null
-                        ? `Updated ${member.updated_at}`
+                        ? `Updated ${member.updated_at}${destinationCoordinate ? ` - ${formatMiles(distanceMiles(member, destinationCoordinate))} away` : ''}`
                         : 'Location pending'}
                     </Text>
                   </View>
@@ -199,6 +297,35 @@ function jitterCoordinate(member: LiveMember, index: number) {
     latitude: latitude + offset,
     longitude: longitude + offset,
   };
+}
+
+function distanceMiles(
+  from: { latitude: number | null; longitude: number | null },
+  to: { latitude: number; longitude: number }
+) {
+  if (from.latitude === null || from.longitude === null) {
+    return 0;
+  }
+  const earthMiles = 3958.8;
+  const dLat = toRadians(to.latitude - from.latitude);
+  const dLon = toRadians(to.longitude - from.longitude);
+  const lat1 = toRadians(from.latitude);
+  const lat2 = toRadians(to.latitude);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return earthMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function formatMiles(value: number) {
+  if (value < 0.1) {
+    return 'less than 0.1 mi';
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} mi`;
 }
 
 const styles = StyleSheet.create({
@@ -275,6 +402,20 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 12,
     fontWeight: '700',
+  },
+  destinationTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: colors.textPrimary,
+  },
+  destinationMeta: {
+    marginTop: 5,
+    color: colors.textSecondary,
+  },
+  distanceText: {
+    marginTop: spacing.sm,
+    color: colors.accent,
+    fontWeight: '900',
   },
   emptyTitle: {
     fontSize: 18,

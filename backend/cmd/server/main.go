@@ -55,6 +55,8 @@ func main() {
 	api.POST("/trips/:id/itinerary/events/:eventId/undo-complete", handlers.UndoCompleteItineraryEvent)
 	api.GET("/trips/:id/expenses", handlers.GetTripExpenses)
 	api.POST("/trips/:id/expenses", handlers.CreateTripExpense)
+	api.PATCH("/trips/:id/expenses/:expenseId", handlers.UpdateTripExpense)
+	api.DELETE("/trips/:id/expenses/:expenseId", handlers.DeleteTripExpense)
 	api.GET("/trips/:id/expense-groups", handlers.GetExpenseGroups)
 	api.POST("/trips/:id/expense-groups", handlers.CreateExpenseGroup)
 	api.POST("/trips/:id/location", handlers.UpdateTripLocation)

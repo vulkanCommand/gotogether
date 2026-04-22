@@ -50,6 +50,8 @@ export type ExpenseItem = {
   paidByUserId?: number;
   expenseGroupId?: number;
   linkedEventId?: string;
+  linkedEventTitle?: string;
+  linkedDayTitle?: string;
   splitMethod: string;
   notes: string;
   createdAt: string;

@@ -43,17 +43,19 @@ type CreateExpenseRequest struct {
 }
 
 type ExpenseResponse struct {
-	ID             string                `json:"id"`
-	Title          string                `json:"title"`
-	Amount         float64               `json:"amount"`
-	PaidBy         string                `json:"paidBy"`
-	PaidByUserID   int                   `json:"paidByUserId"`
-	ExpenseGroupID int                   `json:"expenseGroupId"`
-	LinkedEventID  string                `json:"linkedEventId"`
-	SplitMethod    string                `json:"splitMethod"`
-	Notes          string                `json:"notes"`
-	CreatedAt      string                `json:"createdAt"`
-	SplitPreview   []ExpenseSplitPayload `json:"splitPreview"`
+	ID               string                `json:"id"`
+	Title            string                `json:"title"`
+	Amount           float64               `json:"amount"`
+	PaidBy           string                `json:"paidBy"`
+	PaidByUserID     int                   `json:"paidByUserId"`
+	ExpenseGroupID   int                   `json:"expenseGroupId"`
+	LinkedEventID    string                `json:"linkedEventId"`
+	LinkedEventTitle string                `json:"linkedEventTitle"`
+	LinkedDayTitle   string                `json:"linkedDayTitle"`
+	SplitMethod      string                `json:"splitMethod"`
+	Notes            string                `json:"notes"`
+	CreatedAt        string                `json:"createdAt"`
+	SplitPreview     []ExpenseSplitPayload `json:"splitPreview"`
 }
 
 type ExpenseGroupResponse struct {
@@ -77,6 +79,8 @@ type NotificationResponse struct {
 	RequiresAction    bool   `json:"requiresAction"`
 	ActionType        string `json:"actionType"`
 	TargetID          int    `json:"targetId"`
+	ActionLabel       string `json:"actionLabel"`
+	TargetTitle       string `json:"targetTitle"`
 	ActionCompletedAt string `json:"actionCompletedAt"`
 	CreatedAt         string `json:"createdAt"`
 }

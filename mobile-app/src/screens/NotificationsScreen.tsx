@@ -72,7 +72,7 @@ export default function NotificationsScreen() {
   const acceptOne = async (notification: ApiNotification) => {
     try {
       setAcceptingId(notification.id);
-      await acceptNotificationAction(notification.id);
+      const response = await acceptNotificationAction(notification.id);
       setNotifications((items) =>
         items.map((item) =>
           item.id === notification.id
@@ -80,7 +80,7 @@ export default function NotificationsScreen() {
             : item
         )
       );
-      Alert.alert('Accepted', 'Your confirmation was saved.');
+      Alert.alert(response.stale ? 'Task refreshed' : 'Accepted', response.stale ? 'This task is no longer pending.' : 'Your confirmation was saved.');
       await loadNotifications();
     } catch (error: any) {
       Alert.alert('Accept failed', error?.message || 'Could not accept this pending task');
@@ -142,6 +142,12 @@ export default function NotificationsScreen() {
             <Text style={styles.kind}>{notification.kind}</Text>
             <Text style={styles.title}>{notification.title}</Text>
             <Text style={styles.body}>{notification.body}</Text>
+            {notification.requiresAction && !notification.actionCompletedAt ? (
+              <View style={styles.actionDetail}>
+                <Text style={styles.actionLabel}>{notification.actionLabel || 'Pending confirmation'}</Text>
+                <Text style={styles.actionTarget}>{notification.targetTitle || notification.body}</Text>
+              </View>
+            ) : null}
             {notification.requiresAction && !notification.actionCompletedAt ? (
               <Pressable
                 style={[styles.acceptButton, acceptingId === notification.id && styles.buttonDisabled]}
@@ -218,6 +224,26 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  actionDetail: {
+    marginTop: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  actionLabel: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  actionTarget: {
+    marginTop: 6,
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '800',
   },
   acceptButton: {
     marginTop: spacing.md,

@@ -430,7 +430,12 @@ func CompleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	createTripActionNotifications(tripID, userID, "Confirm event completion", "Trip lead marked an itinerary event complete. Accept to confirm.", "task", true, "event_complete", eventID)
+	var eventTitle string
+	_ = db.DB.QueryRow(`SELECT COALESCE(title, '') FROM itinerary_events WHERE id = $1`, eventID).Scan(&eventTitle)
+	if strings.TrimSpace(eventTitle) == "" {
+		eventTitle = "an itinerary event"
+	}
+	createTripActionNotifications(tripID, userID, "Confirm event completion", "Trip lead marked "+strings.TrimSpace(eventTitle)+" complete. Accept to confirm.", "task", true, "event_complete", eventID)
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "event completed but itinerary reload failed", "details": err.Error()})

@@ -299,7 +299,12 @@ func CompleteTrip(c *gin.Context) {
 		return
 	}
 
-	createTripActionNotifications(tripID, userID, "Confirm trip completion", "Trip lead marked the trip complete. Accept to confirm.", "task", true, "trip_complete", tripID)
+	var tripName string
+	_ = db.DB.QueryRow(`SELECT COALESCE(name, '') FROM trips WHERE id = $1`, tripID).Scan(&tripName)
+	if strings.TrimSpace(tripName) == "" {
+		tripName = "this trip"
+	}
+	createTripActionNotifications(tripID, userID, "Confirm trip completion", "Trip lead marked "+strings.TrimSpace(tripName)+" complete. Accept to confirm.", "task", true, "trip_complete", tripID)
 
 	var completedAt string
 	_ = db.DB.QueryRow(`SELECT COALESCE(completed_at::text, '') FROM trips WHERE id = $1`, tripID).Scan(&completedAt)

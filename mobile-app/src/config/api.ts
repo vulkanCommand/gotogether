@@ -44,6 +44,8 @@ export type ApiExpense = {
   paidByUserId?: number;
   expenseGroupId?: number;
   linkedEventId?: string;
+  linkedEventTitle?: string;
+  linkedDayTitle?: string;
   splitMethod: string;
   notes: string;
   createdAt: string;
@@ -91,6 +93,8 @@ export type ApiNotification = {
   requiresAction: boolean;
   actionType: string;
   targetId: number;
+  actionLabel?: string;
+  targetTitle?: string;
   actionCompletedAt: string;
   createdAt: string;
 };
@@ -295,7 +299,7 @@ export async function clearAllNotifications() {
 }
 
 export async function acceptNotificationAction(notificationId: number) {
-  return apiRequest<{ accepted: boolean }>(`/api/notifications/${notificationId}/accept`, {
+  return apiRequest<{ accepted: boolean; stale?: boolean }>(`/api/notifications/${notificationId}/accept`, {
     method: 'POST',
   });
 }
@@ -308,6 +312,41 @@ export async function createExpenseGroup(tripId: number, payload: { name: string
   return apiRequest<{ group: ApiExpenseGroup }>(`/api/trips/${tripId}/expense-groups`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export type SaveExpensePayload = {
+  title: string;
+  amount: number;
+  paidByUserId: number;
+  expenseGroupId: number;
+  linkedEventId?: string;
+  splitMethod: string;
+  notes?: string;
+  splitPreview: Array<{
+    memberId: string;
+    memberName: string;
+    amount: number;
+  }>;
+};
+
+export async function createTripExpense(tripId: number, payload: SaveExpensePayload) {
+  return apiRequest<{ expense: ApiExpense }>(`/api/trips/${tripId}/expenses`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateTripExpense(tripId: number, expenseId: string, payload: SaveExpensePayload) {
+  return apiRequest<{ expense: ApiExpense }>(`/api/trips/${tripId}/expenses/${expenseId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteTripExpense(tripId: number, expenseId: string) {
+  return apiRequest<{ deleted: boolean }>(`/api/trips/${tripId}/expenses/${expenseId}`, {
+    method: 'DELETE',
   });
 }
 

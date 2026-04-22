@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -11,7 +11,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { ExpenseSplit, useTripStore } from '../store/tripStore';
-import { apiRequest } from '../config/api';
+import { createTripExpense, updateTripExpense } from '../config/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddExpense'>;
 
@@ -23,9 +23,12 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   const itineraryDays = useTripStore((state) => state.itineraryDays);
   const totalExpenseAmount = useTripStore((state) => state.totalExpenseAmount);
   const addExpense = useTripStore((state) => state.addExpense);
+  const updateExpense = useTripStore((state) => state.updateExpense);
 
   const crewList = crew.length > 0 ? crew : [];
   const defaultGroupId = route.params?.groupId ?? expenseGroups[0]?.id;
+  const editingExpenseId = route.params?.expenseId;
+  const editingExpense = expenses.find((expense) => expense.id === editingExpenseId);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [paidByUserId, setPaidByUserId] = useState(Number(crewList[0]?.id || 0));
@@ -34,6 +37,24 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   const [splitMethod, setSplitMethod] = useState<'Equal split' | 'Custom split'>('Equal split');
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    if (!editingExpense) {
+      return;
+    }
+    setTitle(editingExpense.title);
+    setAmount(String(editingExpense.amount));
+    setPaidByUserId(editingExpense.paidByUserId ?? Number(crewList[0]?.id || 0));
+    setExpenseGroupId(editingExpense.expenseGroupId ?? defaultGroupId ?? 0);
+    setLinkedEventId(editingExpense.linkedEventId ?? '');
+    setSplitMethod(editingExpense.splitMethod.toLowerCase().includes('custom') ? 'Custom split' : 'Equal split');
+    setNotes(editingExpense.notes ?? '');
+    const amounts: Record<string, string> = {};
+    editingExpense.splitPreview.forEach((split) => {
+      amounts[split.memberId] = String(split.amount);
+    });
+    setCustomAmounts(amounts);
+  }, [defaultGroupId, editingExpense]);
 
   const parsedAmount = Number(amount);
   const safeAmount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
@@ -105,12 +126,11 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
         splitPreview,
       };
 
-      const response = await apiRequest<{ expense: any }>(`/api/trips/${currentTrip.id}/expenses`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
+      const response = editingExpenseId
+        ? await updateTripExpense(currentTrip.id, editingExpenseId, payload)
+        : await createTripExpense(currentTrip.id, payload);
 
-      addExpense({
+      const savedExpense = {
         id: response.expense.id,
         title: response.expense.title ?? payload.title,
         amount: response.expense.amount ?? payload.amount,
@@ -118,11 +138,18 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
         paidByUserId: response.expense.paidByUserId ?? paidByUserId,
         expenseGroupId: response.expense.expenseGroupId ?? expenseGroupId,
         linkedEventId: response.expense.linkedEventId ?? linkedEventId,
+        linkedEventTitle: response.expense.linkedEventTitle,
+        linkedDayTitle: response.expense.linkedDayTitle,
         splitMethod: response.expense.splitMethod ?? splitMethod,
         notes: response.expense.notes ?? payload.notes,
         createdAt: response.expense.createdAt || new Date().toISOString(),
         splitPreview: Array.isArray(response.expense.splitPreview) ? response.expense.splitPreview : splitPreview,
-      });
+      };
+      if (editingExpenseId) {
+        updateExpense(editingExpenseId, savedExpense);
+      } else {
+        addExpense(savedExpense);
+      }
 
       navigation.navigate('MainTabs', { screen: 'Expenses' });
     } catch (error: any) {
@@ -133,7 +160,11 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   return (
     <Screen showFooter>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <SectionTitle title="Add Split" subtitle="Choose the group, payer, event link, then split it equally or custom." action={<NotificationBell />} />
+        <SectionTitle
+          title={editingExpenseId ? 'Edit Split' : 'Add Split'}
+          subtitle="Choose the group, payer, event link, then split it equally or custom."
+          action={<NotificationBell />}
+        />
 
         <AppCard>
           <View style={styles.headerRow}>
@@ -239,7 +270,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
         </AppCard>
 
         <View style={styles.actions}>
-          <PrimaryButton title="Save Expense" onPress={handleSaveExpense} />
+          <PrimaryButton title={editingExpenseId ? 'Save Changes' : 'Save Expense'} onPress={handleSaveExpense} />
           <PrimaryButton title="Back to Expenses" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Expenses' })} />
         </View>
       </ScrollView>

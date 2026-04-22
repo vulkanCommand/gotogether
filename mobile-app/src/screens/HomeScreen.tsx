@@ -193,6 +193,17 @@ export default function HomeScreen({ navigation }: Props) {
     navigation.navigate(overview.setupRequired ? 'TripSetup' : screen);
   };
 
+  const openLiveMap = () => {
+    if (!overview || !nextPlan) {
+      return;
+    }
+    setCurrentTrip(overview.trip);
+    setCrew(overview.crew);
+    setItineraryDays(overview.days);
+    setTripLead(lead);
+    navigation.navigate('Live');
+  };
+
   if (loading) {
     return (
       <Screen>
@@ -242,7 +253,7 @@ export default function HomeScreen({ navigation }: Props) {
               <StatCard value={`${completedPlans}/${totalPlans}`} label="Plans done" />
             </View>
 
-            <View style={styles.nextCard}>
+            <Pressable style={styles.nextCard} onPress={openLiveMap} disabled={!nextPlan || overview.setupRequired}>
               <Text style={styles.label}>Next up</Text>
               {nextPlan ? (
                 <>
@@ -250,13 +261,14 @@ export default function HomeScreen({ navigation }: Props) {
                   <Text style={styles.nextMeta}>
                     {nextPlan.day} - {nextPlan.event.time} - {nextPlan.event.location}
                   </Text>
+                  <Text style={styles.mapHint}>Tap to open live map</Text>
                 </>
               ) : overview.setupRequired ? (
                 <Text style={styles.nextMeta}>Finish your availability and lead vote before planning starts.</Text>
               ) : (
                 <Text style={styles.nextMeta}>No upcoming itinerary event yet.</Text>
               )}
-            </View>
+            </Pressable>
 
             <View style={styles.leadCard}>
               <Text style={styles.label}>Trip lead</Text>
@@ -373,6 +385,11 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  mapHint: {
+    marginTop: spacing.sm,
+    color: colors.accent,
+    fontWeight: '900',
   },
   leadCard: {
     marginTop: spacing.md,

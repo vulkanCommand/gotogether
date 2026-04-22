@@ -244,21 +244,201 @@ func CreateTripExpense(c *gin.Context) {
 		return
 	}
 
+	expense := models.ExpenseResponse{
+		ID:             "expense-" + strconv.Itoa(expenseID),
+		Title:          req.Title,
+		Amount:         req.Amount,
+		PaidBy:         memberNames[paidByUserID],
+		PaidByUserID:   paidByUserID,
+		ExpenseGroupID: expenseGroupID,
+		LinkedEventID:  formatOptionalEventID(linkedEventID),
+		SplitMethod:    splitMethodLabel(req.SplitMethod),
+		Notes:          req.Notes,
+		CreatedAt:      createdAt,
+		SplitPreview:   splits,
+	}
+	addLinkedEventLabels(&expense, linkedEventID)
+
 	c.JSON(http.StatusCreated, gin.H{
-		"expense": models.ExpenseResponse{
-			ID:             "expense-" + strconv.Itoa(expenseID),
-			Title:          req.Title,
-			Amount:         req.Amount,
-			PaidBy:         memberNames[paidByUserID],
-			PaidByUserID:   paidByUserID,
-			ExpenseGroupID: expenseGroupID,
-			LinkedEventID:  formatOptionalEventID(linkedEventID),
-			SplitMethod:    splitMethodLabel(req.SplitMethod),
-			Notes:          req.Notes,
-			CreatedAt:      createdAt,
-			SplitPreview:   splits,
-		},
+		"expense": expense,
 	})
+}
+
+func UpdateTripExpense(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+	if !ensureTripAccess(c, tripID, userID) {
+		return
+	}
+
+	expenseID := parseNumericID(c.Param("expenseId"))
+	if expenseID <= 0 || !expenseBelongsToTrip(expenseID, tripID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "expense not found"})
+		return
+	}
+
+	var req models.CreateExpenseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	req.Title = strings.TrimSpace(req.Title)
+	req.PaidBy = strings.TrimSpace(req.PaidBy)
+	req.SplitMethod = normalizeSplitMethod(req.SplitMethod)
+	req.Notes = strings.TrimSpace(req.Notes)
+	if req.Title == "" || req.Amount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "title and positive amount are required"})
+		return
+	}
+
+	members, err := loadTripExpenseMembers(tripID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load trip members", "details": err.Error()})
+		return
+	}
+	if len(members) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "trip has no members"})
+		return
+	}
+
+	memberNames := map[int]string{}
+	for _, member := range members {
+		memberNames[member.ID] = member.Name
+	}
+
+	paidByUserID := req.PaidByUserID
+	if _, exists := memberNames[paidByUserID]; !exists {
+		paidByUserID = userID
+	}
+	if _, exists := memberNames[paidByUserID]; !exists {
+		paidByUserID = members[0].ID
+	}
+
+	expenseGroupID := req.ExpenseGroupID
+	if expenseGroupID <= 0 || !expenseGroupBelongsToTrip(expenseGroupID, tripID) {
+		expenseGroupID, err = ensureDefaultExpenseGroup(tripID, userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare expense group", "details": err.Error()})
+			return
+		}
+	}
+
+	linkedEventID := 0
+	if strings.TrimSpace(req.LinkedEventID) != "" {
+		linkedEventID = parseNumericID(req.LinkedEventID)
+		if linkedEventID <= 0 || !eventBelongsToTrip(linkedEventID, tripID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "linked itinerary event is invalid"})
+			return
+		}
+	}
+
+	splits, err := buildExpenseSplits(req, members, memberNames)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	var createdAt string
+	err = tx.QueryRow(`
+		UPDATE expenses
+		SET expense_group_id = $3,
+			itinerary_event_id = NULLIF($4, 0),
+			title = $5,
+			amount = $6,
+			paid_by_user_id = $7,
+			split_method = $8,
+			notes = $9
+		WHERE id = $1 AND trip_id = $2
+		RETURNING created_at::text
+	`, expenseID, tripID, expenseGroupID, linkedEventID, req.Title, req.Amount, paidByUserID, req.SplitMethod, req.Notes).Scan(&createdAt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update expense", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`DELETE FROM expense_splits WHERE expense_id = $1`, expenseID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to replace expense splits", "details": err.Error()})
+		return
+	}
+
+	for _, split := range splits {
+		memberID := parseNumericID(split.MemberID)
+		if _, err := tx.Exec(`
+			INSERT INTO expense_splits (expense_id, user_id, amount)
+			VALUES ($1, $2, $3)
+		`, expenseID, memberID, split.Amount); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save expense split", "details": err.Error()})
+			return
+		}
+	}
+
+	if !commitOrRespond(c, tx) {
+		return
+	}
+
+	expense := models.ExpenseResponse{
+		ID:             "expense-" + strconv.Itoa(expenseID),
+		Title:          req.Title,
+		Amount:         req.Amount,
+		PaidBy:         memberNames[paidByUserID],
+		PaidByUserID:   paidByUserID,
+		ExpenseGroupID: expenseGroupID,
+		LinkedEventID:  formatOptionalEventID(linkedEventID),
+		SplitMethod:    splitMethodLabel(req.SplitMethod),
+		Notes:          req.Notes,
+		CreatedAt:      createdAt,
+		SplitPreview:   splits,
+	}
+	addLinkedEventLabels(&expense, linkedEventID)
+
+	c.JSON(http.StatusOK, gin.H{"expense": expense})
+}
+
+func DeleteTripExpense(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+	if !ensureTripAccess(c, tripID, userID) {
+		return
+	}
+
+	expenseID := parseNumericID(c.Param("expenseId"))
+	if expenseID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid expense id"})
+		return
+	}
+
+	result, err := db.DB.Exec(`DELETE FROM expenses WHERE id = $1 AND trip_id = $2`, expenseID, tripID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete expense", "details": err.Error()})
+		return
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "expense not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 func loadExpenseGroups(tripID int) ([]models.ExpenseGroupResponse, error) {
@@ -295,11 +475,15 @@ func loadTripExpenses(tripID int) ([]models.ExpenseResponse, error) {
 			COALESCE(u.name, ''),
 			COALESCE(e.expense_group_id, 0),
 			COALESCE(e.itinerary_event_id, 0),
+			COALESCE(ie.title, ''),
+			COALESCE(iday.title, ''),
 			e.split_method,
 			COALESCE(e.notes, ''),
 			e.created_at::text
 		FROM expenses e
 		LEFT JOIN users u ON u.id = e.paid_by_user_id
+		LEFT JOIN itinerary_events ie ON ie.id = e.itinerary_event_id
+		LEFT JOIN itinerary_days iday ON iday.id = ie.itinerary_day_id
 		WHERE e.trip_id = $1
 		ORDER BY e.created_at DESC, e.id DESC
 	`, tripID)
@@ -322,6 +506,8 @@ func loadTripExpenses(tripID int) ([]models.ExpenseResponse, error) {
 			&expense.PaidBy,
 			&expense.ExpenseGroupID,
 			&linkedEventID,
+			&expense.LinkedEventTitle,
+			&expense.LinkedDayTitle,
 			&expense.SplitMethod,
 			&expense.Notes,
 			&expense.CreatedAt,
@@ -458,6 +644,24 @@ func expenseGroupBelongsToTrip(groupID int, tripID int) bool {
 	var exists bool
 	err := db.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM expense_groups WHERE id = $1 AND trip_id = $2)`, groupID, tripID).Scan(&exists)
 	return err == nil && exists
+}
+
+func expenseBelongsToTrip(expenseID int, tripID int) bool {
+	var exists bool
+	err := db.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM expenses WHERE id = $1 AND trip_id = $2)`, expenseID, tripID).Scan(&exists)
+	return err == nil && exists
+}
+
+func addLinkedEventLabels(expense *models.ExpenseResponse, eventID int) {
+	if eventID <= 0 {
+		return
+	}
+	_ = db.DB.QueryRow(`
+		SELECT COALESCE(e.title, ''), COALESCE(d.title, '')
+		FROM itinerary_events e
+		INNER JOIN itinerary_days d ON d.id = e.itinerary_day_id
+		WHERE e.id = $1
+	`, eventID).Scan(&expense.LinkedEventTitle, &expense.LinkedDayTitle)
 }
 
 func eventBelongsToTrip(eventID int, tripID int) bool {

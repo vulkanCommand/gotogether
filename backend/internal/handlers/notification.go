@@ -47,6 +47,7 @@ func GetNotifications(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read notifications", "details": err.Error()})
 			return
 		}
+		enrichNotificationActionDetails(&item)
 		notifications = append(notifications, item)
 	}
 
@@ -116,7 +117,13 @@ func AcceptNotificationAction(c *gin.Context) {
 			return
 		}
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported pending action"})
+		_, _ = db.DB.Exec(`
+			UPDATE notifications
+			SET action_completed_at = CURRENT_TIMESTAMP,
+				cleared_at = CURRENT_TIMESTAMP
+			WHERE id = $1 AND user_id = $2
+		`, notificationID, userID)
+		c.JSON(http.StatusOK, gin.H{"accepted": false, "stale": true})
 		return
 	}
 
@@ -130,6 +137,46 @@ func AcceptNotificationAction(c *gin.Context) {
 	createUserNotification(userID, tripID, "Task accepted", "You accepted the completion request.", "alert", false, "", 0, userID)
 	createTripNotifications(tripID, userID, "Task accepted", user.Name+" accepted "+strings.ReplaceAll(actionType, "_", " ")+".", "alert", false)
 	c.JSON(http.StatusOK, gin.H{"accepted": true})
+}
+
+func enrichNotificationActionDetails(item *models.NotificationResponse) {
+	actionType := strings.TrimSpace(item.ActionType)
+	switch actionType {
+	case "event_complete":
+		item.ActionLabel = "Confirm event completion"
+		var eventTitle, dayTitle, tripName string
+		err := db.DB.QueryRow(`
+			SELECT COALESCE(e.title, ''), COALESCE(d.title, ''), COALESCE(t.name, '')
+			FROM itinerary_events e
+			INNER JOIN itinerary_days d ON d.id = e.itinerary_day_id
+			INNER JOIN trips t ON t.id = d.trip_id
+			WHERE e.id = $1 AND d.trip_id = $2
+		`, item.TargetID, item.TripID).Scan(&eventTitle, &dayTitle, &tripName)
+		if err == nil {
+			detailParts := make([]string, 0, 3)
+			if strings.TrimSpace(tripName) != "" {
+				detailParts = append(detailParts, strings.TrimSpace(tripName))
+			}
+			if strings.TrimSpace(dayTitle) != "" {
+				detailParts = append(detailParts, strings.TrimSpace(dayTitle))
+			}
+			if strings.TrimSpace(eventTitle) != "" {
+				detailParts = append(detailParts, strings.TrimSpace(eventTitle))
+			}
+			item.TargetTitle = strings.Join(detailParts, " - ")
+		}
+	case "trip_complete":
+		item.ActionLabel = "Confirm trip completion"
+		var tripName string
+		if err := db.DB.QueryRow(`SELECT COALESCE(name, '') FROM trips WHERE id = $1`, item.TripID).Scan(&tripName); err == nil {
+			item.TargetTitle = strings.TrimSpace(tripName)
+		}
+	default:
+		if item.RequiresAction {
+			item.ActionLabel = "Pending confirmation"
+			item.TargetTitle = strings.TrimSpace(item.Title)
+		}
+	}
 }
 
 func ClearNotification(c *gin.Context) {
