@@ -74,7 +74,8 @@ func loadUserByID(userID int) (models.User, error) {
 			COALESCE(phone, ''),
 			COALESCE(username, ''),
 			COALESCE(home_city, ''),
-			COALESCE(bio, '')
+			COALESCE(bio, ''),
+			COALESCE(profile_image_url, '')
 		FROM users
 		WHERE id = $1
 	`, userID).Scan(
@@ -86,6 +87,7 @@ func loadUserByID(userID int) (models.User, error) {
 		&user.Username,
 		&user.HomeCity,
 		&user.Bio,
+		&user.ProfileImageURL,
 	)
 	if err != nil {
 		return user, err
@@ -116,6 +118,41 @@ func ensureTripAccess(c *gin.Context, tripID int, userID int) bool {
 
 	if !exists {
 		c.JSON(http.StatusNotFound, gin.H{"error": "trip not found"})
+		return false
+	}
+
+	return true
+}
+
+func tripRole(userID int, tripID int) (string, error) {
+	var role string
+	err := db.DB.QueryRow(`
+		SELECT COALESCE(tm.role, '')
+		FROM trip_members tm
+		WHERE tm.trip_id = $1 AND tm.user_id = $2
+	`, tripID, userID).Scan(&role)
+	if err != nil {
+		return "", err
+	}
+	return strings.ToLower(strings.TrimSpace(role)), nil
+}
+
+func ensureTripLeadAccess(c *gin.Context, tripID int, userID int) bool {
+	role, err := tripRole(userID, tripID)
+	if err != nil {
+		if sqlErrNoRows(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "trip not found"})
+			return false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to verify trip lead access",
+			"details": err.Error(),
+		})
+		return false
+	}
+
+	if role != "lead" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the trip lead can manage this"})
 		return false
 	}
 

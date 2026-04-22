@@ -16,6 +16,18 @@ import (
 const defaultTripPhotosBucket = "gotogether-783eb-media-501556960072"
 
 func UploadTripPhoto(ctx context.Context, tripID int, userID int, filename string, contentType string, reader io.Reader) (string, error) {
+	return uploadMediaObject(ctx, fmt.Sprintf("trips/%d/photos", tripID), userID, filename, contentType, reader)
+}
+
+func UploadTripCover(ctx context.Context, tripID int, userID int, filename string, contentType string, reader io.Reader) (string, error) {
+	return uploadMediaObject(ctx, fmt.Sprintf("trips/%d/cover", tripID), userID, filename, contentType, reader)
+}
+
+func UploadProfileImage(ctx context.Context, userID int, filename string, contentType string, reader io.Reader) (string, error) {
+	return uploadMediaObject(ctx, fmt.Sprintf("users/%d/profile", userID), userID, filename, contentType, reader)
+}
+
+func uploadMediaObject(ctx context.Context, prefix string, userID int, filename string, contentType string, reader io.Reader) (string, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to create storage client: %w", err)
@@ -32,7 +44,7 @@ func UploadTripPhoto(ctx context.Context, tripID int, userID int, filename strin
 		extension = ".jpg"
 	}
 
-	objectName := fmt.Sprintf("trips/%d/%d-%d%s", tripID, userID, time.Now().UnixNano(), extension)
+	objectName := fmt.Sprintf("%s/%d-%d%s", strings.Trim(prefix, "/"), userID, time.Now().UnixNano(), extension)
 	writer := client.Bucket(bucketName).Object(objectName).NewWriter(ctx)
 	writer.ContentType = contentType
 	writer.CacheControl = "public, max-age=3600"

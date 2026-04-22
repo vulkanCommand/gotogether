@@ -45,19 +45,36 @@ func CreateTrip(c *gin.Context) {
 	err = tx.QueryRow(`
 		INSERT INTO trips (name, destination, start_date, end_date, created_by)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, destination, start_date::text, end_date::text, created_by
+		RETURNING id, name, destination, start_date::text, end_date::text, created_by, COALESCE(image_url, ''), COALESCE(completed_at::text, '')
 	`, req.Name, req.Destination, req.StartDate, req.EndDate, userID).
-		Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy)
+		Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &trip.ImageURL, &trip.CompletedAt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trip", "details": err.Error()})
 		return
 	}
 
+	leadUserID := req.LeadUserID
+	if leadUserID <= 0 {
+		leadUserID = userID
+	}
+	allowedLead := leadUserID == userID
+	for _, memberID := range req.MemberIDs {
+		if memberID == leadUserID {
+			allowedLead = true
+			break
+		}
+	}
+	if !allowedLead {
+		leadUserID = userID
+	}
+	trip.LeadUserID = leadUserID
+	trip.ViewerRole = "lead"
+
 	_, err = tx.Exec(`
 		INSERT INTO trip_members (trip_id, user_id, role)
-		VALUES ($1, $2, 'lead')
+		VALUES ($1, $2, $3)
 		ON CONFLICT (trip_id, user_id) DO NOTHING
-	`, trip.ID, userID)
+	`, trip.ID, userID, memberRoleForUser(userID, leadUserID))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trip member", "details": err.Error()})
 		return
@@ -71,12 +88,21 @@ func CreateTrip(c *gin.Context) {
 		addedMembers[memberID] = true
 		if _, err := tx.Exec(`
 			INSERT INTO trip_members (trip_id, user_id, role)
-			VALUES ($1, $2, 'member')
+			VALUES ($1, $2, $3)
 			ON CONFLICT (trip_id, user_id) DO NOTHING
-		`, trip.ID, memberID); err != nil {
+		`, trip.ID, memberID, memberRoleForUser(memberID, leadUserID)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add trip member", "details": err.Error()})
 			return
 		}
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO expense_groups (trip_id, name, created_by_user_id)
+		VALUES ($1, 'Trip expenses', $2)
+		ON CONFLICT (trip_id, name) DO NOTHING
+	`, trip.ID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create expense group", "details": err.Error()})
+		return
 	}
 
 	if !commitOrRespond(c, tx) {
@@ -100,16 +126,21 @@ func GetTrips(c *gin.Context) {
 			t.start_date::text,
 			t.end_date::text,
 			t.created_by,
-			COUNT(tm.user_id)::int AS members_count
+			COUNT(tm.user_id)::int AS members_count,
+			COALESCE(t.image_url, '') AS image_url,
+			COALESCE(t.completed_at::text, '') AS completed_at,
+			COALESCE(viewer.role, '') AS viewer_role,
+			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id
 		FROM trips t
 		LEFT JOIN trip_members tm ON tm.trip_id = t.id
+		LEFT JOIN trip_members viewer ON viewer.trip_id = t.id AND viewer.user_id = $1
 		WHERE t.created_by = $1
 		   OR t.id IN (
 				SELECT trip_id
 				FROM trip_members
 				WHERE user_id = $1
 		   )
-		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by
+		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by, t.image_url, t.completed_at, viewer.role
 		ORDER BY t.start_date ASC, t.id ASC
 	`, userID)
 	if err != nil {
@@ -121,7 +152,7 @@ func GetTrips(c *gin.Context) {
 	trips := make([]models.TripListItem, 0)
 	for rows.Next() {
 		var trip models.TripListItem
-		if err := rows.Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &trip.MembersCount); err != nil {
+		if err := rows.Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &trip.MembersCount, &trip.ImageURL, &trip.CompletedAt, &trip.ViewerRole, &trip.LeadUserID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read trips", "details": err.Error()})
 			return
 		}
@@ -158,9 +189,14 @@ func GetTripByID(c *gin.Context) {
 			t.start_date::text,
 			t.end_date::text,
 			t.created_by,
-			COUNT(tm.user_id)::int AS members_count
+			COUNT(tm.user_id)::int AS members_count,
+			COALESCE(t.image_url, '') AS image_url,
+			COALESCE(t.completed_at::text, '') AS completed_at,
+			COALESCE(viewer.role, '') AS viewer_role,
+			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id
 		FROM trips t
 		LEFT JOIN trip_members tm ON tm.trip_id = t.id
+		LEFT JOIN trip_members viewer ON viewer.trip_id = t.id AND viewer.user_id = $2
 		WHERE t.id = $1
 		  AND (
 				t.created_by = $2
@@ -170,8 +206,8 @@ func GetTripByID(c *gin.Context) {
 					WHERE user_id = $2
 				)
 		  )
-		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by
-	`, tripID, userID).Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &membersCount)
+		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by, t.image_url, t.completed_at, viewer.role
+	`, tripID, userID).Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &membersCount, &trip.ImageURL, &trip.CompletedAt, &trip.ViewerRole, &trip.LeadUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "trip not found"})
@@ -218,7 +254,23 @@ func GetTripByID(c *gin.Context) {
 			"end_date":      trip.EndDate,
 			"created_by":    trip.CreatedBy,
 			"members_count": membersCount,
+			"image_url":     trip.ImageURL,
+			"completed_at":  trip.CompletedAt,
+			"viewer_role":   trip.ViewerRole,
+			"lead_user_id":  trip.LeadUserID,
 		},
 		"members": members,
+		"permissions": gin.H{
+			"can_edit_trip":      trip.ViewerRole == "lead",
+			"can_edit_itinerary": trip.ViewerRole == "lead",
+			"can_complete_trip":  trip.ViewerRole == "lead",
+		},
 	})
+}
+
+func memberRoleForUser(userID int, leadUserID int) string {
+	if userID == leadUserID {
+		return "lead"
+	}
+	return "member"
 }

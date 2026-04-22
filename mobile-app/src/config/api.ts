@@ -20,11 +20,20 @@ export type ApiTrip = {
   end_date: string;
   created_by?: number;
   members_count?: number;
+  image_url?: string;
+  completed_at?: string;
+  viewer_role?: string;
+  lead_user_id?: number;
 };
 
 export type ApiTripDetails = {
   trip: ApiTrip;
   members: ApiTripMember[];
+  permissions?: {
+    can_edit_trip: boolean;
+    can_edit_itinerary: boolean;
+    can_complete_trip: boolean;
+  };
 };
 
 export type ApiExpense = {
@@ -32,6 +41,9 @@ export type ApiExpense = {
   title: string;
   amount: number;
   paidBy: string;
+  paidByUserId?: number;
+  expenseGroupId?: number;
+  linkedEventId?: string;
   splitMethod: string;
   notes: string;
   createdAt: string;
@@ -42,10 +54,19 @@ export type ApiExpense = {
   }>;
 };
 
+export type ApiExpenseGroup = {
+  id: number;
+  tripId: number;
+  name: string;
+  createdAt: string;
+  expenses: ApiExpense[];
+};
+
 export type ApiTripLocation = {
   user_id: number;
   name: string;
   email: string;
+  profile_image_url: string;
   latitude: number | null;
   longitude: number | null;
   accuracy: number | null;
@@ -181,6 +202,24 @@ export async function updateMyProfile(payload: {
   });
 }
 
+export async function updateMyProfileImage(payload: {
+  photo: { uri: string; name: string; type: string };
+}) {
+  const formData = new FormData();
+  formData.append('photo', payload.photo as any);
+
+  return apiRequest<{ user: AppUser }>('/api/me/profile-image', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function deleteMyProfileImage() {
+  return apiRequest<{ user: AppUser }>('/api/me/profile-image', {
+    method: 'DELETE',
+  });
+}
+
 export async function deleteMyAccount() {
   return apiRequest<{ deleted: boolean; auth_deleted: boolean }>('/api/me', {
     method: 'DELETE',
@@ -200,6 +239,17 @@ export async function fetchFriends() {
 
 export async function fetchTripDetails(tripId: number) {
   return apiRequest<ApiTripDetails>(`/api/trips/${tripId}`);
+}
+
+export async function fetchExpenseGroups(tripId: number) {
+  return apiRequest<{ groups: ApiExpenseGroup[] }>(`/api/trips/${tripId}/expense-groups`);
+}
+
+export async function createExpenseGroup(tripId: number, payload: { name: string }) {
+  return apiRequest<{ group: ApiExpenseGroup }>(`/api/trips/${tripId}/expense-groups`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateTripLocation(
@@ -232,4 +282,35 @@ export async function createTripPhoto(
     method: 'POST',
     body: formData,
   });
+}
+
+export async function updateTripCover(
+  tripId: number,
+  payload: { photo: { uri: string; name: string; type: string } }
+) {
+  const formData = new FormData();
+  formData.append('photo', payload.photo as any);
+
+  return apiRequest<{ image_url: string }>(`/api/trips/${tripId}/cover`, {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+export async function deleteTripCover(tripId: number) {
+  return apiRequest<{ removed: boolean }>(`/api/trips/${tripId}/cover`, {
+    method: 'DELETE',
+  });
+}
+
+export function tripCoverFileUrl(tripId: number) {
+  return `${API_BASE_URL}/api/trips/${tripId}/cover/file`;
+}
+
+export function profileImageFileUrl() {
+  return `${API_BASE_URL}/api/me/profile-image/file`;
+}
+
+export function userProfileImageFileUrl(userId: number) {
+  return `${API_BASE_URL}/api/users/${userId}/profile-image/file`;
 }

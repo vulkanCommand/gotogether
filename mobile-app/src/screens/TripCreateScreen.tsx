@@ -169,6 +169,7 @@ export default function TripCreateScreen({ navigation }: Props) {
           start_date: `2026-04-${String(activeDates[0]).padStart(2, '0')}`,
           end_date: `2026-04-${String(activeDates[activeDates.length - 1]).padStart(2, '0')}`,
           member_ids: plannerCrew.map((member) => Number(member.id)).filter(Number.isFinite),
+          lead_user_id: Number(tripLead?.id || user?.id || 0),
         }),
       });
 

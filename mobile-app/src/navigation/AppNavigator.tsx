@@ -14,6 +14,7 @@ import TripsScreen from '../screens/TripsScreen';
 import LiveScreen from '../screens/LiveScreen';
 import ExpensesScreen from '../screens/ExpensesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import CreateGroupScreen from '../screens/CreateGroupScreen';
 import TripCreateScreen from '../screens/TripCreateScreen';
 import TripOverviewScreen from '../screens/TripOverviewScreen';
@@ -34,8 +35,9 @@ export type RootStackParamList = {
   TripCreate: undefined;
   TripOverview: undefined;
   Itinerary: undefined;
-  AddExpense: undefined;
+  AddExpense: { groupId?: number; eventId?: string } | undefined;
   TripCompletion: undefined;
+  Settings: undefined;
 };
 
 export type MainTabParamList = {
@@ -123,6 +125,7 @@ export default function AppNavigator() {
           <Stack.Screen name="Itinerary" component={ItineraryScreen} />
           <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
           <Stack.Screen name="TripCompletion" component={TripCompletionScreen} />
+          <Stack.Screen name="Settings" component={SettingsScreen} />
         </>
         )
       ) : (

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT,
     home_city TEXT,
     bio TEXT,
+    profile_image_url TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -17,6 +18,9 @@ CREATE TABLE IF NOT EXISTS trips (
     destination TEXT NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
+    image_url TEXT,
+    completed_at TIMESTAMP,
+    completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -60,12 +64,26 @@ CREATE TABLE IF NOT EXISTS itinerary_events (
     status TEXT NOT NULL DEFAULT 'upcoming',
     attendee_summary TEXT,
     event_order INTEGER NOT NULL,
+    completed_at TIMESTAMP,
+    completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS expense_groups (
+    id SERIAL PRIMARY KEY,
+    trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (trip_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS expenses (
     id SERIAL PRIMARY KEY,
     trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    expense_group_id INTEGER REFERENCES expense_groups(id) ON DELETE SET NULL,
+    itinerary_event_id INTEGER REFERENCES itinerary_events(id) ON DELETE SET NULL,
     title TEXT NOT NULL,
     amount NUMERIC(10,2) NOT NULL,
     paid_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,

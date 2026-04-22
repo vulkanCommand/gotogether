@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -13,8 +13,9 @@ import SectionTitle from '../components/SectionTitle';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { fetchTripLiveLocations, updateTripLocation } from '../config/api';
+import { fetchTripLiveLocations, updateTripLocation, userProfileImageFileUrl } from '../config/api';
 import { useTripStore } from '../store/tripStore';
+import { useAuthStore } from '../store/authStore';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Live'>,
@@ -25,6 +26,7 @@ type LiveMember = {
   user_id: number;
   name: string;
   email: string;
+  profile_image_url: string;
   latitude: number | null;
   longitude: number | null;
   accuracy: number | null;
@@ -41,6 +43,7 @@ const defaultRegion = {
 
 export default function LiveScreen() {
   const currentTrip = useTripStore((state) => state.currentTrip);
+  const token = useAuthStore((state) => state.token);
   const [loading, setLoading] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [locations, setLocations] = useState<LiveMember[]>([]);
@@ -125,16 +128,27 @@ export default function LiveScreen() {
 
             {!loading && mappableLocations.length > 0 ? (
               <MapView style={styles.map} initialRegion={region} region={region}>
-                {mappableLocations.map((member) => (
+                {mappableLocations.map((member, index) => (
                   <Marker
                     key={member.user_id}
-                    coordinate={{
-                      latitude: member.latitude ?? 0,
-                      longitude: member.longitude ?? 0,
-                    }}
+                    coordinate={jitterCoordinate(member, index)}
                     title={member.name || member.email}
                     description={member.is_current_user ? 'You' : member.updated_at}
-                  />
+                  >
+                    <View style={[styles.avatarMarker, member.is_current_user && styles.avatarMarkerSelf]}>
+                      {member.profile_image_url && token ? (
+                        <Image
+                          source={{
+                            uri: userProfileImageFileUrl(member.user_id),
+                            headers: { Authorization: `Bearer ${token}` },
+                          }}
+                          style={styles.avatarImage}
+                        />
+                      ) : (
+                        <Text style={styles.avatarText}>{(member.name || member.email || 'U').slice(0, 1).toUpperCase()}</Text>
+                      )}
+                    </View>
+                  </Marker>
                 ))}
               </MapView>
             ) : !loading ? (
@@ -176,6 +190,16 @@ export default function LiveScreen() {
   );
 }
 
+function jitterCoordinate(member: LiveMember, index: number) {
+  const latitude = member.latitude ?? 0;
+  const longitude = member.longitude ?? 0;
+  const offset = index * 0.00012;
+  return {
+    latitude: latitude + offset,
+    longitude: longitude + offset,
+  };
+}
+
 const styles = StyleSheet.create({
   mapWrap: {
     height: 300,
@@ -188,6 +212,28 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
+  },
+  avatarMarker: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 3,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarMarkerSelf: {
+    borderColor: colors.success,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarText: {
+    color: colors.accent,
+    fontWeight: '800',
   },
   mapFallback: {
     flex: 1,

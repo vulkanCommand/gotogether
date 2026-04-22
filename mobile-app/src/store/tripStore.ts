@@ -32,6 +32,7 @@ export type ItineraryDay = {
   id: string;
   title: string;
   dateLabel: string;
+  status?: ItineraryEventStatus;
   events: ItineraryEvent[];
 };
 
@@ -46,10 +47,21 @@ export type ExpenseItem = {
   title: string;
   amount: number;
   paidBy: string;
+  paidByUserId?: number;
+  expenseGroupId?: number;
+  linkedEventId?: string;
   splitMethod: string;
   notes: string;
   createdAt: string;
   splitPreview: ExpenseSplit[];
+};
+
+export type ExpenseGroup = {
+  id: number;
+  tripId: number;
+  name: string;
+  createdAt: string;
+  expenses: ExpenseItem[];
 };
 
 export type CurrentTrip = {
@@ -59,6 +71,10 @@ export type CurrentTrip = {
   start_date: string;
   end_date: string;
   members_count?: number;
+  image_url?: string;
+  completed_at?: string;
+  viewer_role?: string;
+  lead_user_id?: number;
 };
 
 type TripStore = {
@@ -71,6 +87,7 @@ type TripStore = {
   tripLead: CrewMember | null;
   itineraryDays: ItineraryDay[];
   expenses: ExpenseItem[];
+  expenseGroups: ExpenseGroup[];
 
   setCurrentTrip: (trip: CurrentTrip | null) => void;
   setCrew: (crew: CrewMember[]) => void;
@@ -98,6 +115,7 @@ type TripStore = {
   removeEventFromDay: (dayId: string, eventId: string) => void;
 
   setExpenses: (expenses: ExpenseItem[]) => void;
+  setExpenseGroups: (groups: ExpenseGroup[]) => void;
   addExpense: (expense: ExpenseItem) => void;
   updateExpense: (expenseId: string, updates: Partial<ExpenseItem>) => void;
   removeExpense: (expenseId: string) => void;
@@ -131,6 +149,7 @@ const initialPlannerState = {
   tripLead: null as CrewMember | null,
   itineraryDays: [] as ItineraryDay[],
   expenses: [] as ExpenseItem[],
+  expenseGroups: [] as ExpenseGroup[],
 };
 
 const normalizeUniqueStrings = (values: string[]) => {
@@ -270,6 +289,7 @@ export const useTripStore = create<TripStore>((set, get) => ({
     })),
 
   setExpenses: (expenses) => set({ expenses }),
+  setExpenseGroups: (expenseGroups) => set({ expenseGroups }),
   addExpense: (expense) => set((state) => ({ expenses: [expense, ...state.expenses] })),
   updateExpense: (expenseId, updates) =>
     set((state) => ({ expenses: state.expenses.map((expense) => (expense.id === expenseId ? { ...expense, ...updates } : expense)) })),

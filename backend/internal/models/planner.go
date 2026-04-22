@@ -1,19 +1,22 @@
 package models
 
 type ItineraryEventPayload struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Time      string   `json:"time"`
-	Location  string   `json:"location"`
-	Notes     string   `json:"notes"`
-	Attendees []string `json:"attendees"`
-	Status    string   `json:"status"`
+	ID          string   `json:"id"`
+	DayID       string   `json:"dayId,omitempty"`
+	Title       string   `json:"title"`
+	Time        string   `json:"time"`
+	Location    string   `json:"location"`
+	Notes       string   `json:"notes"`
+	Attendees   []string `json:"attendees"`
+	Status      string   `json:"status"`
+	CompletedAt string   `json:"completedAt,omitempty"`
 }
 
 type ItineraryDayPayload struct {
 	ID        string                  `json:"id"`
 	Title     string                  `json:"title"`
 	DateLabel string                  `json:"dateLabel"`
+	Status    string                  `json:"status,omitempty"`
 	Events    []ItineraryEventPayload `json:"events"`
 }
 
@@ -28,21 +31,39 @@ type ExpenseSplitPayload struct {
 }
 
 type CreateExpenseRequest struct {
-	Title        string                `json:"title"`
-	Amount       float64               `json:"amount"`
-	PaidBy       string                `json:"paidBy"`
-	SplitMethod  string                `json:"splitMethod"`
-	Notes        string                `json:"notes"`
-	SplitPreview []ExpenseSplitPayload `json:"splitPreview"`
+	Title          string                `json:"title"`
+	Amount         float64               `json:"amount"`
+	PaidBy         string                `json:"paidBy"`
+	PaidByUserID   int                   `json:"paidByUserId"`
+	ExpenseGroupID int                   `json:"expenseGroupId"`
+	LinkedEventID  string                `json:"linkedEventId"`
+	SplitMethod    string                `json:"splitMethod"`
+	Notes          string                `json:"notes"`
+	SplitPreview   []ExpenseSplitPayload `json:"splitPreview"`
 }
 
 type ExpenseResponse struct {
-	ID           string                `json:"id"`
-	Title        string                `json:"title"`
-	Amount       float64               `json:"amount"`
-	PaidBy       string                `json:"paidBy"`
-	SplitMethod  string                `json:"splitMethod"`
-	Notes        string                `json:"notes"`
-	CreatedAt    string                `json:"createdAt"`
-	SplitPreview []ExpenseSplitPayload `json:"splitPreview"`
+	ID             string                `json:"id"`
+	Title          string                `json:"title"`
+	Amount         float64               `json:"amount"`
+	PaidBy         string                `json:"paidBy"`
+	PaidByUserID   int                   `json:"paidByUserId"`
+	ExpenseGroupID int                   `json:"expenseGroupId"`
+	LinkedEventID  string                `json:"linkedEventId"`
+	SplitMethod    string                `json:"splitMethod"`
+	Notes          string                `json:"notes"`
+	CreatedAt      string                `json:"createdAt"`
+	SplitPreview   []ExpenseSplitPayload `json:"splitPreview"`
+}
+
+type ExpenseGroupResponse struct {
+	ID        int               `json:"id"`
+	TripID    int               `json:"tripId"`
+	Name      string            `json:"name"`
+	CreatedAt string            `json:"createdAt"`
+	Expenses  []ExpenseResponse `json:"expenses"`
+}
+
+type CreateExpenseGroupRequest struct {
+	Name string `json:"name"`
 }

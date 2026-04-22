@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as ImagePicker from 'expo-image-picker';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -9,7 +10,7 @@ import SectionTitle from '../components/SectionTitle';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { updateMyProfile } from '../config/api';
+import { updateMyProfile, updateMyProfileImage } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CompleteProfile'>;
@@ -23,7 +24,26 @@ export default function CompleteProfileScreen({ navigation }: Props) {
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [homeCity, setHomeCity] = useState(user?.home_city ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
+  const [profilePhoto, setProfilePhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const pickProfileImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('Photos permission needed', 'Allow photo access to add a profile picture.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setProfilePhoto(result.assets[0]);
+    }
+  };
 
   const handleSave = async () => {
     if (!name.trim() || !username.trim()) {
@@ -40,7 +60,18 @@ export default function CompleteProfileScreen({ navigation }: Props) {
         home_city: homeCity.trim(),
         bio: bio.trim(),
       });
-      setUser(response.user);
+      let updatedUser = response.user;
+      if (profilePhoto) {
+        const imageResponse = await updateMyProfileImage({
+          photo: {
+            uri: profilePhoto.uri,
+            name: profilePhoto.fileName || 'profile.jpg',
+            type: profilePhoto.mimeType || 'image/jpeg',
+          },
+        });
+        updatedUser = imageResponse.user;
+      }
+      setUser(updatedUser);
       navigation.replace('PermissionsSetup');
     } catch (error: any) {
       console.log('Profile update failed', error);
@@ -60,6 +91,14 @@ export default function CompleteProfileScreen({ navigation }: Props) {
 
         <AppCard>
           <Text style={styles.emailLabel}>{user?.email || 'Signed in account'}</Text>
+
+          <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
+            {profilePhoto ? (
+              <Image source={{ uri: profilePhoto.uri }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>Add profile photo</Text>
+            )}
+          </Pressable>
 
           <TextInput
             style={styles.input}
@@ -123,6 +162,25 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.accent,
     marginBottom: spacing.md,
+  },
+  avatarWrap: {
+    height: 120,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#EEF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginBottom: spacing.md,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarText: {
+    color: colors.accent,
+    fontWeight: '800',
   },
   input: {
     backgroundColor: colors.surface,

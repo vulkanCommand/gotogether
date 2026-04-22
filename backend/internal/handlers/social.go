@@ -46,7 +46,8 @@ func SyncContacts(c *gin.Context) {
 			COALESCE(email, ''),
 			COALESCE(phone, ''),
 			COALESCE(username, ''),
-			COALESCE(home_city, '')
+			COALESCE(home_city, ''),
+			COALESCE(profile_image_url, '')
 		FROM users
 		WHERE id <> $1
 		  AND (
@@ -66,7 +67,7 @@ func SyncContacts(c *gin.Context) {
 	friendIDs := make([]int, 0)
 	for rows.Next() {
 		var friend models.Friend
-		if err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.Phone, &friend.Username, &friend.HomeCity); err != nil {
+		if err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.Phone, &friend.Username, &friend.HomeCity, &friend.ProfileImageURL); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read matched contacts", "details": err.Error()})
 			return
 		}
@@ -112,7 +113,8 @@ func GetFriends(c *gin.Context) {
 			COALESCE(u.email, ''),
 			COALESCE(u.phone, ''),
 			COALESCE(u.username, ''),
-			COALESCE(u.home_city, '')
+			COALESCE(u.home_city, ''),
+			COALESCE(u.profile_image_url, '')
 		FROM friendships f
 		INNER JOIN users u ON u.id = f.friend_user_id
 		WHERE f.user_id = $1
@@ -127,7 +129,7 @@ func GetFriends(c *gin.Context) {
 	friends := make([]models.Friend, 0)
 	for rows.Next() {
 		var friend models.Friend
-		if err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.Phone, &friend.Username, &friend.HomeCity); err != nil {
+		if err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.Phone, &friend.Username, &friend.HomeCity, &friend.ProfileImageURL); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read friends", "details": err.Error()})
 			return
 		}
@@ -197,6 +199,7 @@ func GetTripLiveLocations(c *gin.Context) {
 			u.id,
 			COALESCE(u.name, ''),
 			COALESCE(u.email, ''),
+			COALESCE(u.profile_image_url, ''),
 			tll.latitude,
 			tll.longitude,
 			tll.accuracy,
@@ -218,7 +221,7 @@ func GetTripLiveLocations(c *gin.Context) {
 	locations := make([]models.TripLiveLocation, 0)
 	for rows.Next() {
 		var item models.TripLiveLocation
-		if err := rows.Scan(&item.UserID, &item.Name, &item.Email, &item.Latitude, &item.Longitude, &item.Accuracy, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.UserID, &item.Name, &item.Email, &item.ProfileImageURL, &item.Latitude, &item.Longitude, &item.Accuracy, &item.UpdatedAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read live locations", "details": err.Error()})
 			return
 		}

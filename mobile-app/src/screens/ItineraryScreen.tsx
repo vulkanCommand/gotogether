@@ -118,6 +118,7 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedDayId, setSelectedDayId] = useState<string>('');
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const [newTitle, setNewTitle] = useState('');
@@ -132,6 +133,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   const crewCount = crew.length > 0 ? crew.length : 4;
   const leadName = tripLead?.name ?? 'Trip lead pending';
   const computedNextUp = nextUp();
+  const canManageItinerary = currentTrip?.viewer_role === 'lead';
 
   const sortedSelectedDates = useMemo(() => {
     const numeric = selectedDates
@@ -213,7 +215,24 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const openAddPlanModal = (dayId: string) => {
     setSelectedDayId(dayId);
+    setEditingEventId(null);
     resetForm();
+    setModalVisible(true);
+  };
+
+  const openEditPlanModal = (dayId: string, eventId: string) => {
+    const event = itineraryDays.find((day) => day.id === dayId)?.events.find((item) => item.id === eventId);
+    if (!event) {
+      return;
+    }
+    setSelectedDayId(dayId);
+    setEditingEventId(eventId);
+    setNewTitle(event.title);
+    setNewTime(event.time);
+    setNewLocation(event.location);
+    setNewNote(event.notes);
+    setNewAttendees(event.attendees.join(', '));
+    setNewStatus(event.status);
     setModalVisible(true);
   };
 
@@ -222,31 +241,37 @@ export default function ItineraryScreen({ navigation }: Props) {
       return;
     }
 
-    const updatedDays = itineraryDays.map((day) =>
-      day.id === selectedDayId
-        ? {
-            ...day,
-            events: [
-              ...day.events,
-              {
-                id: `event-${Date.now()}`,
-                title: newTitle.trim(),
-                time: newTime.trim(),
-                location: newLocation.trim() || 'Location TBD',
-                notes: newNote.trim() || 'No notes added yet.',
-                attendees: [newAttendees.trim() || `${crewCount} attending`],
-                status: newStatus,
-              },
-            ],
-          }
-        : day
-    );
+    if (!currentTrip?.id) {
+      return;
+    }
 
-    const saved = await saveItinerary(updatedDays);
-    if (saved) {
-      setItineraryDays(updatedDays);
+    const payload = {
+      title: newTitle.trim(),
+      time: newTime.trim(),
+      location: newLocation.trim() || 'Location TBD',
+      notes: newNote.trim() || 'No notes added yet.',
+      attendees: [newAttendees.trim() || `${crewCount} attending`],
+      status: newStatus,
+    };
+
+    try {
+      if (editingEventId) {
+        await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${editingEventId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiRequest(`/api/trips/${currentTrip.id}/itinerary/days/${selectedDayId}/events`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+      }
+      await fetchItinerary();
       setModalVisible(false);
       resetForm();
+      setEditingEventId(null);
+    } catch (error: any) {
+      Alert.alert('Save failed', error?.message || 'Could not save event');
     }
   };
 
@@ -255,19 +280,68 @@ export default function ItineraryScreen({ navigation }: Props) {
     const matchedDayNumber = sortedSelectedDates[nextIndex];
     const fallbackDateLabel = matchedDayNumber ? `April ${matchedDayNumber}` : formatFallbackDateLabel(nextIndex);
 
-    const updatedDays = [
-      ...itineraryDays,
-      {
-        id: `day-${Date.now()}`,
-        title: `Day ${nextIndex + 1}`,
-        dateLabel: fallbackDateLabel,
-        events: [],
-      },
-    ];
+    if (!currentTrip?.id) {
+      return;
+    }
 
-    const saved = await saveItinerary(updatedDays);
-    if (saved) {
-      setItineraryDays(updatedDays);
+    try {
+      await apiRequest(`/api/trips/${currentTrip.id}/itinerary/days`, {
+        method: 'POST',
+        body: JSON.stringify({
+          title: `Day ${nextIndex + 1}`,
+          dateLabel: fallbackDateLabel,
+        }),
+      });
+      await fetchItinerary();
+    } catch (error: any) {
+      Alert.alert('Day failed', error?.message || 'Could not add day');
+    }
+  };
+
+  const handleDeleteDay = async (dayId: string) => {
+    if (!currentTrip?.id) {
+      return;
+    }
+    Alert.alert('Delete day', 'This removes the day and all its events.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await apiRequest(`/api/trips/${currentTrip.id}/itinerary/days/${dayId}`, { method: 'DELETE' });
+            await fetchItinerary();
+          } catch (error: any) {
+            Alert.alert('Delete failed', error?.message || 'Could not delete day');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    if (!currentTrip?.id) {
+      return;
+    }
+    try {
+      await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${eventId}`, { method: 'DELETE' });
+      await fetchItinerary();
+    } catch (error: any) {
+      Alert.alert('Delete failed', error?.message || 'Could not delete event');
+    }
+  };
+
+  const handleCompleteEvent = async (eventId: string) => {
+    if (!currentTrip?.id) {
+      return;
+    }
+    try {
+      const response = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary/events/${eventId}/complete`, {
+        method: 'POST',
+      });
+      setItineraryDays(response.days);
+    } catch (error: any) {
+      Alert.alert('Complete failed', error?.message || 'Could not complete event');
     }
   };
 
@@ -332,9 +406,11 @@ export default function ItineraryScreen({ navigation }: Props) {
           </View>
         </AppCard>
 
-        <View style={styles.utilityActions}>
-          <PrimaryButton title="Add Day" variant="secondary" onPress={handleAddDay} />
-        </View>
+        {canManageItinerary ? (
+          <View style={styles.utilityActions}>
+            <PrimaryButton title="Add Day" variant="secondary" onPress={handleAddDay} />
+          </View>
+        ) : null}
 
         <View style={styles.dayList}>
           {itineraryDays.map((day) => (
@@ -352,13 +428,20 @@ export default function ItineraryScreen({ navigation }: Props) {
                     </Text>
                   </View>
 
-                  <View style={styles.dayAddButton}>
-                    <PrimaryButton
-                      title="Add Plan"
-                      variant="secondary"
-                      onPress={() => openAddPlanModal(day.id)}
-                    />
-                  </View>
+                  {canManageItinerary ? (
+                    <>
+                      <View style={styles.dayAddButton}>
+                        <PrimaryButton
+                          title="Add Plan"
+                          variant="secondary"
+                          onPress={() => openAddPlanModal(day.id)}
+                        />
+                      </View>
+                      <Pressable onPress={() => handleDeleteDay(day.id)} style={styles.inlineDanger}>
+                        <Text style={styles.inlineDangerText}>Delete day</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
                 </View>
               </View>
 
@@ -377,6 +460,10 @@ export default function ItineraryScreen({ navigation }: Props) {
                         status: plan.status,
                       }}
                       isLast={index === day.events.length - 1}
+                      canManage={canManageItinerary}
+                      onEdit={() => openEditPlanModal(day.id, plan.id)}
+                      onDelete={() => handleDeleteEvent(plan.id)}
+                      onComplete={() => handleCompleteEvent(plan.id)}
                     />
                   ))
                 ) : (
@@ -413,7 +500,7 @@ export default function ItineraryScreen({ navigation }: Props) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Add itinerary event</Text>
+            <Text style={styles.modalTitle}>{editingEventId ? 'Edit itinerary event' : 'Add itinerary event'}</Text>
             <Text style={styles.modalSubtitle}>
               Create a new plan for the selected day and keep the trip flow moving.
             </Text>
@@ -512,6 +599,10 @@ function SummaryPill({ value }: { value: string }) {
 function PlanRow({
   plan,
   isLast,
+  canManage,
+  onEdit,
+  onDelete,
+  onComplete,
 }: {
   plan: {
     id: string;
@@ -523,6 +614,10 @@ function PlanRow({
     status: ItineraryEventStatus;
   };
   isLast: boolean;
+  canManage: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  onComplete: () => void;
 }) {
   const markerStyle =
     plan.status === 'completed'
@@ -580,6 +675,22 @@ function PlanRow({
         <View style={styles.planFooter}>
           <Text style={styles.planAttendees}>{plan.attendees}</Text>
         </View>
+
+        {canManage ? (
+          <View style={styles.planActions}>
+            {plan.status !== 'completed' ? (
+              <Pressable style={styles.actionChip} onPress={onComplete}>
+                <Text style={styles.actionChipText}>Complete</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={styles.actionChip} onPress={onEdit}>
+              <Text style={styles.actionChipText}>Edit</Text>
+            </Pressable>
+            <Pressable style={styles.deleteChip} onPress={onDelete}>
+              <Text style={styles.deleteChipText}>Delete</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -717,6 +828,14 @@ const styles = StyleSheet.create({
   },
   dayAddButton: {
     minWidth: 120,
+  },
+  inlineDanger: {
+    paddingVertical: 4,
+  },
+  inlineDangerText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: '800',
   },
   dayLabel: {
     fontSize: 18,
@@ -871,6 +990,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.textSecondary,
+  },
+  planActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  actionChip: {
+    borderRadius: radius.pill,
+    backgroundColor: '#EEF4FF',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  actionChipText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  deleteChip: {
+    borderRadius: radius.pill,
+    backgroundColor: '#FEF2F2',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  deleteChipText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: '800',
   },
   actions: {
     gap: spacing.sm,

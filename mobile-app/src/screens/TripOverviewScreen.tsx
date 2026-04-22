@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as ImagePicker from 'expo-image-picker';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -10,7 +11,8 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { useTripStore } from '../store/tripStore';
-import { fetchTripDetails } from '../config/api';
+import { deleteTripCover, fetchTripDetails, tripCoverFileUrl, updateTripCover } from '../config/api';
+import { useAuthStore } from '../store/authStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripOverview'>;
 
@@ -27,7 +29,9 @@ export default function TripOverviewScreen({ navigation }: Props) {
     itineraryDays,
     setCrew,
     setCurrentTrip,
+    setTripLead,
   } = useTripStore();
+  const token = useAuthStore((state) => state.token);
 
   const hydrateTrip = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -44,10 +48,14 @@ export default function TripOverviewScreen({ navigation }: Props) {
           role: member.role,
         }))
       );
+      const lead = response.members.find((member) => member.role === 'lead');
+      if (lead) {
+        setTripLead({ id: String(lead.id), name: lead.name, role: lead.role });
+      }
     } catch (error) {
       console.log('Fetch trip details failed', error);
     }
-  }, [currentTrip?.id, setCrew, setCurrentTrip]);
+  }, [currentTrip?.id, setCrew, setCurrentTrip, setTripLead]);
 
   useEffect(() => {
     hydrateTrip();
@@ -69,13 +77,77 @@ export default function TripOverviewScreen({ navigation }: Props) {
         ? `${selectedDestination.name}, ${selectedDestination.country}`
         : selectedDestination.name
       : 'Destination pending');
+  const canEditTrip = currentTrip?.viewer_role === 'lead';
+  const heroSource =
+    currentTrip?.image_url && token
+      ? { uri: tripCoverFileUrl(currentTrip.id), headers: { Authorization: `Bearer ${token}` } }
+      : { uri: heroImage };
+
+  const pickTripCover = async () => {
+    if (!currentTrip?.id || !canEditTrip) {
+      return;
+    }
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('Photos permission needed', 'Allow photo access to update the trip picture.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.9,
+    });
+    if (result.canceled || !result.assets[0]) {
+      return;
+    }
+    try {
+      const asset = result.assets[0];
+      const response = await updateTripCover(currentTrip.id, {
+        photo: {
+          uri: asset.uri,
+          name: asset.fileName || 'trip-cover.jpg',
+          type: asset.mimeType || 'image/jpeg',
+        },
+      });
+      setCurrentTrip({ ...currentTrip, image_url: response.image_url });
+    } catch (error: any) {
+      Alert.alert('Upload failed', error?.message || 'Could not update trip photo');
+    }
+  };
+
+  const removeTripCover = async () => {
+    if (!currentTrip?.id || !canEditTrip) {
+      return;
+    }
+    try {
+      await deleteTripCover(currentTrip.id);
+      setCurrentTrip({ ...currentTrip, image_url: '' });
+    } catch (error: any) {
+      Alert.alert('Remove failed', error?.message || 'Could not remove trip photo');
+    }
+  };
 
   return (
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <SectionTitle title="Trip Overview" subtitle="Everything your crew needs in one place." />
 
-        <Image source={{ uri: heroImage }} style={styles.hero} />
+        <Pressable onPress={pickTripCover} disabled={!canEditTrip}>
+          <Image source={heroSource} style={styles.hero} />
+        </Pressable>
+        {canEditTrip ? (
+          <View style={styles.coverActions}>
+            <Pressable style={styles.smallButton} onPress={pickTripCover}>
+              <Text style={styles.smallButtonText}>{currentTrip?.image_url ? 'Change trip photo' : 'Upload trip photo'}</Text>
+            </Pressable>
+            {currentTrip?.image_url ? (
+              <Pressable style={styles.smallButton} onPress={removeTripCover}>
+                <Text style={styles.smallButtonText}>Remove</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         <AppCard>
           <Text style={styles.trip}>{tripName}</Text>
@@ -133,6 +205,24 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: radius.lg,
     marginBottom: spacing.md,
+  },
+  coverActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+  },
+  smallButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  smallButtonText: {
+    color: colors.textPrimary,
+    fontWeight: '700',
   },
   trip: {
     fontSize: 22,

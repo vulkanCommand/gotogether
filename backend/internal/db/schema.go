@@ -15,6 +15,7 @@ var schemaStatements = []string{
 		username TEXT,
 		home_city TEXT,
 		bio TEXT,
+		profile_image_url TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`,
@@ -22,6 +23,7 @@ var schemaStatements = []string{
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS home_city TEXT`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT`,
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
 	`CREATE TABLE IF NOT EXISTS trips (
 		id SERIAL PRIMARY KEY,
@@ -29,9 +31,15 @@ var schemaStatements = []string{
 		destination TEXT NOT NULL,
 		start_date DATE NOT NULL,
 		end_date DATE NOT NULL,
+		image_url TEXT,
+		completed_at TIMESTAMP,
+		completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 		created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS image_url TEXT`,
+	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`,
+	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
 	`CREATE TABLE IF NOT EXISTS trip_members (
 		id SERIAL PRIMARY KEY,
 		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
@@ -68,11 +76,26 @@ var schemaStatements = []string{
 		status TEXT NOT NULL DEFAULT 'upcoming',
 		attendee_summary TEXT,
 		event_order INTEGER NOT NULL,
+		completed_at TIMESTAMP,
+		completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`,
+	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+	`CREATE TABLE IF NOT EXISTS expense_groups (
+		id SERIAL PRIMARY KEY,
+		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+		name TEXT NOT NULL,
+		created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (trip_id, name)
 	)`,
 	`CREATE TABLE IF NOT EXISTS expenses (
 		id SERIAL PRIMARY KEY,
 		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+		expense_group_id INTEGER REFERENCES expense_groups(id) ON DELETE SET NULL,
+		itinerary_event_id INTEGER REFERENCES itinerary_events(id) ON DELETE SET NULL,
 		title TEXT NOT NULL,
 		amount NUMERIC(10,2) NOT NULL,
 		paid_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -80,6 +103,8 @@ var schemaStatements = []string{
 		notes TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS expense_group_id INTEGER REFERENCES expense_groups(id) ON DELETE SET NULL`,
+	`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS itinerary_event_id INTEGER REFERENCES itinerary_events(id) ON DELETE SET NULL`,
 	`CREATE TABLE IF NOT EXISTS expense_splits (
 		id SERIAL PRIMARY KEY,
 		expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
@@ -117,6 +142,9 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone)`,
 	`CREATE INDEX IF NOT EXISTS idx_friendships_user_id ON friendships (user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_live_locations_trip_id ON trip_live_locations (trip_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_expense_groups_trip_id ON expense_groups (trip_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_expenses_group_id ON expenses (expense_group_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_expense_splits_expense_id ON expense_splits (expense_id)`,
 }
 
 func ensureSchema(db *sql.DB) error {

@@ -9,6 +9,7 @@ export type AppUser = {
   username: string;
   home_city: string;
   bio: string;
+  profile_image_url: string;
   profile_complete: boolean;
 };
 

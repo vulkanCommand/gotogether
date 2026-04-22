@@ -7,6 +7,7 @@ export type Friend = {
   phone: string;
   username: string;
   home_city: string;
+  profile_image_url?: string;
 };
 
 type FriendState = {
