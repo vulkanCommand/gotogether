@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -150,6 +150,19 @@ export default function TripOverviewScreen({ navigation }: Props) {
     }
   };
 
+  const openMapsLocation = async (value?: string) => {
+    const query = value?.trim();
+    if (!query) {
+      return;
+    }
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Maps unavailable', 'Could not open this location in Maps.');
+    }
+  };
+
   return (
     <Screen showFooter>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -174,7 +187,9 @@ export default function TripOverviewScreen({ navigation }: Props) {
         <AppCard>
           <Text style={styles.trip}>{tripName}</Text>
           <Text style={styles.meta}>{tripDates}</Text>
-          <Text style={styles.meta}>{tripDestination}</Text>
+          <Pressable onPress={() => openMapsLocation(tripDestination)}>
+            <Text style={[styles.meta, styles.locationLink]}>{tripDestination}</Text>
+          </Pressable>
 
           <View style={styles.statsRow}>
             <StatCard value={String(currentTrip?.members_count ?? crew.length)} label="Crew" />
@@ -187,9 +202,10 @@ export default function TripOverviewScreen({ navigation }: Props) {
             {nextPlan ? (
               <>
                 <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
-                <Text style={styles.nextMeta}>
-                  {nextPlan.day} - {nextPlan.event.time} - {nextPlan.event.location}
-                </Text>
+                <Text style={styles.nextMeta}>{nextPlan.day} - {nextPlan.event.time}</Text>
+                <Pressable onPress={() => openMapsLocation(nextPlan.event.location)}>
+                  <Text style={styles.nextLocation}>{nextPlan.event.location}</Text>
+                </Pressable>
               </>
             ) : (
               <Text style={styles.nextMeta}>No upcoming itinerary event yet.</Text>
@@ -270,6 +286,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
   },
+  locationLink: {
+    color: colors.accent,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
   statsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -340,6 +361,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  nextLocation: {
+    marginTop: 6,
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '900',
+    textDecorationLine: 'underline',
   },
   leadLabel: {
     fontSize: 12,

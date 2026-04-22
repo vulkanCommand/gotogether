@@ -235,7 +235,7 @@ export default function ItineraryScreen({ navigation }: Props) {
       return;
     }
 
-    Alert.alert('Delete day', 'This removes the day and all events inside it.', [
+    Alert.alert('Are you sure?', 'Delete this day and all events inside it?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -308,7 +308,7 @@ export default function ItineraryScreen({ navigation }: Props) {
       return;
     }
 
-    Alert.alert('Delete event', 'This removes the event and any pending completion task for it.', [
+    Alert.alert('Are you sure?', 'Delete this event and any pending completion task for it?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -330,16 +330,24 @@ export default function ItineraryScreen({ navigation }: Props) {
       return;
     }
 
-    try {
-      const response = await apiRequest<{ days: ItineraryDay[] }>(
-        `/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(eventId)}/complete`,
-        { method: 'POST' }
-      );
-      setItineraryDays(response.days);
-      Alert.alert('Confirmation sent', 'Crew members will confirm this event from Pending tasks.');
-    } catch (error: any) {
-      Alert.alert('Complete failed', error?.message || 'Could not complete event');
-    }
+    Alert.alert('Are you sure?', 'Mark this event complete and send confirmation tasks to the crew?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Complete',
+        onPress: async () => {
+          try {
+            const response = await apiRequest<{ days: ItineraryDay[] }>(
+              `/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(eventId)}/complete`,
+              { method: 'POST' }
+            );
+            setItineraryDays(response.days);
+            Alert.alert('Confirmation sent', 'Crew members will confirm this event from Pending tasks.');
+          } catch (error: any) {
+            Alert.alert('Complete failed', error?.message || 'Could not complete event');
+          }
+        },
+      },
+    ]);
   };
 
   const handleUndoCompleteEvent = async (eventId: string) => {

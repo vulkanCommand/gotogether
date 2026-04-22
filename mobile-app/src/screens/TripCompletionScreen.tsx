@@ -122,30 +122,38 @@ export default function TripCompletionScreen({ navigation }: Props) {
       (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
   ].join(' - ');
 
-  const handleFinish = async () => {
+  const handleFinish = () => {
     if (!canCompleteTrip) {
       Alert.alert('Trip lead only', 'Only the trip lead can start trip completion.');
       navigation.navigate('MainTabs', { screen: 'Trips' });
       return;
     }
 
-    try {
-      if (currentTrip?.id) {
-        const response = await completeTrip(currentTrip.id);
-        if (response.pending_confirmations) {
-          Alert.alert(
-            'Confirmation sent',
-            'Crew members must accept the completion request in Notifications before this trip moves to Completed.'
-          );
-          navigation.navigate('MainTabs', { screen: 'Trips' });
-          return;
-        }
-      }
-      resetTrip();
-      navigation.navigate('MainTabs', { screen: 'Trips' });
-    } catch (error: any) {
-      Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
-    }
+    Alert.alert('Are you sure?', 'Start trip completion and ask every crew member to confirm?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Complete',
+        onPress: async () => {
+          try {
+            if (currentTrip?.id) {
+              const response = await completeTrip(currentTrip.id);
+              if (response.pending_confirmations) {
+                Alert.alert(
+                  'Confirmation sent',
+                  'Crew members must accept the completion request in Notifications before this trip moves to Completed.'
+                );
+                navigation.navigate('MainTabs', { screen: 'Trips' });
+                return;
+              }
+            }
+            resetTrip();
+            navigation.navigate('MainTabs', { screen: 'Trips' });
+          } catch (error: any) {
+            Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
+          }
+        },
+      },
+    ]);
   };
 
   return (

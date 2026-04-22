@@ -4,7 +4,7 @@ import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -209,6 +209,17 @@ export default function LiveScreen() {
                     pinColor="#2563EB"
                   />
                 ) : null}
+                {destinationCoordinate
+                  ? mappableLocations.map((member, index) => (
+                      <Polyline
+                        key={`route-${member.user_id}`}
+                        coordinates={[jitterCoordinate(member, index), destinationCoordinate]}
+                        strokeColor={member.is_current_user ? colors.success : colors.accent}
+                        strokeWidth={member.is_current_user ? 4 : 2}
+                        lineDashPattern={member.is_current_user ? undefined : [8, 6]}
+                      />
+                    ))
+                  : null}
                 {mappableLocations.map((member, index) => (
                   <Marker
                     key={member.user_id}
@@ -330,7 +341,7 @@ function formatMiles(value: number) {
 
 const styles = StyleSheet.create({
   mapWrap: {
-    height: 300,
+    height: 470,
     borderRadius: radius.lg,
     overflow: 'hidden',
     borderWidth: 1,
