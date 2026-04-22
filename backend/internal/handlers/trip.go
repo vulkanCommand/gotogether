@@ -63,6 +63,22 @@ func CreateTrip(c *gin.Context) {
 		return
 	}
 
+	addedMembers := map[int]bool{userID: true}
+	for _, memberID := range req.MemberIDs {
+		if memberID <= 0 || addedMembers[memberID] {
+			continue
+		}
+		addedMembers[memberID] = true
+		if _, err := tx.Exec(`
+			INSERT INTO trip_members (trip_id, user_id, role)
+			VALUES ($1, $2, 'member')
+			ON CONFLICT (trip_id, user_id) DO NOTHING
+		`, trip.ID, memberID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add trip member", "details": err.Error()})
+			return
+		}
+	}
+
 	if !commitOrRespond(c, tx) {
 		return
 	}
@@ -165,6 +181,34 @@ func GetTripByID(c *gin.Context) {
 		return
 	}
 
+	memberRows, err := db.DB.Query(`
+		SELECT u.id, COALESCE(u.name, ''), COALESCE(tm.role, 'member')
+		FROM trip_members tm
+		INNER JOIN users u ON u.id = tm.user_id
+		WHERE tm.trip_id = $1
+		ORDER BY tm.joined_at ASC, tm.id ASC
+	`, tripID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch trip members", "details": err.Error()})
+		return
+	}
+	defer memberRows.Close()
+
+	members := make([]gin.H, 0)
+	for memberRows.Next() {
+		var memberID int
+		var memberName, memberRole string
+		if err := memberRows.Scan(&memberID, &memberName, &memberRole); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read trip members", "details": err.Error()})
+			return
+		}
+		members = append(members, gin.H{
+			"id":   memberID,
+			"name": memberName,
+			"role": memberRole,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"trip": gin.H{
 			"id":            trip.ID,
@@ -175,5 +219,6 @@ func GetTripByID(c *gin.Context) {
 			"created_by":    trip.CreatedBy,
 			"members_count": membersCount,
 		},
+		"members": members,
 	})
 }

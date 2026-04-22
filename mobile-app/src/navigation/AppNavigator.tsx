@@ -7,6 +7,8 @@ import { colors } from '../theme/colors';
 
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
+import CompleteProfileScreen from '../screens/CompleteProfileScreen';
+import PermissionsSetupScreen from '../screens/PermissionsSetupScreen';
 import HomeScreen from '../screens/HomeScreen';
 import TripsScreen from '../screens/TripsScreen';
 import LiveScreen from '../screens/LiveScreen';
@@ -23,6 +25,8 @@ import { useAuthStore } from '../store/authStore';
 export type RootStackParamList = {
   Onboarding: undefined;
   Login: undefined;
+  CompleteProfile: undefined;
+  PermissionsSetup: undefined;
   MainTabs: {
     screen?: keyof MainTabParamList;
   } | undefined;
@@ -95,16 +99,24 @@ function BootScreen() {
 export default function AppNavigator() {
   const token = useAuthStore((state) => state.token);
   const authChecked = useAuthStore((state) => state.authChecked);
+  const user = useAuthStore((state) => state.user);
 
-  if (!authChecked) {
+  if (!authChecked || (token && !user)) {
     return <BootScreen />;
   }
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {token ? (
+      {token && user ? (
+        !user.profile_complete ? (
+          <>
+            <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+            <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
+          </>
+        ) : (
         <>
           <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
           <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
           <Stack.Screen name="TripCreate" component={TripCreateScreen} />
           <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
@@ -112,6 +124,7 @@ export default function AppNavigator() {
           <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
           <Stack.Screen name="TripCompletion" component={TripCompletionScreen} />
         </>
+        )
       ) : (
         <>
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />

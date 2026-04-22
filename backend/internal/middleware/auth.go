@@ -49,6 +49,12 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Set("name", "")
 		}
 
+		if phone, ok := decoded.Claims["phone_number"].(string); ok {
+			c.Set("phone", phone)
+		} else {
+			c.Set("phone", "")
+		}
+
 		c.Next()
 	}
 }

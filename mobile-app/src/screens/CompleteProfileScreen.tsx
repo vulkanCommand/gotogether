@@ -1,36 +1,22 @@
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { signOut } from 'firebase/auth';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
-import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
+import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { deleteMyAccount, fetchFriends, updateMyProfile } from '../config/api';
+import { updateMyProfile } from '../config/api';
 import { useAuthStore } from '../store/authStore';
-import { useFriendStore } from '../store/friendStore';
-import { firebaseAuth } from '../config/firebase';
-import { useTripStore } from '../store/tripStore';
 
-type Props = CompositeScreenProps<
-  BottomTabScreenProps<MainTabParamList, 'Profile'>,
-  NativeStackScreenProps<RootStackParamList>
->;
+type Props = NativeStackScreenProps<RootStackParamList, 'CompleteProfile'>;
 
-export default function ProfileScreen({ navigation }: Props) {
+export default function CompleteProfileScreen({ navigation }: Props) {
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
-  const clearSession = useAuthStore((state) => state.clearSession);
-  const friends = useFriendStore((state) => state.friends);
-  const setFriends = useFriendStore((state) => state.setFriends);
-  const clearFriends = useFriendStore((state) => state.clearFriends);
-  const resetTrip = useTripStore((state) => state.resetTrip);
 
   const [name, setName] = useState(user?.name ?? '');
   const [username, setUsername] = useState(user?.username ?? '');
@@ -39,7 +25,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [bio, setBio] = useState(user?.bio ?? '');
   const [saving, setSaving] = useState(false);
 
-  const saveProfile = async () => {
+  const handleSave = async () => {
     if (!name.trim() || !username.trim()) {
       Alert.alert('Missing details', 'Name and username are required.');
       return;
@@ -55,7 +41,7 @@ export default function ProfileScreen({ navigation }: Props) {
         bio: bio.trim(),
       });
       setUser(response.user);
-      Alert.alert('Profile updated', 'Your account details were saved.');
+      navigation.replace('PermissionsSetup');
     } catch (error: any) {
       console.log('Profile update failed', error);
       Alert.alert('Save failed', error?.message || 'Could not save profile');
@@ -64,52 +50,16 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
-  const refreshFriends = async () => {
-    try {
-      const response = await fetchFriends();
-      setFriends(response.friends);
-      Alert.alert('Contacts refreshed', `Found ${response.friends.length} connected friends.`);
-    } catch (error: any) {
-      Alert.alert('Refresh failed', error?.message || 'Could not refresh friends');
-    }
-  };
-
-  const handleSignOut = async () => {
-    await signOut(firebaseAuth);
-    clearFriends();
-    resetTrip();
-    clearSession();
-  };
-
-  const handleDeleteAccount = async () => {
-    Alert.alert('Delete account', 'This will remove your profile and trip data from the backend.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteMyAccount();
-            await signOut(firebaseAuth);
-            clearFriends();
-            resetTrip();
-            clearSession();
-          } catch (error: any) {
-            Alert.alert('Delete failed', error?.message || 'Could not delete account');
-          }
-        },
-      },
-    ]);
-  };
-
   return (
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <SectionTitle title="Profile" subtitle="Manage your account, permissions, and connected friends." />
+        <SectionTitle
+          title="Finish your profile"
+          subtitle="A few basics make the rest of the app personal and easier to use."
+        />
 
         <AppCard>
-          <Text style={styles.email}>{user?.email || 'Signed in user'}</Text>
-          <Text style={styles.stat}>Connected friends: {friends.length}</Text>
+          <Text style={styles.emailLabel}>{user?.email || 'Signed in account'}</Text>
 
           <TextInput
             style={styles.input}
@@ -155,13 +105,10 @@ export default function ProfileScreen({ navigation }: Props) {
           />
         </AppCard>
 
-        <View style={styles.actions}>
-          <PrimaryButton title={saving ? 'Saving...' : 'Save profile'} onPress={saveProfile} />
-          <PrimaryButton title="Grant permissions again" variant="secondary" onPress={() => navigation.navigate('PermissionsSetup')} />
-          <PrimaryButton title="Refresh friends" variant="secondary" onPress={refreshFriends} />
-          <PrimaryButton title="Sign out" variant="secondary" onPress={handleSignOut} />
-          <PrimaryButton title="Delete account" variant="secondary" onPress={handleDeleteAccount} />
-        </View>
+        <PrimaryButton
+          title={saving ? 'Saving profile...' : 'Save and continue'}
+          onPress={handleSave}
+        />
       </ScrollView>
     </Screen>
   );
@@ -171,15 +118,10 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: spacing.xl,
   },
-  email: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
-  },
-  stat: {
-    color: colors.textSecondary,
+  emailLabel: {
     fontSize: 14,
+    fontWeight: '700',
+    color: colors.accent,
     marginBottom: spacing.md,
   },
   input: {
@@ -197,8 +139,5 @@ const styles = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: 'top',
     marginBottom: 0,
-  },
-  actions: {
-    gap: spacing.sm,
   },
 });

@@ -22,6 +22,7 @@ export default function ExpensesScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
   const expenses = useTripStore((state) => state.expenses);
   const setExpenses = useTripStore((state) => state.setExpenses);
+  const crew = useTripStore((state) => state.crew);
   const totalExpenseAmount = useTripStore((state) => state.totalExpenseAmount);
   const [loading, setLoading] = useState(false);
 
@@ -53,6 +54,10 @@ export default function ExpensesScreen({ navigation }: Props) {
     }, [fetchExpenses])
   );
 
+  const splitEstimate =
+    expenses.length > 0 ? totalExpenseAmount() / Math.max(crew.length || currentTrip?.members_count || 1, 1) : 0;
+  const averageExpense = expenses.length > 0 ? totalExpenseAmount() / expenses.length : 0;
+
   return (
     <Screen>
       <SectionTitle title="Expenses" subtitle="Track who paid, who owes, and what is settled." />
@@ -66,6 +71,17 @@ export default function ExpensesScreen({ navigation }: Props) {
       <AppCard>
         <Text style={styles.oweLabel}>Total logged</Text>
         <Text style={styles.oweAmount}>${totalExpenseAmount().toFixed(2)}</Text>
+
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryValue}>${splitEstimate.toFixed(2)}</Text>
+            <Text style={styles.summaryLabel}>Per person</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryValue}>${averageExpense.toFixed(2)}</Text>
+            <Text style={styles.summaryLabel}>Average expense</Text>
+          </View>
+        </View>
       </AppCard>
 
       {!currentTrip ? (
@@ -180,5 +196,26 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 16,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  summaryCard: {
+    flex: 1,
+    borderRadius: radius.md,
+    backgroundColor: '#F8FAFC',
+    padding: spacing.md,
+  },
+  summaryValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  summaryLabel: {
+    marginTop: 4,
+    fontSize: 12,
+    color: colors.textSecondary,
   },
 });

@@ -26,6 +26,7 @@ function AuthBootstrap() {
   const setSession = useAuthStore((state) => state.setSession);
   const clearSession = useAuthStore((state) => state.clearSession);
   const setAuthChecked = useAuthStore((state) => state.setAuthChecked);
+  const setUser = useAuthStore((state) => state.setUser);
 
   useEffect(() => {
     const unsubscribe = onIdTokenChanged(firebaseAuth, async (user) => {
@@ -37,7 +38,8 @@ function AuthBootstrap() {
 
         const freshToken = await user.getIdToken(true);
         setSession(freshToken);
-        await syncAuthenticatedUser();
+        const response = await syncAuthenticatedUser();
+        setUser(response.user);
       } catch (error) {
         console.log('Auth bootstrap failed', error);
         clearSession();
@@ -47,7 +49,7 @@ function AuthBootstrap() {
     });
 
     return unsubscribe;
-  }, [clearSession, setAuthChecked, setSession]);
+  }, [clearSession, setAuthChecked, setSession, setUser]);
 
   return null;
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
@@ -9,50 +10,20 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { CrewMember, DestinationOption, useTripStore } from '../store/tripStore';
-import { members as mockMembers } from '../data/mock';
-import { apiRequest, ApiTrip } from '../config/api';
+import { ApiTrip, apiRequest } from '../config/api';
+import { useAuthStore } from '../store/authStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCreate'>;
 
 const steps = ['Dates', 'Destination', 'Trip Lead'];
-
 const weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const monthLabel = 'April 2026';
 const dayOffset = 3;
 const calendarDays = Array.from({ length: 30 }, (_, index) => index + 1);
-
-const destinationSeed: DestinationOption[] = [
-  {
-    id: '1',
-    name: 'Santorini',
-    country: 'Greece',
-    emoji: '🏝️',
-    accent: '#E8F0FF',
-    votes: ['1', '2', '3'],
-  },
-  {
-    id: '2',
-    name: 'Bali',
-    country: 'Indonesia',
-    emoji: '🌴',
-    accent: '#F3ECFF',
-    votes: ['4', '5'],
-  },
-  {
-    id: '3',
-    name: 'Swiss Alps',
-    country: 'Switzerland',
-    emoji: '🏔️',
-    accent: '#ECFDF5',
-    votes: ['6'],
-  },
-];
-
-const roleLabels = ['Organizer', 'Food planner', 'Driver', 'Stay scout', 'Budget lead', 'Photo lead'];
-
-const availabilitySeed = ['Available', 'Available', 'Available', 'Available', 'Maybe', 'Unavailable'] as const;
+const roleLabels = ['Organizer', 'Navigator', 'Budget lead', 'Photo lead', 'Food scout', 'Planner'];
 
 export default function TripCreateScreen({ navigation }: Props) {
+  const user = useAuthStore((state) => state.user);
   const crew = useTripStore((state) => state.crew);
   const selectedDates = useTripStore((state) => state.selectedDates);
   const bestMatchRange = useTripStore((state) => state.bestMatchRange);
@@ -61,51 +32,52 @@ export default function TripCreateScreen({ navigation }: Props) {
   const tripLead = useTripStore((state) => state.tripLead);
 
   const setCrew = useTripStore((state) => state.setCrew);
-  const setSelectedDates = useTripStore((state) => state.setSelectedDates);
   const toggleSelectedDate = useTripStore((state) => state.toggleSelectedDate);
   const setBestMatchRange = useTripStore((state) => state.setBestMatchRange);
   const setDestinationOptions = useTripStore((state) => state.setDestinationOptions);
   const setSelectedDestinationId = useTripStore((state) => state.setSelectedDestinationId);
   const voteDestination = useTripStore((state) => state.voteDestination);
   const setTripLead = useTripStore((state) => state.setTripLead);
-  const hydratePlannerDefaults = useTripStore((state) => state.hydratePlannerDefaults);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
   const resetPlannerState = useTripStore((state) => state.resetPlannerState);
 
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
-
-  const fallbackCrew = useMemo<CrewMember[]>(
-    () =>
-      mockMembers.slice(0, 4).map((member, index) => ({
-        id: member.id,
-        name: member.name,
-        role: roleLabels[index] ?? 'Crew member',
-      })),
-    []
-  );
+  const [destinationName, setDestinationName] = useState('');
+  const [destinationCountry, setDestinationCountry] = useState('');
 
   const plannerCrew = useMemo<CrewMember[]>(() => {
-    if (crew.length === 0) {
-      return fallbackCrew;
+    if (crew.length > 0) {
+      return crew.map((member, index) => ({
+        ...member,
+        role: member.role ?? roleLabels[index] ?? 'Crew member',
+      }));
     }
 
-    return crew.map((member, index) => ({
-      ...member,
-      role: member.role ?? roleLabels[index] ?? 'Crew member',
-    }));
-  }, [crew, fallbackCrew]);
+    if (!user) {
+      return [];
+    }
+
+    return [
+      {
+        id: String(user.id),
+        name: user.name || user.email,
+        role: 'Organizer',
+      },
+    ];
+  }, [crew, user]);
 
   useEffect(() => {
-    hydratePlannerDefaults({
-      crew: fallbackCrew,
-      destinationOptions: destinationSeed,
-    });
-
-    if (crew.length === 0) {
-      setCrew(fallbackCrew);
+    if (crew.length === 0 && plannerCrew.length > 0) {
+      setCrew(plannerCrew);
     }
-  }, [crew.length, fallbackCrew, hydratePlannerDefaults, setCrew]);
+  }, [crew.length, plannerCrew, setCrew]);
+
+  useEffect(() => {
+    if (!tripLead && plannerCrew.length > 0) {
+      setTripLead(plannerCrew[0]);
+    }
+  }, [plannerCrew, setTripLead, tripLead]);
 
   const activeDates = useMemo(() => {
     const parsed = selectedDates
@@ -124,77 +96,53 @@ export default function TripCreateScreen({ navigation }: Props) {
       return `Apr ${activeDates[0]}`;
     }
 
-    return `Apr ${activeDates[0]} – Apr ${activeDates[activeDates.length - 1]}`;
+    return `Apr ${activeDates[0]} - Apr ${activeDates[activeDates.length - 1]}`;
   }, [activeDates]);
 
   useEffect(() => {
-    if (matchedRange) {
-      setBestMatchRange(matchedRange);
-    } else if (bestMatchRange) {
-      setBestMatchRange('');
-    }
-  }, [bestMatchRange, matchedRange, setBestMatchRange]);
+    setBestMatchRange(matchedRange);
+  }, [matchedRange, setBestMatchRange]);
 
-  useEffect(() => {
-    if (destinationOptions.length === 0) {
-      setDestinationOptions(destinationSeed);
-    }
-  }, [destinationOptions.length, setDestinationOptions]);
+  const selectedDestination = useMemo(
+    () => destinationOptions.find((destination) => destination.id === selectedDestinationId) ?? null,
+    [destinationOptions, selectedDestinationId]
+  );
 
-  useEffect(() => {
-    if (!tripLead && plannerCrew.length > 0) {
-      setTripLead(plannerCrew[0]);
-    }
-  }, [plannerCrew, setTripLead, tripLead]);
-
-  const selectedDestination = useMemo(() => {
-    return (
-      destinationOptions.find((destination) => destination.id === selectedDestinationId) ?? null
-    );
-  }, [destinationOptions, selectedDestinationId]);
-
-  const selectedLeadId = tripLead?.id ?? plannerCrew[0]?.id ?? '';
-
-  const availabilityRows = useMemo(() => {
-    const base = plannerCrew.map((member, index) => ({
-      name: member.name,
-      status: availabilitySeed[index] ?? 'Available',
-    }));
-
-    if (base.length >= 4) {
-      return base;
+  const addDestinationOption = () => {
+    if (!destinationName.trim()) {
+      Alert.alert('Add destination', 'Enter a destination name first.');
+      return;
     }
 
-    return [
-      ...base,
-      { name: 'Nina', status: 'Maybe' as const },
-      { name: 'Ravi', status: 'Unavailable' as const },
-    ];
-  }, [plannerCrew]);
+    const optionId = `destination-${Date.now()}`;
+    const nextOption: DestinationOption = {
+      id: optionId,
+      name: destinationName.trim(),
+      country: destinationCountry.trim(),
+      emoji: '✈️',
+      accent: '#EEF4FF',
+      votes: [],
+    };
 
-  const handleDateToggle = (day: number) => {
-    toggleSelectedDate(String(day));
+    setDestinationOptions([...destinationOptions, nextOption]);
+    setDestinationName('');
+    setDestinationCountry('');
   };
 
   const handleDestinationSelect = (destinationId: string) => {
-    const actingMemberId = plannerCrew[0]?.id ?? '1';
-
+    const actingMemberId = plannerCrew[0]?.id ?? 'self';
     setSelectedDestinationId(destinationId);
     voteDestination(destinationId, actingMemberId);
   };
 
-  const handleLeadSelect = (member: CrewMember) => {
-    setTripLead(member);
-  };
-
   const goNext = async () => {
     if (step === 0 && activeDates.length === 0) {
-      Alert.alert('Select dates', 'Choose at least one date before continuing.');
+      Alert.alert('Select dates', 'Choose at least one trip date before continuing.');
       return;
     }
 
     if (step === 1 && !selectedDestination) {
-      Alert.alert('Select destination', 'Choose one destination before continuing.');
+      Alert.alert('Select destination', 'Add and choose a destination before continuing.');
       return;
     }
 
@@ -204,27 +152,23 @@ export default function TripCreateScreen({ navigation }: Props) {
     }
 
     if (!selectedDestination || !matchedRange || activeDates.length === 0) {
-      Alert.alert('Trip incomplete', 'Please finish dates and destination first.');
+      Alert.alert('Trip incomplete', 'Finish dates and destination first.');
       return;
     }
 
     try {
       setSaving(true);
-      resetPlannerState();
-      setCrew(plannerCrew);
-      setSelectedDates(activeDates.map(String));
-      setBestMatchRange(matchedRange);
-      setDestinationOptions(destinationOptions);
-      setSelectedDestinationId(selectedDestination.id);
-      setTripLead(tripLead ?? plannerCrew[0] ?? null);
 
       const created = await apiRequest<{ trip: ApiTrip }>('/api/trips', {
         method: 'POST',
         body: JSON.stringify({
           name: `${selectedDestination.name} Trip`,
-          destination: selectedDestination.name,
+          destination: selectedDestination.country
+            ? `${selectedDestination.name}, ${selectedDestination.country}`
+            : selectedDestination.name,
           start_date: `2026-04-${String(activeDates[0]).padStart(2, '0')}`,
           end_date: `2026-04-${String(activeDates[activeDates.length - 1]).padStart(2, '0')}`,
+          member_ids: plannerCrew.map((member) => Number(member.id)).filter(Number.isFinite),
         }),
       });
 
@@ -244,6 +188,7 @@ export default function TripCreateScreen({ navigation }: Props) {
       return;
     }
 
+    resetPlannerState();
     navigation.goBack();
   };
 
@@ -252,7 +197,7 @@ export default function TripCreateScreen({ navigation }: Props) {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <SectionTitle
           title="Create Trip"
-          subtitle="Match dates, lock a location, choose a trip lead, then move into itinerary and expenses."
+          subtitle="Choose dates, pick a destination, assign a lead, and save the trip for your crew."
         />
 
         <AppCard>
@@ -290,28 +235,19 @@ export default function TripCreateScreen({ navigation }: Props) {
                   >
                     {label}
                   </Text>
-
-                  {index < steps.length - 1 && (
-                    <View
-                      style={[
-                        styles.stepLine,
-                        index < step && styles.stepLineComplete,
-                      ]}
-                    />
-                  )}
                 </View>
               );
             })}
           </View>
         </AppCard>
 
-        {step === 0 && (
+        {step === 0 ? (
           <>
             <AppCard>
               <Text style={styles.eyebrow}>Step 1</Text>
-              <Text style={styles.cardTitle}>Availability matching</Text>
+              <Text style={styles.cardTitle}>Choose dates</Text>
               <Text style={styles.cardMeta}>
-                Tap the dates your group can do. This becomes the first real trip input before voting.
+                Pick the dates your crew is available. These dates are saved to the trip.
               </Text>
 
               <View style={styles.calendarHeader}>
@@ -340,7 +276,7 @@ export default function TripCreateScreen({ navigation }: Props) {
                   return (
                     <Pressable
                       key={day}
-                      onPress={() => handleDateToggle(day)}
+                      onPress={() => toggleSelectedDate(String(day))}
                       style={[styles.dayCell, selected && styles.dayCellSelected]}
                     >
                       <Text style={[styles.dayText, selected && styles.dayTextSelected]}>
@@ -353,143 +289,107 @@ export default function TripCreateScreen({ navigation }: Props) {
             </AppCard>
 
             <AppCard>
-              <View style={styles.matchHeader}>
-                <View>
-                  <Text style={styles.eyebrow}>Best match</Text>
-                  <Text style={styles.matchTitle}>{matchedRange || 'Select dates'}</Text>
-                </View>
-
-                <View style={styles.matchPill}>
-                  <Text style={styles.matchPillText}>
-                    {plannerCrew.length} of {plannerCrew.length + 2} available
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.matchText}>
-                This overlap is now stored in the app flow, so your overview and itinerary can use the same trip window.
-              </Text>
-
-              <View style={styles.availabilityList}>
-                {availabilityRows.map((item, index) => (
-                  <View key={`${item.name}-${index}`} style={styles.availabilityRow}>
-                    <Text style={styles.availabilityName}>{item.name}</Text>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        item.status === 'Available' && styles.statusBadgeAvailable,
-                        item.status === 'Maybe' && styles.statusBadgeMaybe,
-                        item.status === 'Unavailable' && styles.statusBadgeUnavailable,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusBadgeText,
-                          item.status === 'Available' && styles.statusBadgeTextAvailable,
-                          item.status === 'Maybe' && styles.statusBadgeTextMaybe,
-                          item.status === 'Unavailable' && styles.statusBadgeTextUnavailable,
-                        ]}
-                      >
-                        {item.status}
-                      </Text>
-                    </View>
+              <Text style={styles.eyebrow}>Crew on this trip</Text>
+              <View style={styles.memberList}>
+                {plannerCrew.map((member) => (
+                  <View key={member.id} style={styles.memberRow}>
+                    <Text style={styles.memberName}>{member.name}</Text>
+                    <Text style={styles.memberRole}>{member.role}</Text>
                   </View>
                 ))}
               </View>
             </AppCard>
           </>
-        )}
+        ) : null}
 
-        {step === 1 && (
+        {step === 1 ? (
           <>
             <AppCard>
               <Text style={styles.eyebrow}>Step 2</Text>
-              <Text style={styles.cardTitle}>Location voting</Text>
+              <Text style={styles.cardTitle}>Add destination options</Text>
               <Text style={styles.cardMeta}>
-                Once dates are matched, pick the place. The winner becomes the trip destination shown in overview.
+                Add one or more destination ideas, then choose the winner for this trip.
               </Text>
 
-              <View style={styles.destinationList}>
-                {destinationOptions.map((destination) => {
-                  const selected = destination.id === selectedDestinationId;
+              <TextInput
+                value={destinationName}
+                onChangeText={setDestinationName}
+                placeholder="Destination name"
+                placeholderTextColor={colors.textSecondary}
+                style={styles.input}
+              />
 
-                  return (
-                    <Pressable
-                      key={destination.id}
-                      onPress={() => handleDestinationSelect(destination.id)}
-                      style={[styles.destinationCard, selected && styles.destinationCardSelected]}
-                    >
-                      <View
-                        style={[
-                          styles.destinationVisual,
-                          { backgroundColor: destination.accent ?? '#EEF2FF' },
-                        ]}
-                      >
-                        <Text style={styles.destinationEmoji}>{destination.emoji ?? '✈️'}</Text>
-                      </View>
+              <TextInput
+                value={destinationCountry}
+                onChangeText={setDestinationCountry}
+                placeholder="Country or region"
+                placeholderTextColor={colors.textSecondary}
+                style={styles.input}
+              />
 
-                      <View style={styles.destinationInfo}>
-                        <Text style={styles.destinationTitle}>{destination.name}</Text>
-                        <Text style={styles.destinationCountry}>{destination.country ?? 'Open destination'}</Text>
-                        <Text style={styles.destinationVotes}>{destination.votes.length} votes</Text>
-                      </View>
-
-                      <View style={[styles.voteIndicator, selected && styles.voteIndicatorSelected]}>
-                        <Text
-                          style={[
-                            styles.voteIndicatorText,
-                            selected && styles.voteIndicatorTextSelected,
-                          ]}
-                        >
-                          {selected ? 'Selected' : 'Vote'}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <PrimaryButton title="Add destination option" onPress={addDestinationOption} />
             </AppCard>
 
             <AppCard>
-              <View style={styles.choiceHeader}>
-                <View>
-                  <Text style={styles.eyebrow}>Current winner</Text>
-                  <Text style={styles.choiceTitle}>
-                    {selectedDestination
-                      ? `${selectedDestination.name}, ${selectedDestination.country}`
-                      : 'Pick a destination'}
-                  </Text>
-                </View>
+              <View style={styles.destinationList}>
+                {destinationOptions.length === 0 ? (
+                  <Text style={styles.emptyCopy}>No destination options added yet.</Text>
+                ) : (
+                  destinationOptions.map((destination) => {
+                    const selected = destination.id === selectedDestinationId;
 
-                <View style={styles.choicePill}>
-                  <Text style={styles.choicePillText}>Store-backed</Text>
-                </View>
+                    return (
+                      <Pressable
+                        key={destination.id}
+                        onPress={() => handleDestinationSelect(destination.id)}
+                        style={[styles.destinationCard, selected && styles.destinationCardSelected]}
+                      >
+                        <View style={styles.destinationInfo}>
+                          <Text style={styles.destinationTitle}>{destination.name}</Text>
+                          <Text style={styles.destinationCountry}>
+                            {destination.country || 'Country pending'}
+                          </Text>
+                          <Text style={styles.destinationVotes}>
+                            {destination.votes.length} vote{destination.votes.length === 1 ? '' : 's'}
+                          </Text>
+                        </View>
+
+                        <View style={[styles.voteIndicator, selected && styles.voteIndicatorSelected]}>
+                          <Text
+                            style={[
+                              styles.voteIndicatorText,
+                              selected && styles.voteIndicatorTextSelected,
+                            ]}
+                          >
+                            {selected ? 'Selected' : 'Choose'}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })
+                )}
               </View>
-
-              <Text style={styles.choiceMeta}>
-                This choice now carries forward through the rest of the trip flow instead of staying trapped on this screen.
-              </Text>
             </AppCard>
           </>
-        )}
+        ) : null}
 
-        {step === 2 && (
+        {step === 2 ? (
           <>
             <AppCard>
               <Text style={styles.eyebrow}>Step 3</Text>
-              <Text style={styles.cardTitle}>Trip lead voting</Text>
+              <Text style={styles.cardTitle}>Choose the trip lead</Text>
               <Text style={styles.cardMeta}>
-                Pick the person who will coordinate the trip and own the itinerary decisions.
+                The trip lead owns itinerary decisions and acts as the default organizer.
               </Text>
 
               <View style={styles.leadGrid}>
                 {plannerCrew.map((member) => {
-                  const selected = member.id === selectedLeadId;
+                  const selected = member.id === tripLead?.id;
 
                   return (
                     <Pressable
                       key={member.id}
-                      onPress={() => handleLeadSelect(member)}
+                      onPress={() => setTripLead(member)}
                       style={[styles.leadCard, selected && styles.leadCardSelected]}
                     >
                       <View style={[styles.leadAvatar, selected && styles.leadAvatarSelected]}>
@@ -499,23 +399,12 @@ export default function TripCreateScreen({ navigation }: Props) {
                             selected && styles.leadAvatarTextSelected,
                           ]}
                         >
-                          {member.name.charAt(0)}
+                          {member.name.charAt(0).toUpperCase()}
                         </Text>
                       </View>
 
                       <Text style={styles.leadName}>{member.name}</Text>
                       <Text style={styles.leadRole}>{member.role ?? 'Crew member'}</Text>
-
-                      <View style={[styles.leadPickPill, selected && styles.leadPickPillSelected]}>
-                        <Text
-                          style={[
-                            styles.leadPickText,
-                            selected && styles.leadPickTextSelected,
-                          ]}
-                        >
-                          {selected ? 'Chosen lead' : 'Choose'}
-                        </Text>
-                      </View>
                     </Pressable>
                   );
                 })}
@@ -524,32 +413,20 @@ export default function TripCreateScreen({ navigation }: Props) {
 
             <AppCard>
               <Text style={styles.eyebrow}>Trip summary</Text>
-              <Text style={styles.summaryTitle}>Ready for overview</Text>
-
-              <View style={styles.summaryBlock}>
-                <SummaryRow label="Crew size" value={`${plannerCrew.length} people`} />
-                <SummaryRow label="Matched dates" value={matchedRange || 'Not selected'} />
-                <SummaryRow
-                  label="Destination"
-                  value={
-                    selectedDestination
-                      ? `${selectedDestination.name}, ${selectedDestination.country}`
-                      : 'Not selected'
-                  }
-                />
-                <SummaryRow
-                  label="Trip lead"
-                  value={tripLead?.name ?? 'Not selected'}
-                  isLast
-                />
-              </View>
-
-              <Text style={styles.summaryNote}>
-                After this, you’ll land in Trip Overview. From there you can open itinerary and start building events.
+              <Text style={styles.summaryTitle}>Ready to save</Text>
+              <Text style={styles.summaryCopy}>Dates: {bestMatchRange || 'Pending'}</Text>
+              <Text style={styles.summaryCopy}>
+                Destination:{' '}
+                {selectedDestination
+                  ? selectedDestination.country
+                    ? `${selectedDestination.name}, ${selectedDestination.country}`
+                    : selectedDestination.name
+                  : 'Pending'}
               </Text>
+              <Text style={styles.summaryCopy}>Trip lead: {tripLead?.name || 'Pending'}</Text>
             </AppCard>
           </>
-        )}
+        ) : null}
 
         <View style={styles.actionRow}>
           <PrimaryButton
@@ -558,7 +435,13 @@ export default function TripCreateScreen({ navigation }: Props) {
             onPress={goBack}
           />
           <PrimaryButton
-            title={step < 2 ? 'Continue' : 'Continue to Overview'}
+            title={
+              saving
+                ? 'Saving...'
+                : step < 2
+                  ? 'Continue'
+                  : 'Continue to Overview'
+            }
             onPress={goNext}
           />
         </View>
@@ -567,41 +450,20 @@ export default function TripCreateScreen({ navigation }: Props) {
   );
 }
 
-function SummaryRow({
-  label,
-  value,
-  isLast = false,
-}: {
-  label: string;
-  value: string;
-  isLast?: boolean;
-}) {
-  return (
-    <View style={[styles.summaryRow, isLast && styles.summaryRowLast]}>
-      <Text style={styles.summaryRowLabel}>{label}</Text>
-      <Text style={styles.summaryRowValue}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   content: {
     paddingBottom: spacing.xl,
   },
-
   stepHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
-
   stepItem: {
     flex: 1,
     alignItems: 'center',
-    position: 'relative',
   },
-
   stepCircle: {
     width: 34,
     height: 34,
@@ -612,80 +474,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   stepCircleActive: {
     backgroundColor: '#EEF4FF',
     borderColor: '#B9D2FF',
   },
-
   stepCircleComplete: {
     backgroundColor: colors.accent,
     borderColor: colors.accent,
   },
-
   stepCircleText: {
     fontSize: 13,
     fontWeight: '800',
     color: colors.textSecondary,
   },
-
   stepCircleTextActive: {
     color: colors.accent,
   },
-
   stepCircleTextComplete: {
     color: '#FFFFFF',
   },
-
   stepLabel: {
     marginTop: 8,
     fontSize: 12,
     fontWeight: '700',
     color: colors.textSecondary,
   },
-
   stepLabelActive: {
     color: colors.textPrimary,
   },
-
   stepLabelComplete: {
     color: colors.accent,
   },
-
-  stepLine: {
-    position: 'absolute',
-    top: 16,
-    right: '-48%',
-    width: '96%',
-    height: 2,
-    backgroundColor: '#E5E7EB',
-    zIndex: -1,
-  },
-
-  stepLineComplete: {
-    backgroundColor: colors.accent,
-  },
-
   eyebrow: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.accent,
     marginBottom: spacing.sm,
   },
-
   cardTitle: {
     fontSize: 20,
     fontWeight: '800',
     color: colors.textPrimary,
   },
-
   cardMeta: {
     marginTop: 6,
     fontSize: 13,
     lineHeight: 20,
     color: colors.textSecondary,
   },
-
   calendarHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -693,32 +529,27 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
-
   calendarMonth: {
     fontSize: 16,
     fontWeight: '800',
     color: colors.textPrimary,
   },
-
   calendarHintPill: {
     backgroundColor: '#EEF4FF',
     borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-
   calendarHintText: {
     color: colors.accent,
     fontSize: 12,
     fontWeight: '700',
   },
-
   weekdayRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
-
   weekdayLabel: {
     width: `${100 / 7}%`,
     textAlign: 'center',
@@ -726,18 +557,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textSecondary,
   },
-
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-
   emptyCell: {
     width: '12.8%',
     aspectRatio: 1,
   },
-
   dayCell: {
     width: '12.8%',
     aspectRatio: 1,
@@ -748,119 +576,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   dayCellSelected: {
     backgroundColor: colors.accent,
     borderColor: colors.accent,
   },
-
   dayText: {
     fontSize: 13,
     fontWeight: '700',
     color: colors.textPrimary,
   },
-
   dayTextSelected: {
     color: '#FFFFFF',
   },
-
-  matchHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-
-  matchTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-
-  matchPill: {
-    backgroundColor: '#ECFDF5',
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-
-  matchPillText: {
-    color: colors.success,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  matchText: {
-    marginTop: spacing.sm,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.textSecondary,
-  },
-
-  availabilityList: {
+  memberList: {
     marginTop: spacing.md,
     gap: spacing.sm,
   },
-
-  availabilityRow: {
+  memberRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.sm,
-    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
     borderWidth: 1,
     borderColor: '#EEF2F7',
     borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    backgroundColor: colors.surface,
   },
-
-  availabilityName: {
-    fontSize: 14,
+  memberName: {
+    fontSize: 15,
     fontWeight: '700',
     color: colors.textPrimary,
   },
-
-  statusBadge: {
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-
-  statusBadgeAvailable: {
-    backgroundColor: '#ECFDF5',
-  },
-
-  statusBadgeMaybe: {
-    backgroundColor: '#FFF7ED',
-  },
-
-  statusBadgeUnavailable: {
-    backgroundColor: '#F3F4F6',
-  },
-
-  statusBadgeText: {
+  memberRole: {
     fontSize: 12,
-    fontWeight: '700',
-  },
-
-  statusBadgeTextAvailable: {
-    color: colors.success,
-  },
-
-  statusBadgeTextMaybe: {
-    color: colors.warning,
-  },
-
-  statusBadgeTextUnavailable: {
     color: colors.textSecondary,
   },
-
+  input: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderColor: colors.border,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: colors.textPrimary,
+    fontSize: 15,
+    marginBottom: spacing.sm,
+  },
   destinationList: {
-    marginTop: spacing.md,
     gap: spacing.sm,
   },
-
+  emptyCopy: {
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
   destinationCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -871,108 +640,52 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
   },
-
   destinationCardSelected: {
     borderColor: '#B9D2FF',
     backgroundColor: '#F8FBFF',
   },
-
-  destinationVisual: {
-    width: 68,
-    height: 68,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  destinationEmoji: {
-    fontSize: 30,
-  },
-
   destinationInfo: {
     flex: 1,
   },
-
   destinationTitle: {
     fontSize: 16,
     fontWeight: '800',
     color: colors.textPrimary,
   },
-
   destinationCountry: {
     marginTop: 4,
     fontSize: 13,
     color: colors.textSecondary,
   },
-
   destinationVotes: {
     marginTop: 6,
     fontSize: 12,
     fontWeight: '700',
     color: colors.accent,
   },
-
   voteIndicator: {
     borderRadius: radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 7,
     backgroundColor: '#F3F4F6',
   },
-
   voteIndicatorSelected: {
     backgroundColor: '#EEF4FF',
   },
-
   voteIndicatorText: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.textSecondary,
   },
-
   voteIndicatorTextSelected: {
     color: colors.accent,
   },
-
-  choiceHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-
-  choiceTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-
-  choicePill: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-
-  choicePillText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  choiceMeta: {
-    marginTop: spacing.sm,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.textSecondary,
-  },
-
   leadGrid: {
     marginTop: spacing.md,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-
   leadCard: {
     width: '48.5%',
     borderRadius: radius.lg,
@@ -983,12 +696,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     alignItems: 'center',
   },
-
   leadCardSelected: {
     backgroundColor: '#F8FBFF',
     borderColor: '#B9D2FF',
   },
-
   leadAvatar: {
     width: 58,
     height: 58,
@@ -997,21 +708,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   leadAvatarSelected: {
     backgroundColor: colors.accent,
   },
-
   leadAvatarText: {
     fontSize: 20,
     fontWeight: '800',
     color: colors.textPrimary,
   },
-
   leadAvatarTextSelected: {
     color: '#FFFFFF',
   },
-
   leadName: {
     marginTop: spacing.sm,
     fontSize: 15,
@@ -1019,82 +726,24 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     textAlign: 'center',
   },
-
   leadRole: {
     marginTop: 4,
     fontSize: 12,
     color: colors.textSecondary,
     textAlign: 'center',
   },
-
-  leadPickPill: {
-    marginTop: spacing.sm,
-    backgroundColor: '#F3F4F6',
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-
-  leadPickPillSelected: {
-    backgroundColor: '#EEF4FF',
-  },
-
-  leadPickText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-
-  leadPickTextSelected: {
-    color: colors.accent,
-  },
-
   summaryTitle: {
     fontSize: 20,
     fontWeight: '800',
     color: colors.textPrimary,
+    marginBottom: spacing.sm,
   },
-
-  summaryBlock: {
-    marginTop: spacing.md,
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    borderRadius: radius.md,
-    overflow: 'hidden',
-  },
-
-  summaryRow: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEF2F7',
-  },
-
-  summaryRowLast: {
-    borderBottomWidth: 0,
-  },
-
-  summaryRowLabel: {
-    fontSize: 12,
-    fontWeight: '700',
+  summaryCopy: {
     color: colors.textSecondary,
-    marginBottom: 4,
-  },
-
-  summaryRowValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-
-  summaryNote: {
-    marginTop: spacing.md,
-    fontSize: 13,
+    fontSize: 14,
     lineHeight: 20,
-    color: colors.textSecondary,
+    marginBottom: 6,
   },
-
   actionRow: {
     gap: spacing.sm,
   },

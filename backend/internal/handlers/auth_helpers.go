@@ -4,12 +4,16 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"gotogether-backend/internal/db"
+	"gotogether-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
 )
+
+var nonDigitPattern = regexp.MustCompile(`\D+`)
 
 func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 	if db.DB == nil {
@@ -31,19 +35,23 @@ func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 
 	email, _ := c.Get("email")
 	name, _ := c.Get("name")
+	phone, _ := c.Get("phone")
 	emailStr, _ := email.(string)
 	nameStr, _ := name.(string)
+	phoneStr, _ := phone.(string)
 
 	var userID int
 	err := db.DB.QueryRow(`
-		INSERT INTO users (firebase_uid, email, name)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (firebase_uid, email, name, phone)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (firebase_uid)
 		DO UPDATE SET
-			email = EXCLUDED.email,
-			name = EXCLUDED.name
+			email = COALESCE(NULLIF(EXCLUDED.email, ''), users.email),
+			name = COALESCE(NULLIF(EXCLUDED.name, ''), users.name),
+			phone = COALESCE(NULLIF(EXCLUDED.phone, ''), users.phone),
+			updated_at = CURRENT_TIMESTAMP
 		RETURNING id
-	`, strings.TrimSpace(uid), strings.TrimSpace(emailStr), strings.TrimSpace(nameStr)).Scan(&userID)
+	`, strings.TrimSpace(uid), strings.TrimSpace(emailStr), strings.TrimSpace(nameStr), normalizePhone(phoneStr)).Scan(&userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to sync authenticated user",
@@ -53,6 +61,38 @@ func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 	}
 
 	return userID, true
+}
+
+func loadUserByID(userID int) (models.User, error) {
+	var user models.User
+	err := db.DB.QueryRow(`
+		SELECT
+			id,
+			firebase_uid,
+			COALESCE(email, ''),
+			COALESCE(name, ''),
+			COALESCE(phone, ''),
+			COALESCE(username, ''),
+			COALESCE(home_city, ''),
+			COALESCE(bio, '')
+		FROM users
+		WHERE id = $1
+	`, userID).Scan(
+		&user.ID,
+		&user.FirebaseUID,
+		&user.Email,
+		&user.Name,
+		&user.Phone,
+		&user.Username,
+		&user.HomeCity,
+		&user.Bio,
+	)
+	if err != nil {
+		return user, err
+	}
+
+	user.ProfileComplete = strings.TrimSpace(user.Name) != "" && strings.TrimSpace(user.Username) != ""
+	return user, nil
 }
 
 func ensureTripAccess(c *gin.Context, tripID int, userID int) bool {
@@ -98,4 +138,17 @@ func commitOrRespond(c *gin.Context, tx *sql.Tx) bool {
 
 func sqlErrNoRows(err error) bool {
 	return errors.Is(err, sql.ErrNoRows)
+}
+
+func normalizePhone(value string) string {
+	digits := nonDigitPattern.ReplaceAllString(strings.TrimSpace(value), "")
+	if digits == "" {
+		return ""
+	}
+
+	if len(digits) == 10 {
+		return "1" + digits
+	}
+
+	return digits
 }

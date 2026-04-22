@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View, Pressable, Alert } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+} from 'firebase/auth';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -11,40 +14,46 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { firebaseAuth } from '../config/firebase';
-import { syncAuthenticatedUser } from '../config/api';
-import { useAuthStore } from '../store/authStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
+const sampleAccounts = [
+  { email: 'abcd1@gmail.com', password: '00000000' },
+  { email: 'abcd2@gmail.com', password: '00000000' },
+];
+
 export default function LoginScreen({ navigation }: Props) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [email, setEmail] = useState(sampleAccounts[0].email);
+  const [password, setPassword] = useState(sampleAccounts[0].password);
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const setSession = useAuthStore((state) => state.setSession);
-  const clearSession = useAuthStore((state) => state.clearSession);
+  const handleSubmit = async () => {
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Missing details', 'Enter your email and password.');
+      return;
+    }
 
-  const handleLogin = async () => {
+    if (mode === 'signup' && password !== confirmPassword) {
+      Alert.alert('Passwords do not match', 'Confirm your password to create the account.');
+      return;
+    }
+
     try {
       setLoading(true);
 
-      const userCredential = await signInWithEmailAndPassword(
-        firebaseAuth,
-        email.trim(),
-        password
-      );
-
-      const user = userCredential.user;
-      const token = await user.getIdToken(true);
-
-      setSession(token);
-      await syncAuthenticatedUser();
-
-      navigation.replace('MainTabs');
+      if (mode === 'signup') {
+        await createUserWithEmailAndPassword(firebaseAuth, email.trim(), password);
+      } else {
+        await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
+      }
     } catch (error: any) {
-      clearSession();
       console.log(error);
-      Alert.alert('Login Failed', error.message || 'Something went wrong');
+      Alert.alert(
+        mode === 'signup' ? 'Sign up failed' : 'Sign in failed',
+        error.message || 'Something went wrong'
+      );
     } finally {
       setLoading(false);
     }
@@ -53,11 +62,24 @@ export default function LoginScreen({ navigation }: Props) {
   return (
     <Screen>
       <SectionTitle
-        title="Welcome back"
-        subtitle="Log in to continue planning with your crew."
+        title={mode === 'signin' ? 'Welcome back' : 'Create account'}
+        subtitle="Use email and password so the app works cleanly in Expo Go right now."
       />
 
       <AppCard>
+        <View style={styles.modeRow}>
+          <ModeChip
+            active={mode === 'signin'}
+            label="Sign in"
+            onPress={() => setMode('signin')}
+          />
+          <ModeChip
+            active={mode === 'signup'}
+            label="Sign up"
+            onPress={() => setMode('signup')}
+          />
+        </View>
+
         <View style={styles.form}>
           <TextInput
             placeholder="Email"
@@ -66,6 +88,7 @@ export default function LoginScreen({ navigation }: Props) {
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
+            keyboardType="email-address"
           />
 
           <TextInput
@@ -77,25 +100,106 @@ export default function LoginScreen({ navigation }: Props) {
             onChangeText={setPassword}
           />
 
+          {mode === 'signup' ? (
+            <TextInput
+              placeholder="Confirm password"
+              placeholderTextColor={colors.textSecondary}
+              style={styles.input}
+              secureTextEntry
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+            />
+          ) : null}
+
           <PrimaryButton
-            title={loading ? 'Logging in...' : 'Continue'}
-            onPress={handleLogin}
+            title={
+              loading
+                ? mode === 'signup'
+                  ? 'Creating account...'
+                  : 'Signing in...'
+                : mode === 'signup'
+                  ? 'Create account'
+                  : 'Continue'
+            }
+            onPress={handleSubmit}
           />
         </View>
       </AppCard>
 
-      <Pressable style={styles.secondary}>
-        <Text style={styles.secondaryText}>Continue with Google</Text>
-      </Pressable>
+      <AppCard>
+        <Text style={styles.helperTitle}>Quick test accounts</Text>
+        <Text style={styles.helperText}>
+          Tap one to autofill and sign in with the seeded app users.
+        </Text>
 
-      <Pressable style={styles.secondary}>
-        <Text style={styles.secondaryText}>Continue with Apple</Text>
+        <View style={styles.sampleWrap}>
+          {sampleAccounts.map((account) => (
+            <Pressable
+              key={account.email}
+              style={styles.sampleChip}
+              onPress={() => {
+                setMode('signin');
+                setEmail(account.email);
+                setPassword(account.password);
+                setConfirmPassword('');
+              }}
+            >
+              <Text style={styles.sampleChipText}>{account.email}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </AppCard>
+
+      <Pressable style={styles.backLink} onPress={() => navigation.navigate('Onboarding')}>
+        <Text style={styles.backLinkText}>Back to onboarding</Text>
       </Pressable>
     </Screen>
   );
 }
 
+function ModeChip({
+  active,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.modeChip, active && styles.modeChipActive]}>
+      <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  modeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  modeChip: {
+    flex: 1,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modeChipActive: {
+    backgroundColor: '#EEF4FF',
+    borderColor: '#C7DAFF',
+  },
+  modeChipText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modeChipTextActive: {
+    color: colors.accent,
+  },
   form: {
     gap: spacing.md,
   },
@@ -109,17 +213,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  secondary: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.pill,
-    paddingVertical: 16,
-    alignItems: 'center',
+  helperTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  helperText: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  sampleWrap: {
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  sampleChip: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  secondaryText: {
+  sampleChipText: {
     color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  backLink: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  backLinkText: {
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

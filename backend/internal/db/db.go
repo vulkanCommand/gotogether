@@ -38,6 +38,12 @@ func InitDB() error {
 		return fmt.Errorf("database ping failed: %w", pingErr)
 	}
 
+	if err := ensureSchema(DB); err != nil {
+		_ = DB.Close()
+		DB = nil
+		return err
+	}
+
 	log.Println("Database connected")
 	return nil
 }
