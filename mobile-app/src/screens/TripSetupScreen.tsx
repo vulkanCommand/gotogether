@@ -15,17 +15,70 @@ import { radius, spacing } from '../theme/spacing';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripSetup'>;
 
-const days = Array.from({ length: 30 }, (_, index) => String(index + 1));
+type DateOption = {
+  value: string;
+  label: string;
+  shortLabel: string;
+};
+
+const parseTripDate = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const toISODate = (date: Date) => date.toISOString().slice(0, 10);
+
+const formatDateLabel = (date: Date) =>
+  date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+const buildTripDateOptions = (start?: string, end?: string): DateOption[] => {
+  const startDate = parseTripDate(start);
+  const endDate = parseTripDate(end);
+  if (!startDate || !endDate || endDate < startDate) {
+    return Array.from({ length: 7 }, (_, index) => {
+      const fallback = new Date();
+      fallback.setDate(fallback.getDate() + index);
+      return {
+        value: toISODate(fallback),
+        label: formatDateLabel(fallback),
+        shortLabel: String(fallback.getDate()),
+      };
+    });
+  }
+
+  const options: DateOption[] = [];
+  const cursor = new Date(startDate);
+  while (cursor <= endDate && options.length < 60) {
+    options.push({
+      value: toISODate(cursor),
+      label: formatDateLabel(cursor),
+      shortLabel: String(cursor.getDate()),
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return options;
+};
 
 export default function TripSetupScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
   const crew = useTripStore((state) => state.crew);
+  const setTripSelectedDates = useTripStore((state) => state.setSelectedDates);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [leadVoteUserId, setLeadVoteUserId] = useState<number>(Number(crew[0]?.id || 0));
   const [saving, setSaving] = useState(false);
 
   const tripName = currentTrip?.name ?? 'Trip setup';
-  const sortedDates = useMemo(() => selectedDates.slice().sort((a, b) => Number(a) - Number(b)), [selectedDates]);
+  const tripDateOptions = useMemo(
+    () => buildTripDateOptions(currentTrip?.start_date, currentTrip?.end_date),
+    [currentTrip?.end_date, currentTrip?.start_date]
+  );
+  const sortedDates = useMemo(
+    () => selectedDates.slice().sort((a, b) => a.localeCompare(b)),
+    [selectedDates]
+  );
 
   const toggleDate = (day: string) => {
     setSelectedDates((current) =>
@@ -48,6 +101,7 @@ export default function TripSetupScreen({ navigation }: Props) {
         availableDates: sortedDates,
         leadVoteUserId,
       });
+      setTripSelectedDates(sortedDates);
       navigation.replace('TripOverview');
     } catch (error: any) {
       Alert.alert('Save failed', error?.message || 'Could not save setup');
@@ -66,17 +120,18 @@ export default function TripSetupScreen({ navigation }: Props) {
 
       <AppCard>
         <Text style={styles.cardTitle}>Your available dates</Text>
-        <Text style={styles.cardMeta}>Tap every day you can make the trip.</Text>
+        <Text style={styles.cardMeta}>Tap the trip dates you can make.</Text>
         <View style={styles.calendarGrid}>
-          {days.map((day) => {
-            const selected = selectedDates.includes(day);
+          {tripDateOptions.map((day) => {
+            const selected = selectedDates.includes(day.value);
             return (
               <Pressable
-                key={day}
+                key={day.value}
                 style={[styles.dayChip, selected && styles.dayChipSelected]}
-                onPress={() => toggleDate(day)}
+                onPress={() => toggleDate(day.value)}
               >
-                <Text style={[styles.dayText, selected && styles.dayTextSelected]}>{day}</Text>
+                <Text style={[styles.dayText, selected && styles.dayTextSelected]}>{day.shortLabel}</Text>
+                <Text style={[styles.dayMeta, selected && styles.dayTextSelected]}>{day.label.split(',')[0]}</Text>
               </Pressable>
             );
           })}
@@ -126,9 +181,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   dayChip: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 58,
+    height: 58,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -141,6 +196,12 @@ const styles = StyleSheet.create({
   },
   dayText: {
     color: colors.textPrimary,
+    fontWeight: '800',
+  },
+  dayMeta: {
+    marginTop: 2,
+    color: colors.textSecondary,
+    fontSize: 10,
     fontWeight: '800',
   },
   dayTextSelected: {

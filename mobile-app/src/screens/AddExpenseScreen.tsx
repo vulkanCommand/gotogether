@@ -141,7 +141,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
               <Text style={styles.eyebrow}>Trip context</Text>
               <Text style={styles.tripTitle}>{currentTrip?.name ?? 'Current trip'}</Text>
               <Text style={styles.tripMeta}>
-                {crewList.length} crew members • {expenses.length} logged split{expenses.length === 1 ? '' : 's'}
+                {crewList.length} crew members - {expenses.length} logged split{expenses.length === 1 ? '' : 's'}
               </Text>
             </View>
             <View style={styles.totalPill}>

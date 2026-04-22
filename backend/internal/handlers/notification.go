@@ -77,6 +77,20 @@ func AcceptNotificationAction(c *gin.Context) {
 	`, notificationID, userID).Scan(&tripID, &actionType, &targetID)
 	if err != nil {
 		if sqlErrNoRows(err) {
+			var exists bool
+			_ = db.DB.QueryRow(`
+				SELECT EXISTS (
+					SELECT 1
+					FROM notifications
+					WHERE id = $1
+						AND user_id = $2
+						AND requires_action = TRUE
+				)
+			`, notificationID, userID).Scan(&exists)
+			if exists {
+				c.JSON(http.StatusOK, gin.H{"accepted": false, "stale": true})
+				return
+			}
 			c.JSON(http.StatusNotFound, gin.H{"error": "pending action not found"})
 			return
 		}
@@ -86,8 +100,14 @@ func AcceptNotificationAction(c *gin.Context) {
 
 	switch actionType {
 	case "event_complete":
-		if err := acceptEventCompletion(tripID, targetID, userID); err != nil {
+		accepted, err := acceptEventCompletion(tripID, targetID, userID)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to accept event completion", "details": err.Error()})
+			return
+		}
+		if !accepted {
+			neutralizePendingEventCompletionNotifications(tripID, targetID)
+			c.JSON(http.StatusOK, gin.H{"accepted": false, "stale": true})
 			return
 		}
 	case "trip_complete":

@@ -33,6 +33,23 @@ const fallbackDateLabel = (index: number) => {
 
 const parseNumericId = (value: string) => value.replace(/^(day|event)-/, '');
 
+const parseDate = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const formatDateLabel = (date: Date) =>
+  date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
 const parseTime = (value: string) => {
   const match = value.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/i);
   return {
@@ -80,9 +97,8 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const sortedSelectedDates = useMemo(() => {
     return selectedDates
-      .map((value) => Number(value))
-      .filter((value) => !Number.isNaN(value))
-      .sort((a, b) => a - b);
+      .slice()
+      .sort((a, b) => a.localeCompare(b));
   }, [selectedDates]);
 
   const totals = useMemo(() => {
@@ -140,7 +156,7 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const selectedAttendeeNames = () => {
     const selected = crew.filter((member) => selectedAttendeeIds.includes(member.id)).map((member) => member.name);
-    return selected.length > 0 ? selected : crew.map((member) => member.name);
+    return selected;
   };
 
   const openAddPlan = (dayId: string) => {
@@ -174,8 +190,13 @@ export default function ItineraryScreen({ navigation }: Props) {
     }
 
     const nextIndex = itineraryDays.length;
-    const matchedDayNumber = sortedSelectedDates[nextIndex];
-    const dateLabel = matchedDayNumber ? `April ${matchedDayNumber}` : fallbackDateLabel(nextIndex);
+    const selectedDate = parseDate(sortedSelectedDates[nextIndex]);
+    const tripStart = parseDate(currentTrip.start_date);
+    const dateLabel = selectedDate
+      ? formatDateLabel(selectedDate)
+      : tripStart
+        ? formatDateLabel(addDays(tripStart, nextIndex))
+        : fallbackDateLabel(nextIndex);
 
     try {
       await apiRequest(`/api/trips/${currentTrip.id}/itinerary/days`, {
@@ -235,6 +256,10 @@ export default function ItineraryScreen({ navigation }: Props) {
       Alert.alert('Title needed', 'Add a title for this event.');
       return;
     }
+    if (selectedAttendeeIds.length === 0) {
+      Alert.alert('Attendees needed', 'Select at least one attendee for this event.');
+      return;
+    }
 
     const payload = {
       title: title.trim(),
@@ -275,12 +300,21 @@ export default function ItineraryScreen({ navigation }: Props) {
       return;
     }
 
-    try {
-      await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(eventId)}`, { method: 'DELETE' });
-      await fetchItinerary();
-    } catch (error: any) {
-      Alert.alert('Delete failed', error?.message || 'Could not delete event');
-    }
+    Alert.alert('Delete event', 'This removes the event and any pending completion task for it.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(eventId)}`, { method: 'DELETE' });
+            await fetchItinerary();
+          } catch (error: any) {
+            Alert.alert('Delete failed', error?.message || 'Could not delete event');
+          }
+        },
+      },
+    ]);
   };
 
   const handleCompleteEvent = async (eventId: string) => {
@@ -435,7 +469,9 @@ export default function ItineraryScreen({ navigation }: Props) {
 
         <View style={styles.bottomActions}>
           <PrimaryButton title="Add Expense" onPress={() => navigation.navigate('AddExpense')} />
-          <PrimaryButton title="Finish Trip Flow" variant="secondary" onPress={() => navigation.navigate('TripCompletion')} />
+          {canManageItinerary ? (
+            <PrimaryButton title="Finish Trip Flow" variant="secondary" onPress={() => navigation.navigate('TripCompletion')} />
+          ) : null}
         </View>
       </ScrollView>
 
@@ -600,7 +636,7 @@ function EventRow({
         <Text style={[styles.eventTitle, isCompleted && styles.eventTitleDone]}>{event.title}</Text>
         <Text style={styles.eventLocation}>{event.location}</Text>
         <Text style={styles.eventNotes}>{event.notes}</Text>
-        <Text style={styles.eventAttendees}>{event.attendees.join(', ') || 'Crew pending'}</Text>
+        <Text style={styles.eventAttendees}>{event.attendees.join(', ') || 'No attendees selected'}</Text>
 
         {canManage ? (
           <View style={styles.eventActions}>

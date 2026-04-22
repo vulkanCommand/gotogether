@@ -188,7 +188,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
               <>
                 <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
                 <Text style={styles.nextMeta}>
-                  {nextPlan.day} • {nextPlan.event.time} • {nextPlan.event.location}
+                  {nextPlan.day} - {nextPlan.event.time} - {nextPlan.event.location}
                 </Text>
               </>
             ) : (

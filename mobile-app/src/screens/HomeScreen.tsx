@@ -45,7 +45,7 @@ const dateValue = (value?: string) => {
 const pickHomeTrip = (trips: ApiTrip[]) => {
   const today = todayValue();
   const active = trips
-    .filter((trip) => !trip.completed_at && dateValue(trip.start_date) <= today)
+    .filter((trip) => !trip.completed_at && dateValue(trip.start_date) <= today && dateValue(trip.end_date) >= today)
     .sort((a, b) => dateValue(b.start_date) - dateValue(a.start_date));
   if (active[0]) {
     return active[0];
@@ -56,6 +56,13 @@ const pickHomeTrip = (trips: ApiTrip[]) => {
     .sort((a, b) => dateValue(a.start_date) - dateValue(b.start_date));
   if (upcoming[0]) {
     return upcoming[0];
+  }
+
+  const recentlyEnded = trips
+    .filter((trip) => !trip.completed_at)
+    .sort((a, b) => dateValue(b.end_date) - dateValue(a.end_date));
+  if (recentlyEnded[0]) {
+    return recentlyEnded[0];
   }
 
   return trips
@@ -175,6 +182,17 @@ export default function HomeScreen({ navigation }: Props) {
     navigation.navigate(overview.setupRequired ? 'TripSetup' : 'TripOverview');
   };
 
+  const openProtectedScreen = (screen: 'Itinerary' | 'AddExpense') => {
+    if (!overview) {
+      return;
+    }
+    setCurrentTrip(overview.trip);
+    setCrew(overview.crew);
+    setItineraryDays(overview.days);
+    setTripLead(lead);
+    navigation.navigate(overview.setupRequired ? 'TripSetup' : screen);
+  };
+
   if (loading) {
     return (
       <Screen>
@@ -248,8 +266,8 @@ export default function HomeScreen({ navigation }: Props) {
 
           <View style={styles.actions}>
             <PrimaryButton title={overview.setupRequired ? 'Finish Setup' : 'Open Trip'} onPress={openTrip} />
-            <PrimaryButton title="View Itinerary" variant="secondary" onPress={() => navigation.navigate('Itinerary')} />
-            <PrimaryButton title="Split Expenses" variant="secondary" onPress={() => navigation.navigate('AddExpense')} />
+            <PrimaryButton title="View Itinerary" variant="secondary" onPress={() => openProtectedScreen('Itinerary')} />
+            <PrimaryButton title="Split Expenses" variant="secondary" onPress={() => openProtectedScreen('AddExpense')} />
           </View>
 
           <AppCard>

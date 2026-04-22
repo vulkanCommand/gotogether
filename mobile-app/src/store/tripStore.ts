@@ -317,7 +317,7 @@ export const useTripStore = create<TripStore>((set, get) => ({
           day: day.title,
           time: activeEvent.time,
           title: activeEvent.title,
-          meta: `${activeEvent.location} • ${activeEvent.attendees.join(', ') || 'Crew pending'}`,
+          meta: `${activeEvent.location} - ${activeEvent.attendees.join(', ') || 'Crew pending'}`,
         };
       }
       const upcomingEvent = day.events.find((item) => item.status === 'upcoming');
@@ -326,7 +326,7 @@ export const useTripStore = create<TripStore>((set, get) => ({
           day: day.title,
           time: upcomingEvent.time,
           title: upcomingEvent.title,
-          meta: `${upcomingEvent.location} • ${upcomingEvent.attendees.join(', ') || 'Crew pending'}`,
+          meta: `${upcomingEvent.location} - ${upcomingEvent.attendees.join(', ') || 'Crew pending'}`,
         };
       }
     }

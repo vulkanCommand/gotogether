@@ -61,6 +61,11 @@ func SaveTripItinerary(c *gin.Context) {
 	}
 	defer rollbackQuietly(tx)
 
+	if err := neutralizePendingEventCompletionNotificationsForTripTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear event notifications", "details": err.Error()})
+		return
+	}
+
 	if _, err := tx.Exec(`DELETE FROM itinerary_days WHERE trip_id = $1`, tripID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear existing itinerary", "details": err.Error()})
 		return
@@ -236,8 +241,29 @@ func DeleteItineraryDay(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.DB.Exec(`DELETE FROM itinerary_days WHERE id = $1`, dayID); err != nil {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	if err := neutralizePendingEventCompletionNotificationsForDayTx(tx, tripID, dayID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear event notifications", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`DELETE FROM itinerary_days WHERE id = $1`, dayID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete day", "details": err.Error()})
+		return
+	}
+
+	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
 		return
 	}
 
@@ -347,8 +373,29 @@ func DeleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	if _, err := db.DB.Exec(`DELETE FROM itinerary_events WHERE id = $1`, eventID); err != nil {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	if err := neutralizePendingEventCompletionNotificationsForEventTx(tx, tripID, eventID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear event notifications", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`DELETE FROM itinerary_events WHERE id = $1`, eventID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete event", "details": err.Error()})
+		return
+	}
+
+	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
 		return
 	}
 
@@ -375,8 +422,11 @@ func CompleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	if err := insertEventCompletionConfirmation(tripID, eventID, userID); err != nil {
+	if accepted, err := insertEventCompletionConfirmation(tripID, eventID, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start event completion", "details": err.Error()})
+		return
+	} else if !accepted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
 		return
 	}
 
@@ -390,20 +440,85 @@ func CompleteItineraryEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"days": days})
 }
 
-func insertEventCompletionConfirmation(tripID int, eventID int, userID int) error {
-	_, err := db.DB.Exec(`
+func insertEventCompletionConfirmation(tripID int, eventID int, userID int) (bool, error) {
+	result, err := db.DB.Exec(`
 		INSERT INTO event_completion_confirmations (trip_id, event_id, user_id)
-		VALUES ($1, $2, $3)
+		SELECT $1, e.id, $3
+		FROM itinerary_events e
+		INNER JOIN itinerary_days d ON d.id = e.itinerary_day_id
+		WHERE e.id = $2 AND d.trip_id = $1
 		ON CONFLICT (event_id, user_id) DO UPDATE SET confirmed_at = CURRENT_TIMESTAMP
 	`, tripID, eventID, userID)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return finalizeEventIfConfirmed(tripID, eventID, userID)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rowsAffected == 0 {
+		return false, nil
+	}
+	if err := finalizeEventIfConfirmed(tripID, eventID, userID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-func acceptEventCompletion(tripID int, eventID int, userID int) error {
+func acceptEventCompletion(tripID int, eventID int, userID int) (bool, error) {
 	return insertEventCompletionConfirmation(tripID, eventID, userID)
+}
+
+func neutralizePendingEventCompletionNotifications(tripID int, eventID int) {
+	_, _ = db.DB.Exec(`
+		UPDATE notifications
+		SET action_completed_at = CURRENT_TIMESTAMP,
+			cleared_at = CURRENT_TIMESTAMP
+		WHERE trip_id = $1
+			AND target_id = $2
+			AND action_type = 'event_complete'
+			AND action_completed_at IS NULL
+	`, tripID, eventID)
+}
+
+func neutralizePendingEventCompletionNotificationsForEventTx(tx *sql.Tx, tripID int, eventID int) error {
+	_, err := tx.Exec(`
+		UPDATE notifications
+		SET action_completed_at = CURRENT_TIMESTAMP,
+			cleared_at = CURRENT_TIMESTAMP
+		WHERE trip_id = $1
+			AND target_id = $2
+			AND action_type = 'event_complete'
+			AND action_completed_at IS NULL
+	`, tripID, eventID)
+	return err
+}
+
+func neutralizePendingEventCompletionNotificationsForDayTx(tx *sql.Tx, tripID int, dayID int) error {
+	_, err := tx.Exec(`
+		UPDATE notifications
+		SET action_completed_at = CURRENT_TIMESTAMP,
+			cleared_at = CURRENT_TIMESTAMP
+		WHERE trip_id = $1
+			AND target_id IN (
+				SELECT id FROM itinerary_events WHERE itinerary_day_id = $2
+			)
+			AND action_type = 'event_complete'
+			AND action_completed_at IS NULL
+	`, tripID, dayID)
+	return err
+}
+
+func neutralizePendingEventCompletionNotificationsForTripTx(tx *sql.Tx, tripID int) error {
+	_, err := tx.Exec(`
+		UPDATE notifications
+		SET action_completed_at = CURRENT_TIMESTAMP,
+			cleared_at = CURRENT_TIMESTAMP
+		WHERE trip_id = $1
+			AND action_type = 'event_complete'
+			AND action_completed_at IS NULL
+	`, tripID)
+	return err
 }
 
 func finalizeEventIfConfirmed(tripID int, eventID int, actorUserID int) error {

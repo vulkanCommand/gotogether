@@ -43,6 +43,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
   const [uploading, setUploading] = useState(false);
 
   const destination = selectedDestination();
+  const canCompleteTrip = currentTrip?.viewer_role === 'lead';
 
   const loadPhotos = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -119,9 +120,15 @@ export default function TripCompletionScreen({ navigation }: Props) {
     bestMatchRange || 'Dates pending',
     currentTrip?.destination ||
       (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
-  ].join(' • ');
+  ].join(' - ');
 
   const handleFinish = async () => {
+    if (!canCompleteTrip) {
+      Alert.alert('Trip lead only', 'Only the trip lead can start trip completion.');
+      navigation.navigate('MainTabs', { screen: 'Trips' });
+      return;
+    }
+
     try {
       if (currentTrip?.id) {
         const response = await completeTrip(currentTrip.id);
@@ -151,7 +158,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
         />
 
         <AppCard style={styles.heroCard}>
-          <Text style={styles.emoji}>🎉</Text>
+          <Text style={styles.emoji}>Complete</Text>
           <Text style={styles.heroTitle}>Trip Completed!</Text>
           <Text style={styles.tripName}>{currentTrip?.name ?? destination?.name ?? 'Your Trip'}</Text>
           <Text style={styles.tripMeta}>{tripMeta}</Text>
@@ -208,7 +215,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
         </AppCard>
 
         <View style={styles.actions}>
-          <PrimaryButton title="Finish Trip" onPress={handleFinish} />
+          {canCompleteTrip ? <PrimaryButton title="Finish Trip" onPress={handleFinish} /> : null}
           <PrimaryButton title="Back to Trips" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Trips' })} />
         </View>
       </ScrollView>
@@ -250,7 +257,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emoji: {
-    fontSize: 42,
+    fontSize: 13,
+    color: colors.accent,
+    fontWeight: '800',
     marginBottom: spacing.sm,
   },
   heroTitle: {
