@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -67,14 +68,14 @@ func CreateTrip(c *gin.Context) {
 	if !allowedLead {
 		leadUserID = userID
 	}
-	trip.LeadUserID = leadUserID
+	trip.LeadUserID = userID
 	trip.ViewerRole = "lead"
 
 	_, err = tx.Exec(`
 		INSERT INTO trip_members (trip_id, user_id, role)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (trip_id, user_id) DO NOTHING
-	`, trip.ID, userID, memberRoleForUser(userID, leadUserID))
+	`, trip.ID, userID, "lead")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trip member", "details": err.Error()})
 		return
@@ -90,7 +91,7 @@ func CreateTrip(c *gin.Context) {
 			INSERT INTO trip_members (trip_id, user_id, role)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (trip_id, user_id) DO NOTHING
-		`, trip.ID, memberID, memberRoleForUser(memberID, leadUserID)); err != nil {
+		`, trip.ID, memberID, "member"); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add trip member", "details": err.Error()})
 			return
 		}
@@ -102,6 +103,18 @@ func CreateTrip(c *gin.Context) {
 		ON CONFLICT (trip_id, name) DO NOTHING
 	`, trip.ID, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create expense group", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO trip_member_setup (trip_id, user_id, available_dates, lead_vote_user_id, completed_at, updated_at)
+		VALUES ($1, $2, '', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT (trip_id, user_id) DO UPDATE SET
+			lead_vote_user_id = EXCLUDED.lead_vote_user_id,
+			completed_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP
+	`, trip.ID, userID, leadUserID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save lead vote", "details": err.Error()})
 		return
 	}
 
@@ -281,22 +294,57 @@ func CompleteTrip(c *gin.Context) {
 		return
 	}
 
+	if err := insertTripCompletionConfirmation(tripID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start trip completion", "details": err.Error()})
+		return
+	}
+
+	createTripActionNotifications(tripID, userID, "Confirm trip completion", "Trip lead marked the trip complete. Accept to confirm.", "task", true, "trip_complete", tripID)
+
+	var completedAt string
+	_ = db.DB.QueryRow(`SELECT COALESCE(completed_at::text, '') FROM trips WHERE id = $1`, tripID).Scan(&completedAt)
+	c.JSON(http.StatusOK, gin.H{"completed": strings.TrimSpace(completedAt) != "", "pending_confirmations": strings.TrimSpace(completedAt) == ""})
+}
+
+func insertTripCompletionConfirmation(tripID int, userID int) error {
+	_, err := db.DB.Exec(`
+		INSERT INTO trip_completion_confirmations (trip_id, user_id)
+		VALUES ($1, $2)
+		ON CONFLICT (trip_id, user_id) DO UPDATE SET confirmed_at = CURRENT_TIMESTAMP
+	`, tripID, userID)
+	if err != nil {
+		return err
+	}
+	return finalizeTripIfConfirmed(tripID)
+}
+
+func acceptTripCompletion(tripID int, userID int) error {
+	return insertTripCompletionConfirmation(tripID, userID)
+}
+
+func finalizeTripIfConfirmed(tripID int) error {
+	var memberCount, confirmationCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM trip_members WHERE trip_id = $1`, tripID).Scan(&memberCount); err != nil {
+		return err
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM trip_completion_confirmations WHERE trip_id = $1`, tripID).Scan(&confirmationCount); err != nil {
+		return err
+	}
+	if memberCount == 0 || confirmationCount < memberCount {
+		return nil
+	}
+
+	var leadUserID int
+	if err := db.DB.QueryRow(`SELECT user_id FROM trip_members WHERE trip_id = $1 AND role = 'lead' LIMIT 1`, tripID).Scan(&leadUserID); err != nil {
+		return err
+	}
 	if _, err := db.DB.Exec(`
 		UPDATE trips
 		SET completed_at = CURRENT_TIMESTAMP, completed_by_user_id = $2
 		WHERE id = $1
-	`, tripID, userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to complete trip", "details": err.Error()})
-		return
+	`, tripID, leadUserID); err != nil {
+		return err
 	}
-
-	createTripNotifications(tripID, userID, "Trip completed", "The trip lead marked the trip complete.", "trip", true)
-	c.JSON(http.StatusOK, gin.H{"completed": true})
-}
-
-func memberRoleForUser(userID int, leadUserID int) string {
-	if userID == leadUserID {
-		return "lead"
-	}
-	return "member"
+	createTripNotifications(tripID, leadUserID, "Trip completed", fmt.Sprintf("All members confirmed trip %d is complete.", tripID), "alert", false)
+	return nil
 }

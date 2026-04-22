@@ -89,6 +89,9 @@ export type ApiNotification = {
   body: string;
   kind: string;
   requiresAction: boolean;
+  actionType: string;
+  targetId: number;
+  actionCompletedAt: string;
   createdAt: string;
 };
 
@@ -291,6 +294,12 @@ export async function clearAllNotifications() {
   });
 }
 
+export async function acceptNotificationAction(notificationId: number) {
+  return apiRequest<{ accepted: boolean }>(`/api/notifications/${notificationId}/accept`, {
+    method: 'POST',
+  });
+}
+
 export async function fetchExpenseGroups(tripId: number) {
   return apiRequest<{ groups: ApiExpenseGroup[] }>(`/api/trips/${tripId}/expense-groups`);
 }
@@ -354,7 +363,7 @@ export async function deleteTripCover(tripId: number) {
 }
 
 export async function completeTrip(tripId: number) {
-  return apiRequest<{ completed: boolean }>(`/api/trips/${tripId}/complete`, {
+  return apiRequest<{ completed: boolean; pending_confirmations?: boolean }>(`/api/trips/${tripId}/complete`, {
     method: 'POST',
   });
 }

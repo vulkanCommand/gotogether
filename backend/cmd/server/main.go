@@ -36,6 +36,7 @@ func main() {
 	api.GET("/notifications", handlers.GetNotifications)
 	api.DELETE("/notifications", handlers.ClearAllNotifications)
 	api.DELETE("/notifications/:notificationId", handlers.ClearNotification)
+	api.POST("/notifications/:notificationId/accept", handlers.AcceptNotificationAction)
 	api.POST("/trips", handlers.CreateTrip)
 	api.GET("/trips", handlers.GetTrips)
 	api.GET("/trips/:id", handlers.GetTripByID)

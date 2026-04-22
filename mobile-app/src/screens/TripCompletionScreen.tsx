@@ -124,10 +124,18 @@ export default function TripCompletionScreen({ navigation }: Props) {
   const handleFinish = async () => {
     try {
       if (currentTrip?.id) {
-        await completeTrip(currentTrip.id);
+        const response = await completeTrip(currentTrip.id);
+        if (response.pending_confirmations) {
+          Alert.alert(
+            'Confirmation sent',
+            'Crew members must accept the completion request in Notifications before this trip moves to Completed.'
+          );
+          navigation.navigate('MainTabs', { screen: 'Trips' });
+          return;
+        }
       }
       resetTrip();
-      navigation.navigate('MainTabs');
+      navigation.navigate('MainTabs', { screen: 'Trips' });
     } catch (error: any) {
       Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
     }
@@ -191,7 +199,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
                   />
                   <Text style={styles.photoCaption}>{photo.caption || 'Trip memory'}</Text>
                   <Text style={styles.photoMeta}>
-                    {photo.uploaded_by || 'Crew'} • {photo.uploaded_at}
+                    {photo.uploaded_by || 'Crew'} - {photo.uploaded_at}
                   </Text>
                 </View>
               ))
@@ -201,7 +209,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
 
         <View style={styles.actions}>
           <PrimaryButton title="Finish Trip" onPress={handleFinish} />
-          <PrimaryButton title="Back to Trips" variant="secondary" onPress={handleFinish} />
+          <PrimaryButton title="Back to Trips" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Trips' })} />
         </View>
       </ScrollView>
     </Screen>

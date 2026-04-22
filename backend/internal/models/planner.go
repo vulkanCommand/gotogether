@@ -69,13 +69,16 @@ type CreateExpenseGroupRequest struct {
 }
 
 type NotificationResponse struct {
-	ID             int    `json:"id"`
-	TripID         int    `json:"tripId"`
-	Title          string `json:"title"`
-	Body           string `json:"body"`
-	Kind           string `json:"kind"`
-	RequiresAction bool   `json:"requiresAction"`
-	CreatedAt      string `json:"createdAt"`
+	ID                int    `json:"id"`
+	TripID            int    `json:"tripId"`
+	Title             string `json:"title"`
+	Body              string `json:"body"`
+	Kind              string `json:"kind"`
+	RequiresAction    bool   `json:"requiresAction"`
+	ActionType        string `json:"actionType"`
+	TargetID          int    `json:"targetId"`
+	ActionCompletedAt string `json:"actionCompletedAt"`
+	CreatedAt         string `json:"createdAt"`
 }
 
 type TripMemberSetupRequest struct {

@@ -156,8 +156,31 @@ var schemaStatements = []string{
 		body TEXT NOT NULL,
 		kind TEXT NOT NULL DEFAULT 'activity',
 		requires_action BOOLEAN NOT NULL DEFAULT FALSE,
+		action_type TEXT,
+		target_id INTEGER,
+		actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		action_completed_at TIMESTAMP,
 		cleared_at TIMESTAMP,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action_type TEXT`,
+	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_id INTEGER`,
+	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+	`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action_completed_at TIMESTAMP`,
+	`CREATE TABLE IF NOT EXISTS event_completion_confirmations (
+		id SERIAL PRIMARY KEY,
+		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+		event_id INTEGER NOT NULL REFERENCES itinerary_events(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (event_id, user_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS trip_completion_confirmations (
+		id SERIAL PRIMARY KEY,
+		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (trip_id, user_id)
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))`,
 	`CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone)`,
@@ -167,6 +190,8 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_expenses_group_id ON expenses (expense_group_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_expense_splits_expense_id ON expense_splits (expense_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, cleared_at, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_event_completion_confirmations_event ON event_completion_confirmations (event_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_trip_completion_confirmations_trip ON trip_completion_confirmations (trip_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_member_setup_trip_user ON trip_member_setup (trip_id, user_id)`,
 }
 

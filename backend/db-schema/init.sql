@@ -148,6 +148,27 @@ CREATE TABLE IF NOT EXISTS notifications (
     body TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'activity',
     requires_action BOOLEAN NOT NULL DEFAULT FALSE,
+    action_type TEXT,
+    target_id INTEGER,
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action_completed_at TIMESTAMP,
     cleared_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS event_completion_confirmations (
+    id SERIAL PRIMARY KEY,
+    trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    event_id INTEGER NOT NULL REFERENCES itinerary_events(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (event_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS trip_completion_confirmations (
+    id SERIAL PRIMARY KEY,
+    trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (trip_id, user_id)
 );

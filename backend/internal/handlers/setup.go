@@ -35,7 +35,7 @@ func GetTripSetupStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"viewerRole":     role,
-		"required":       role != "lead" && strings.TrimSpace(completedAt) == "",
+		"required":       strings.TrimSpace(completedAt) == "",
 		"availableDates": splitSetupDates(availableDates),
 		"leadVoteUserId": leadVoteUserID,
 		"completedAt":    completedAt,
@@ -81,7 +81,57 @@ func SaveTripSetupStatus(c *gin.Context) {
 	}
 
 	createTripNotifications(tripID, userID, "Trip setup completed", "A crew member submitted availability and trip lead vote.", "setup", false)
+	if err := finalizeLeadVotingIfReady(tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "setup saved but lead vote failed", "details": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"completed": true})
+}
+
+func finalizeLeadVotingIfReady(tripID int) error {
+	var memberCount, voteCount int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM trip_members WHERE trip_id = $1`, tripID).Scan(&memberCount); err != nil {
+		return err
+	}
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM trip_member_setup WHERE trip_id = $1 AND completed_at IS NOT NULL AND lead_vote_user_id IS NOT NULL`, tripID).Scan(&voteCount); err != nil {
+		return err
+	}
+	if memberCount == 0 || voteCount < memberCount {
+		return nil
+	}
+
+	var leadUserID int
+	if err := db.DB.QueryRow(`
+		SELECT lead_vote_user_id
+		FROM trip_member_setup
+		WHERE trip_id = $1 AND lead_vote_user_id IS NOT NULL
+		GROUP BY lead_vote_user_id
+		ORDER BY COUNT(*) DESC, MIN(updated_at) ASC, lead_vote_user_id ASC
+		LIMIT 1
+	`, tripID).Scan(&leadUserID); err != nil {
+		return err
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer rollbackQuietly(tx)
+
+	if _, err := tx.Exec(`UPDATE trip_members SET role = 'member' WHERE trip_id = $1`, tripID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE trip_members SET role = 'lead' WHERE trip_id = $1 AND user_id = $2`, tripID, leadUserID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	var leadName string
+	_ = db.DB.QueryRow(`SELECT COALESCE(name, email, 'Trip lead') FROM users WHERE id = $1`, leadUserID).Scan(&leadName)
+	createTripNotifications(tripID, leadUserID, "Trip lead finalized", strings.TrimSpace(leadName)+" is now the trip lead based on votes.", "alert", false)
+	return nil
 }
 
 func splitSetupDates(value string) []string {
