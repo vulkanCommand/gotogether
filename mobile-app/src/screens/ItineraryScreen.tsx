@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import * as Location from 'expo-location';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -25,6 +24,14 @@ import { ItineraryDay, ItineraryEventStatus, useTripStore } from '../store/tripS
 import { apiRequest } from '../config/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Itinerary'>;
+
+type LocationSuggestion = {
+  id: string;
+  title: string;
+  subtitle: string;
+  latitude?: number;
+  longitude?: number;
+};
 
 const fallbackDateLabel = (index: number) => {
   const labels = ['Day one', 'Day two', 'Day three', 'Day four'];
@@ -62,6 +69,8 @@ const parseTime = (value: string) => {
 const timeHours = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
 const timeMinutes = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'];
 const timePeriods = ['AM', 'PM'];
+const placesApiKey =
+  process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
 export default function ItineraryScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
@@ -74,7 +83,7 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const [loading, setLoading] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
-  const [timeModalVisible, setTimeModalVisible] = useState(false);
+  const [timePickerOpen, setTimePickerOpen] = useState(false);
   const [selectedDayId, setSelectedDayId] = useState('');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [formStatus, setFormStatus] = useState<ItineraryEventStatus>('upcoming');
@@ -84,6 +93,9 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [notes, setNotes] = useState('');
   const [selectedAttendeeIds, setSelectedAttendeeIds] = useState<string[]>([]);
   const [locationStatus, setLocationStatus] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+  const [loadingLocations, setLoadingLocations] = useState(false);
+  const [selectedLocationId, setSelectedLocationId] = useState('');
   const [saving, setSaving] = useState(false);
 
   const destination = selectedDestination();
@@ -152,6 +164,9 @@ export default function ItineraryScreen({ navigation }: Props) {
     setFormStatus('upcoming');
     setSelectedAttendeeIds(crew.map((member) => member.id));
     setLocationStatus('');
+    setLocationSuggestions([]);
+    setSelectedLocationId('');
+    setTimePickerOpen(false);
   };
 
   const selectedAttendeeNames = () => {
@@ -181,6 +196,9 @@ export default function ItineraryScreen({ navigation }: Props) {
     setNotes(event.notes);
     setSelectedAttendeeIds(crew.filter((member) => event.attendees.includes(member.name)).map((member) => member.id));
     setLocationStatus('');
+    setLocationSuggestions([]);
+    setSelectedLocationId('');
+    setTimePickerOpen(false);
     setEventModalVisible(true);
   };
 
@@ -234,20 +252,6 @@ export default function ItineraryScreen({ navigation }: Props) {
     ]);
   };
 
-  const validateLocation = async () => {
-    if (!location.trim()) {
-      setLocationStatus('Add a location first.');
-      return;
-    }
-
-    try {
-      const matches = await Location.geocodeAsync(location.trim());
-      setLocationStatus(matches.length > 0 ? 'Map location found.' : 'No map result. Saved as text.');
-    } catch {
-      setLocationStatus('No map result. Saved as text.');
-    }
-  };
-
   const handleSavePlan = async () => {
     if (!currentTrip?.id || !selectedDayId) {
       return;
@@ -258,6 +262,10 @@ export default function ItineraryScreen({ navigation }: Props) {
     }
     if (selectedAttendeeIds.length === 0) {
       Alert.alert('Attendees needed', 'Select at least one attendee for this event.');
+      return;
+    }
+    if (!location.trim()) {
+      Alert.alert('Location needed', 'Search and select a location for this event.');
       return;
     }
 
@@ -362,6 +370,92 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const selectedTime = parseTime(time);
+
+  const fetchGooglePlaceSuggestions = async (query: string) => {
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${placesApiKey}`
+    );
+    const data = await response.json();
+    return (Array.isArray(data.predictions) ? data.predictions : []).slice(0, 6).map((item: any) => ({
+      id: item.place_id,
+      title: item.structured_formatting?.main_text || item.description,
+      subtitle: item.structured_formatting?.secondary_text || item.description,
+    }));
+  };
+
+  const fetchOpenStreetMapSuggestions = async (query: string) => {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&q=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'GoTogether/1.0',
+        },
+      }
+    );
+    const data = await response.json();
+    return (Array.isArray(data) ? data : []).map((item: any) => {
+      const title = item.name || item.display_name?.split(',')[0] || 'Map location';
+      const subtitle = item.display_name || '';
+      return {
+        id: String(item.place_id ?? item.osm_id ?? subtitle),
+        title,
+        subtitle,
+        latitude: Number(item.lat),
+        longitude: Number(item.lon),
+      };
+    });
+  };
+
+  const selectLocationSuggestion = (suggestion: LocationSuggestion) => {
+    const label = suggestion.subtitle && suggestion.subtitle !== suggestion.title
+      ? `${suggestion.title}, ${suggestion.subtitle}`
+      : suggestion.title;
+    setLocation(label);
+    setSelectedLocationId(suggestion.id);
+    setLocationSuggestions([]);
+    setLocationStatus('Location selected.');
+  };
+
+  useEffect(() => {
+    const query = location.trim();
+    if (!eventModalVisible || query.length < 3 || selectedLocationId) {
+      if (query.length < 3) {
+        setLocationSuggestions([]);
+        setLocationStatus('');
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setLoadingLocations(true);
+        const suggestions = placesApiKey
+          ? await fetchGooglePlaceSuggestions(query)
+          : await fetchOpenStreetMapSuggestions(query);
+        if (!cancelled) {
+          setLocationSuggestions(suggestions);
+          setLocationStatus(suggestions.length > 0 ? 'Select a location from the list.' : 'No locations found. Try a more specific search.');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.log('Location search failed', error);
+          setLocationSuggestions([]);
+          setLocationStatus('Location search failed. Try again.');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingLocations(false);
+        }
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [eventModalVisible, location, selectedLocationId]);
 
   return (
     <Screen scroll={false} showFooter>
@@ -490,26 +584,55 @@ export default function ItineraryScreen({ navigation }: Props) {
                 style={styles.input}
               />
 
-              <Pressable style={styles.timeField} onPress={() => setTimeModalVisible(true)}>
+              <Pressable style={styles.timeField} onPress={() => setTimePickerOpen((value) => !value)}>
                 <View>
                   <Text style={styles.fieldLabel}>Time</Text>
                   <Text style={styles.timeValue}>{time}</Text>
                 </View>
-                <Text style={styles.chevron}>Change</Text>
+                <Text style={styles.chevron}>{timePickerOpen ? 'Done' : 'Change'}</Text>
               </Pressable>
+
+              {timePickerOpen ? (
+                <View style={styles.inlineTimePicker}>
+                  <View style={styles.timeWheelWrap}>
+                    <TimeWheel values={timeHours} selected={selectedTime.hour} onSelect={(value) => setTimePart('hour', value)} />
+                    <TimeWheel values={timeMinutes} selected={selectedTime.minute} onSelect={(value) => setTimePart('minute', value)} />
+                    <TimeWheel values={timePeriods} selected={selectedTime.period} onSelect={(value) => setTimePart('period', value)} />
+                  </View>
+                  <Pressable style={styles.timeDoneButton} onPress={() => setTimePickerOpen(false)}>
+                    <Text style={styles.timeDoneText}>Use {time}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
 
               <TextInput
                 value={location}
-                onChangeText={setLocation}
-                onBlur={validateLocation}
-                placeholder="Location"
+                onChangeText={(value) => {
+                  setLocation(value);
+                  setSelectedLocationId('');
+                }}
+                placeholder="Search location"
                 placeholderTextColor={colors.textSecondary}
                 style={styles.input}
               />
-              <Pressable style={styles.softChip} onPress={validateLocation}>
-                <Text style={styles.softChipText}>Check map location</Text>
-              </Pressable>
+              {loadingLocations ? <Text style={styles.locationStatus}>Searching locations...</Text> : null}
               {locationStatus ? <Text style={styles.locationStatus}>{locationStatus}</Text> : null}
+              {locationSuggestions.length > 0 ? (
+                <View style={styles.locationList}>
+                  {locationSuggestions.map((suggestion) => (
+                    <Pressable
+                      key={suggestion.id}
+                      style={styles.locationRow}
+                      onPress={() => selectLocationSuggestion(suggestion)}
+                    >
+                      <Text style={styles.locationTitle}>{suggestion.title}</Text>
+                      <Text style={styles.locationSubtitle} numberOfLines={2}>
+                        {suggestion.subtitle}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
 
               <View style={styles.attendeeHeader}>
                 <Text style={styles.fieldLabel}>Attendees</Text>
@@ -551,22 +674,6 @@ export default function ItineraryScreen({ navigation }: Props) {
         </View>
       </Modal>
 
-      <Modal visible={timeModalVisible} transparent animationType="fade" onRequestClose={() => setTimeModalVisible(false)}>
-        <View style={styles.timeOverlay}>
-          <View style={styles.timeSheet}>
-            <Text style={styles.modalTitle}>Select time</Text>
-            <View style={styles.timeWheelWrap}>
-              <TimeWheel values={timeHours} selected={selectedTime.hour} onSelect={(value) => setTimePart('hour', value)} />
-              <TimeWheel values={timeMinutes} selected={selectedTime.minute} onSelect={(value) => setTimePart('minute', value)} />
-              <TimeWheel values={timePeriods} selected={selectedTime.period} onSelect={(value) => setTimePart('period', value)} />
-            </View>
-            <View style={styles.modalActions}>
-              <PrimaryButton title="Use Time" onPress={() => setTimeModalVisible(false)} />
-              <PrimaryButton title="Cancel" variant="secondary" onPress={() => setTimeModalVisible(false)} />
-            </View>
-          </View>
-        </View>
-      </Modal>
     </Screen>
   );
 }
@@ -1015,22 +1122,53 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
   },
-  softChip: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    backgroundColor: '#EEF4FF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  inlineTimePicker: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: '#E3EAF4',
+    backgroundColor: '#F8FAFC',
+    padding: spacing.sm,
+    gap: spacing.sm,
   },
-  softChipText: {
-    color: colors.accent,
-    fontSize: 12,
+  timeDoneButton: {
+    borderRadius: radius.lg,
+    backgroundColor: '#111827',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  timeDoneText: {
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '900',
   },
   locationStatus: {
     color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '800',
+  },
+  locationList: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: '#E3EAF4',
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+  },
+  locationRow: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+  },
+  locationTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  locationSubtitle: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
   },
   attendeeHeader: {
     flexDirection: 'row',
@@ -1076,24 +1214,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.sm,
   },
-  timeOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-  },
-  timeSheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxxl,
-  },
   timeWheelWrap: {
     flexDirection: 'row',
     gap: spacing.sm,
-    height: 220,
-    marginTop: spacing.lg,
-    marginBottom: spacing.md,
+    height: 168,
   },
   timeWheel: {
     flex: 1,
