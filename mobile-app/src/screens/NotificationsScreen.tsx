@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import Screen from '../components/Screen';
@@ -22,6 +22,7 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
   const [activeTab, setActiveTab] = useState<NotificationTab>('Pending tasks');
   const [loading, setLoading] = useState(false);
+  const [acceptingId, setAcceptingId] = useState<number | null>(null);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -60,18 +61,41 @@ export default function NotificationsScreen() {
     if (notification.requiresAction && !notification.actionCompletedAt) {
       return;
     }
-    await clearNotification(notification.id);
-    setNotifications((items) => items.filter((item) => item.id !== notification.id));
+    try {
+      await clearNotification(notification.id);
+      setNotifications((items) => items.filter((item) => item.id !== notification.id));
+    } catch (error: any) {
+      Alert.alert('Clear failed', error?.message || 'Could not clear notification');
+    }
   };
 
   const acceptOne = async (notification: ApiNotification) => {
-    await acceptNotificationAction(notification.id);
-    await loadNotifications();
+    try {
+      setAcceptingId(notification.id);
+      await acceptNotificationAction(notification.id);
+      setNotifications((items) =>
+        items.map((item) =>
+          item.id === notification.id
+            ? { ...item, actionCompletedAt: new Date().toISOString(), requiresAction: false }
+            : item
+        )
+      );
+      Alert.alert('Accepted', 'Your confirmation was saved.');
+      await loadNotifications();
+    } catch (error: any) {
+      Alert.alert('Accept failed', error?.message || 'Could not accept this pending task');
+    } finally {
+      setAcceptingId(null);
+    }
   };
 
   const clearAll = async () => {
-    await clearAllNotifications();
-    setNotifications((items) => items.filter((item) => item.requiresAction && !item.actionCompletedAt));
+    try {
+      await clearAllNotifications();
+      setNotifications((items) => items.filter((item) => item.requiresAction && !item.actionCompletedAt));
+    } catch (error: any) {
+      Alert.alert('Clear failed', error?.message || 'Could not clear notifications');
+    }
   };
 
   return (
@@ -119,8 +143,14 @@ export default function NotificationsScreen() {
             <Text style={styles.title}>{notification.title}</Text>
             <Text style={styles.body}>{notification.body}</Text>
             {notification.requiresAction && !notification.actionCompletedAt ? (
-              <Pressable style={styles.acceptButton} onPress={() => acceptOne(notification)}>
-                <Text style={styles.acceptButtonText}>Accept completion</Text>
+              <Pressable
+                style={[styles.acceptButton, acceptingId === notification.id && styles.buttonDisabled]}
+                onPress={() => acceptOne(notification)}
+                disabled={acceptingId === notification.id}
+              >
+                <Text style={styles.acceptButtonText}>
+                  {acceptingId === notification.id ? 'Accepting...' : 'Accept completion'}
+                </Text>
               </Pressable>
             ) : (
               <Pressable style={styles.clearButton} onPress={() => clearOne(notification)}>
@@ -192,22 +222,25 @@ const styles = StyleSheet.create({
   acceptButton: {
     marginTop: spacing.md,
     alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    backgroundColor: colors.accent,
+    borderRadius: radius.lg,
+    backgroundColor: '#111827',
     paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingVertical: 10,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   acceptButtonText: {
     color: '#FFFFFF',
-    fontWeight: '800',
+    fontWeight: '900',
   },
   clearButton: {
     marginTop: spacing.md,
     alignSelf: 'flex-start',
-    borderRadius: radius.pill,
+    borderRadius: radius.lg,
     backgroundColor: '#F3F4F6',
     paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingVertical: 10,
   },
   clearButtonText: {
     color: colors.textPrimary,

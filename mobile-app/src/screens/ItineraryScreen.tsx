@@ -12,6 +12,7 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
+
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import PrimaryButton from '../components/PrimaryButton';
@@ -20,132 +21,78 @@ import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import {
-  ItineraryDay,
-  ItineraryEventStatus,
-  useTripStore,
-} from '../store/tripStore';
+import { ItineraryDay, ItineraryEventStatus, useTripStore } from '../store/tripStore';
 import { apiRequest } from '../config/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Itinerary'>;
 
-const formatFallbackDateLabel = (index: number) => {
-  const labels = ['Friday, May 24', 'Saturday, May 25', 'Sunday, May 26', 'Monday, May 27'];
-  return labels[index] ?? `Day ${index + 1} schedule`;
+const fallbackDateLabel = (index: number) => {
+  const labels = ['Day one', 'Day two', 'Day three', 'Day four'];
+  return labels[index] ?? `Day ${index + 1}`;
 };
 
-const buildDefaultDays = (tripTitle: string): ItineraryDay[] => [
-  {
-    id: 'day-1',
-    title: 'Day 1',
-    dateLabel: formatFallbackDateLabel(0),
-    events: [
-      {
-        id: '1',
-        time: '10:30 AM',
-        title: `Arrival breakfast stop`,
-        location: 'Crew meetup point',
-        notes: `Quick coffee, snacks, and a final plan check before heading into ${tripTitle}.`,
-        attendees: ['4 attending'],
-        status: 'completed',
-      },
-      {
-        id: '2',
-        time: '4:30 PM',
-        title: 'Check-in and reset',
-        location: 'Stay check-in',
-        notes: 'Unload bags, assign rooms, and lock the dinner plan for the evening.',
-        attendees: ['4 attending'],
-        status: 'active',
-      },
-      {
-        id: '3',
-        time: '7:15 PM',
-        title: 'Sunset dinner with the crew',
-        location: 'Dinner reservation',
-        notes: 'Table is reserved. Final headcount is still pending from one person.',
-        attendees: ['3 confirmed • 1 pending'],
-        status: 'upcoming',
-      },
-    ],
-  },
-  {
-    id: 'day-2',
-    title: 'Day 2',
-    dateLabel: formatFallbackDateLabel(1),
-    events: [
-      {
-        id: '4',
-        time: '8:00 AM',
-        title: 'Coffee and breakfast',
-        location: 'Stay lobby or kitchen',
-        notes: 'Easy breakfast before the main daytime activity starts.',
-        attendees: ['4 attending'],
-        status: 'upcoming',
-      },
-      {
-        id: '5',
-        time: '10:00 AM',
-        title: `${tripTitle} main activity block`,
-        location: 'Planned group activity',
-        notes: 'This is the biggest shared plan of the day and should stay anchored.',
-        attendees: ['4 attending'],
-        status: 'upcoming',
-      },
-      {
-        id: '6',
-        time: '6:30 PM',
-        title: 'Group dinner and recap',
-        location: 'Dinner spot',
-        notes: 'Dinner booking stays flexible depending on energy level after the day plan.',
-        attendees: ['4 attending'],
-        status: 'upcoming',
-      },
-    ],
-  },
-];
+const parseNumericId = (value: string) => value.replace(/^(day|event)-/, '');
+
+const parseTime = (value: string) => {
+  const match = value.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/i);
+  return {
+    hour: match?.[1] || '9',
+    minute: match?.[2] || '00',
+    period: (match?.[3] || 'AM').toUpperCase(),
+  };
+};
+
+const timeHours = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+const timeMinutes = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'];
+const timePeriods = ['AM', 'PM'];
 
 export default function ItineraryScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
   const bestMatchRange = useTripStore((state) => state.bestMatchRange);
   const selectedDates = useTripStore((state) => state.selectedDates);
   const crew = useTripStore((state) => state.crew);
-  const tripLead = useTripStore((state) => state.tripLead);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
   const setItineraryDays = useTripStore((state) => state.setItineraryDays);
   const selectedDestination = useTripStore((state) => state.selectedDestination);
-  const totalPlans = useTripStore((state) => state.totalPlans);
-  const totalConfirmedPlans = useTripStore((state) => state.totalConfirmedPlans);
-  const nextUp = useTripStore((state) => state.nextUp);
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedDayId, setSelectedDayId] = useState<string>('');
-  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const [newTitle, setNewTitle] = useState('');
-  const [newTime, setNewTime] = useState('');
-  const [newLocation, setNewLocation] = useState('');
-  const [newNote, setNewNote] = useState('');
+  const [eventModalVisible, setEventModalVisible] = useState(false);
+  const [timeModalVisible, setTimeModalVisible] = useState(false);
+  const [selectedDayId, setSelectedDayId] = useState('');
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [formStatus, setFormStatus] = useState<ItineraryEventStatus>('upcoming');
+  const [title, setTitle] = useState('');
+  const [time, setTime] = useState('9:00 AM');
+  const [location, setLocation] = useState('');
+  const [notes, setNotes] = useState('');
   const [selectedAttendeeIds, setSelectedAttendeeIds] = useState<string[]>([]);
-  const [newStatus, setNewStatus] = useState<ItineraryEventStatus>('upcoming');
   const [locationStatus, setLocationStatus] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const destination = selectedDestination();
   const tripTitle = currentTrip?.name ?? destination?.name ?? 'Your Trip';
-  const crewCount = crew.length > 0 ? crew.length : 4;
-  const leadName = tripLead?.name ?? 'Trip lead pending';
-  const computedNextUp = nextUp();
+  const tripMeta = [
+    bestMatchRange || 'Dates pending',
+    currentTrip?.destination ??
+      (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
+  ].join(' - ');
   const canManageItinerary = currentTrip?.viewer_role === 'lead';
 
   const sortedSelectedDates = useMemo(() => {
-    const numeric = selectedDates
+    return selectedDates
       .map((value) => Number(value))
       .filter((value) => !Number.isNaN(value))
       .sort((a, b) => a - b);
-
-    return numeric;
   }, [selectedDates]);
+
+  const totals = useMemo(() => {
+    const events = itineraryDays.flatMap((day) => day.events);
+    return {
+      days: itineraryDays.length,
+      plans: events.length,
+      done: events.filter((event) => event.status === 'completed').length,
+    };
+  }, [itineraryDays]);
 
   const fetchItinerary = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -165,27 +112,6 @@ export default function ItineraryScreen({ navigation }: Props) {
     }
   }, [currentTrip?.id, setItineraryDays]);
 
-  const saveItinerary = useCallback(
-    async (days: ItineraryDay[]) => {
-      if (!currentTrip?.id) {
-        return false;
-      }
-
-      try {
-        await apiRequest(`/api/trips/${currentTrip.id}/itinerary`, {
-          method: 'PUT',
-          body: JSON.stringify({ days }),
-        });
-        return true;
-      } catch (error: any) {
-        console.log('Save itinerary failed', error);
-        Alert.alert('Save failed', error?.message || 'Could not save itinerary');
-        return false;
-      }
-    },
-    [currentTrip?.id]
-  );
-
   useEffect(() => {
     fetchItinerary();
   }, [fetchItinerary]);
@@ -202,44 +128,14 @@ export default function ItineraryScreen({ navigation }: Props) {
     }
   }, [itineraryDays, selectedDayId]);
 
-  const tripMeta = [
-    bestMatchRange || 'Dates pending',
-    currentTrip?.destination ?? (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
-  ].join(' • ');
-
   const resetForm = () => {
-    setNewTitle('');
-    setNewTime('9:00 AM');
-    setNewLocation('');
-    setNewNote('');
+    setTitle('');
+    setTime('9:00 AM');
+    setLocation('');
+    setNotes('');
+    setFormStatus('upcoming');
     setSelectedAttendeeIds(crew.map((member) => member.id));
-    setNewStatus('upcoming');
     setLocationStatus('');
-  };
-
-  const openAddPlanModal = (dayId: string) => {
-    setSelectedDayId(dayId);
-    setEditingEventId(null);
-    resetForm();
-    setModalVisible(true);
-  };
-
-  const openEditPlanModal = (dayId: string, eventId: string) => {
-    const event = itineraryDays.find((day) => day.id === dayId)?.events.find((item) => item.id === eventId);
-    if (!event) {
-      return;
-    }
-    setSelectedDayId(dayId);
-    setEditingEventId(eventId);
-    setNewTitle(event.title);
-    setNewTime(event.time);
-    setNewLocation(event.location);
-    setNewNote(event.notes);
-    setSelectedAttendeeIds(
-      crew.filter((member) => event.attendees.includes(member.name)).map((member) => member.id)
-    );
-    setNewStatus(event.status);
-    setModalVisible(true);
   };
 
   const selectedAttendeeNames = () => {
@@ -247,82 +143,46 @@ export default function ItineraryScreen({ navigation }: Props) {
     return selected.length > 0 ? selected : crew.map((member) => member.name);
   };
 
-  const toggleAttendee = (memberId: string) => {
-    setSelectedAttendeeIds((current) =>
-      current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId]
-    );
+  const openAddPlan = (dayId: string) => {
+    setSelectedDayId(dayId);
+    setEditingEventId(null);
+    resetForm();
+    setEventModalVisible(true);
   };
 
-  const selectAllAttendees = () => {
-    setSelectedAttendeeIds(crew.map((member) => member.id));
-  };
-
-  const validateLocation = async () => {
-    if (!newLocation.trim()) {
-      return;
-    }
-    try {
-      const matches = await Location.geocodeAsync(newLocation.trim());
-      setLocationStatus(matches.length > 0 ? 'Map location found' : 'No map result. It will be saved as text.');
-    } catch {
-      setLocationStatus('No map result. It will be saved as text.');
-    }
-  };
-
-  const handleAddPlan = async () => {
-    if (!newTitle.trim() || !newTime.trim()) {
+  const openEditPlan = (dayId: string, eventId: string) => {
+    const event = itineraryDays.find((day) => day.id === dayId)?.events.find((item) => item.id === eventId);
+    if (!event) {
       return;
     }
 
-    if (!currentTrip?.id) {
-      return;
-    }
-
-    const payload = {
-      title: newTitle.trim(),
-      time: newTime.trim(),
-      location: newLocation.trim() || 'Location TBD',
-      notes: newNote.trim() || 'No notes added yet.',
-      attendees: selectedAttendeeNames(),
-      status: newStatus,
-    };
-
-    try {
-      if (editingEventId) {
-        await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${editingEventId}`, {
-          method: 'PATCH',
-          body: JSON.stringify(payload),
-        });
-      } else {
-        await apiRequest(`/api/trips/${currentTrip.id}/itinerary/days/${selectedDayId}/events`, {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-      }
-      await fetchItinerary();
-      setModalVisible(false);
-      resetForm();
-      setEditingEventId(null);
-    } catch (error: any) {
-      Alert.alert('Save failed', error?.message || 'Could not save event');
-    }
+    setSelectedDayId(dayId);
+    setEditingEventId(eventId);
+    setFormStatus(event.status);
+    setTitle(event.title);
+    setTime(event.time);
+    setLocation(event.location);
+    setNotes(event.notes);
+    setSelectedAttendeeIds(crew.filter((member) => event.attendees.includes(member.name)).map((member) => member.id));
+    setLocationStatus('');
+    setEventModalVisible(true);
   };
 
   const handleAddDay = async () => {
-    const nextIndex = itineraryDays.length;
-    const matchedDayNumber = sortedSelectedDates[nextIndex];
-    const fallbackDateLabel = matchedDayNumber ? `April ${matchedDayNumber}` : formatFallbackDateLabel(nextIndex);
-
     if (!currentTrip?.id) {
       return;
     }
+
+    const nextIndex = itineraryDays.length;
+    const matchedDayNumber = sortedSelectedDates[nextIndex];
+    const dateLabel = matchedDayNumber ? `April ${matchedDayNumber}` : fallbackDateLabel(nextIndex);
 
     try {
       await apiRequest(`/api/trips/${currentTrip.id}/itinerary/days`, {
         method: 'POST',
         body: JSON.stringify({
           title: `Day ${nextIndex + 1}`,
-          dateLabel: fallbackDateLabel,
+          dateLabel,
         }),
       });
       await fetchItinerary();
@@ -335,7 +195,8 @@ export default function ItineraryScreen({ navigation }: Props) {
     if (!currentTrip?.id) {
       return;
     }
-    Alert.alert('Delete day', 'This removes the day and all its events.', [
+
+    Alert.alert('Delete day', 'This removes the day and all events inside it.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -352,12 +213,70 @@ export default function ItineraryScreen({ navigation }: Props) {
     ]);
   };
 
+  const validateLocation = async () => {
+    if (!location.trim()) {
+      setLocationStatus('Add a location first.');
+      return;
+    }
+
+    try {
+      const matches = await Location.geocodeAsync(location.trim());
+      setLocationStatus(matches.length > 0 ? 'Map location found.' : 'No map result. Saved as text.');
+    } catch {
+      setLocationStatus('No map result. Saved as text.');
+    }
+  };
+
+  const handleSavePlan = async () => {
+    if (!currentTrip?.id || !selectedDayId) {
+      return;
+    }
+    if (!title.trim()) {
+      Alert.alert('Title needed', 'Add a title for this event.');
+      return;
+    }
+
+    const payload = {
+      title: title.trim(),
+      time,
+      location: location.trim() || 'Location TBD',
+      notes: notes.trim() || 'No notes added yet.',
+      attendees: selectedAttendeeNames(),
+      status: formStatus,
+    };
+
+    try {
+      setSaving(true);
+      if (editingEventId) {
+        await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(editingEventId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiRequest(`/api/trips/${currentTrip.id}/itinerary/days/${parseNumericId(selectedDayId)}/events`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+      }
+
+      await fetchItinerary();
+      setEventModalVisible(false);
+      setEditingEventId(null);
+      resetForm();
+    } catch (error: any) {
+      Alert.alert('Save failed', error?.message || 'Could not save event');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDeleteEvent = async (eventId: string) => {
     if (!currentTrip?.id) {
       return;
     }
+
     try {
-      await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${eventId}`, { method: 'DELETE' });
+      await apiRequest(`/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(eventId)}`, { method: 'DELETE' });
       await fetchItinerary();
     } catch (error: any) {
       Alert.alert('Delete failed', error?.message || 'Could not delete event');
@@ -368,11 +287,14 @@ export default function ItineraryScreen({ navigation }: Props) {
     if (!currentTrip?.id) {
       return;
     }
+
     try {
-      const response = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary/events/${eventId}/complete`, {
-        method: 'POST',
-      });
+      const response = await apiRequest<{ days: ItineraryDay[] }>(
+        `/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(eventId)}/complete`,
+        { method: 'POST' }
+      );
       setItineraryDays(response.days);
+      Alert.alert('Confirmation sent', 'Crew members will confirm this event from Pending tasks.');
     } catch (error: any) {
       Alert.alert('Complete failed', error?.message || 'Could not complete event');
     }
@@ -382,274 +304,229 @@ export default function ItineraryScreen({ navigation }: Props) {
     if (!currentTrip?.id) {
       return;
     }
+
     try {
-      const response = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary/events/${eventId}/undo-complete`, {
-        method: 'POST',
-      });
+      const response = await apiRequest<{ days: ItineraryDay[] }>(
+        `/api/trips/${currentTrip.id}/itinerary/events/${parseNumericId(eventId)}/undo-complete`,
+        { method: 'POST' }
+      );
       setItineraryDays(response.days);
     } catch (error: any) {
       Alert.alert('Undo failed', error?.message || 'Could not reopen event');
     }
   };
 
-  const timeHours = ['1','2','3','4','5','6','7','8','9','10','11','12'];
-  const timeMinutes = ['00','15','30','45'];
-  const timePeriods = ['AM','PM'];
-  const setTimePart = (part: 'hour' | 'minute' | 'period', value: string) => {
-    const match = newTime.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/i);
-    const hour = part === 'hour' ? value : match?.[1] || '9';
-    const minute = part === 'minute' ? value : match?.[2] || '00';
-    const period = part === 'period' ? value : (match?.[3] || 'AM').toUpperCase();
-    setNewTime(`${hour}:${minute} ${period}`);
+  const toggleAttendee = (memberId: string) => {
+    setSelectedAttendeeIds((current) =>
+      current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId]
+    );
   };
 
+  const setTimePart = (part: 'hour' | 'minute' | 'period', value: string) => {
+    const current = parseTime(time);
+    setTime(`${part === 'hour' ? value : current.hour}:${part === 'minute' ? value : current.minute} ${part === 'period' ? value : current.period}`);
+  };
+
+  const selectedTime = parseTime(time);
+
   return (
-    <Screen showFooter>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
+    <Screen scroll={false} showFooter>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <SectionTitle
           title="Itinerary"
-          subtitle="Build the day-by-day plan, keep the next move visible, and carry the trip flow into expenses."
+          subtitle="A clean day-by-day plan for the crew."
           action={<NotificationBell />}
         />
 
-        {loading ? (
-          <AppCard>
-            <Text style={styles.emptyPlanTitle}>Loading itinerary...</Text>
-          </AppCard>
-        ) : null}
-
-        <AppCard>
-          <View style={styles.headerTop}>
-            <View style={styles.headerInfo}>
+        <AppCard style={styles.heroCard}>
+          <View style={styles.heroTop}>
+            <View style={styles.heroText}>
+              <Text style={styles.eyebrow}>Trip plan</Text>
               <Text style={styles.tripTitle}>{tripTitle}</Text>
               <Text style={styles.tripMeta}>{tripMeta}</Text>
             </View>
-
-            <View style={styles.readyPill}>
-              <Text style={styles.readyPillText}>Live plan</Text>
-            </View>
+            <Pressable style={styles.detailsButton} onPress={() => navigation.navigate('TripOverview')}>
+              <Text style={styles.detailsButtonText}>View details</Text>
+            </Pressable>
           </View>
 
-          <View style={styles.summaryRow}>
-            <SummaryPill value={`${itineraryDays.length} days`} />
-            <SummaryPill value={`${totalPlans()} plans`} />
-            <SummaryPill value={`${totalConfirmedPlans()} confirmed`} />
-          </View>
-
-          <View style={styles.nextCard}>
-            <Text style={styles.nextEyebrow}>Next up</Text>
-
-            <View style={styles.nextHeaderRow}>
-              <Text style={styles.nextTitle}>{computedNextUp.title}</Text>
-              <Text style={styles.nextTime}>
-                {computedNextUp.day} • {computedNextUp.time}
-              </Text>
-            </View>
-
-            <Text style={styles.nextMeta}>{computedNextUp.meta}</Text>
-          </View>
-
-          <View style={styles.contextRow}>
-            <View style={styles.contextCard}>
-              <Text style={styles.contextLabel}>Trip lead</Text>
-              <Text style={styles.contextValue}>{leadName}</Text>
-            </View>
-
-            <View style={styles.contextCard}>
-              <Text style={styles.contextLabel}>Crew</Text>
-              <Text style={styles.contextValue}>{crewCount} people</Text>
-            </View>
+          <View style={styles.statsRow}>
+            <MiniStat label="Days" value={String(totals.days)} />
+            <MiniStat label="Events" value={String(totals.plans)} />
+            <MiniStat label="Done" value={`${totals.done}/${totals.plans}`} />
           </View>
         </AppCard>
 
         {canManageItinerary ? (
-          <View style={styles.utilityActions}>
+          <View style={styles.topActions}>
             <PrimaryButton title="Add Day" variant="secondary" onPress={handleAddDay} />
           </View>
         ) : null}
 
+        {loading ? (
+          <AppCard>
+            <Text style={styles.emptyTitle}>Loading itinerary...</Text>
+          </AppCard>
+        ) : null}
+
+        {!loading && itineraryDays.length === 0 ? (
+          <AppCard style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No itinerary days yet</Text>
+            <Text style={styles.emptyText}>Add a day, then add events in the order the crew should follow.</Text>
+            {canManageItinerary ? (
+              <View style={styles.emptyAction}>
+                <PrimaryButton title="Add First Day" onPress={handleAddDay} />
+              </View>
+            ) : null}
+          </AppCard>
+        ) : null}
+
         <View style={styles.dayList}>
-          {itineraryDays.map((day) => (
-            <AppCard key={day.id}>
+          {itineraryDays.map((day, dayIndex) => (
+            <AppCard key={day.id} style={styles.dayCard}>
               <View style={styles.dayHeader}>
-                <View style={styles.dayTitleWrap}>
-                  <Text style={styles.dayLabel}>{day.title}</Text>
+                <View>
+                  <Text style={styles.dayNumber}>Day {dayIndex + 1}</Text>
+                  <Text style={styles.dayTitle}>{day.title}</Text>
                   <Text style={styles.dayDate}>{day.dateLabel}</Text>
                 </View>
-
-                <View style={styles.dayHeaderRight}>
-                  <View style={styles.focusBadge}>
-                    <Text style={styles.focusBadgeText}>
-                      {day.events.length > 0 ? `${day.events.length} plans` : 'Plans coming together'}
-                    </Text>
+                <View style={styles.dayActions}>
+                  <View style={styles.countPill}>
+                    <Text style={styles.countPillText}>{day.events.length} events</Text>
                   </View>
-
                   {canManageItinerary ? (
-                    <>
-                      <View style={styles.dayAddButton}>
-                        <PrimaryButton
-                          title="Add Plan"
-                          variant="secondary"
-                          onPress={() => openAddPlanModal(day.id)}
-                        />
-                      </View>
-                      <Pressable onPress={() => handleDeleteDay(day.id)} style={styles.inlineDanger}>
-                        <Text style={styles.inlineDangerText}>Delete day</Text>
-                      </Pressable>
-                    </>
+                    <Pressable style={styles.iconButton} onPress={() => openAddPlan(day.id)}>
+                      <Text style={styles.iconButtonText}>+ Event</Text>
+                    </Pressable>
                   ) : null}
                 </View>
               </View>
 
-              <View style={styles.timeline}>
-                {day.events.length > 0 ? (
-                  day.events.map((plan, index) => (
-                    <PlanRow
-                      key={plan.id}
-                      plan={{
-                        id: plan.id,
-                        time: plan.time,
-                        title: plan.title,
-                        location: plan.location,
-                        note: plan.notes,
-                        attendees: plan.attendees.join(', '),
-                        status: plan.status,
-                      }}
-                      isLast={index === day.events.length - 1}
+              <View style={styles.eventList}>
+                {day.events.length === 0 ? (
+                  <View style={styles.emptyEvent}>
+                    <Text style={styles.emptyTitle}>No events yet</Text>
+                    <Text style={styles.emptyText}>Events will appear here in the exact order they happen.</Text>
+                  </View>
+                ) : (
+                  day.events.map((event, eventIndex) => (
+                    <EventRow
+                      key={event.id}
+                      event={event}
+                      isLast={eventIndex === day.events.length - 1}
                       canManage={canManageItinerary}
-                      onEdit={() => openEditPlanModal(day.id, plan.id)}
-                      onDelete={() => handleDeleteEvent(plan.id)}
-                      onComplete={() => handleCompleteEvent(plan.id)}
-                      onUndoComplete={() => handleUndoCompleteEvent(plan.id)}
+                      onEdit={() => openEditPlan(day.id, event.id)}
+                      onDelete={() => handleDeleteEvent(event.id)}
+                      onComplete={() => handleCompleteEvent(event.id)}
+                      onUndo={() => handleUndoCompleteEvent(event.id)}
                     />
                   ))
-                ) : (
-                  <View style={styles.emptyPlanCard}>
-                    <Text style={styles.emptyPlanTitle}>No plans yet</Text>
-                    <Text style={styles.emptyPlanMeta}>
-                      Add the first event for this day to start building the itinerary.
-                    </Text>
-                  </View>
                 )}
               </View>
+
+              {canManageItinerary ? (
+                <Pressable style={styles.deleteDayButton} onPress={() => handleDeleteDay(day.id)}>
+                  <Text style={styles.deleteDayText}>Delete day</Text>
+                </Pressable>
+              ) : null}
             </AppCard>
           ))}
         </View>
 
-        <View style={styles.actions}>
-          <PrimaryButton
-            title="Add Expense"
-            onPress={() => navigation.navigate('AddExpense')}
-          />
-          <PrimaryButton
-            title="Finish Trip Flow"
-            variant="secondary"
-            onPress={() => navigation.navigate('TripCompletion')}
-          />
+        <View style={styles.bottomActions}>
+          <PrimaryButton title="Add Expense" onPress={() => navigation.navigate('AddExpense')} />
+          <PrimaryButton title="Finish Trip Flow" variant="secondary" onPress={() => navigation.navigate('TripCompletion')} />
         </View>
       </ScrollView>
 
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalVisible(false)}
-      >
+      <Modal visible={eventModalVisible} transparent animationType="slide" onRequestClose={() => setEventModalVisible(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>{editingEventId ? 'Edit itinerary event' : 'Add itinerary event'}</Text>
-            <Text style={styles.modalSubtitle}>
-              Create a new plan for the selected day and keep the trip flow moving.
-            </Text>
+          <View style={styles.eventSheet}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.eventSheetContent}>
+              <Text style={styles.modalTitle}>{editingEventId ? 'Edit event' : 'Add event'}</Text>
+              <Text style={styles.modalSubtitle}>Add the next step in the trip plan. Status is handled automatically.</Text>
 
-            <TextInput
-              value={newTitle}
-              onChangeText={setNewTitle}
-              placeholder="Event title"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.input}
-            />
-
-            <Text style={styles.statusLabel}>Time</Text>
-            <View style={styles.timePicker}>
-              <TimeColumn values={timeHours} selected={newTime.match(/^(\d{1,2})/)?.[1] || '9'} onSelect={(value) => setTimePart('hour', value)} />
-              <TimeColumn values={timeMinutes} selected={newTime.match(/:(\d{2})/)?.[1] || '00'} onSelect={(value) => setTimePart('minute', value)} />
-              <TimeColumn values={timePeriods} selected={(newTime.match(/(AM|PM)$/i)?.[1] || 'AM').toUpperCase()} onSelect={(value) => setTimePart('period', value)} />
-            </View>
-
-            <TextInput
-              value={newLocation}
-              onChangeText={setNewLocation}
-              placeholder="Location"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.input}
-            />
-            <Pressable style={styles.locationButton} onPress={validateLocation}>
-              <Text style={styles.locationButtonText}>Check map location</Text>
-            </Pressable>
-            {locationStatus ? <Text style={styles.locationStatus}>{locationStatus}</Text> : null}
-
-            <Text style={styles.statusLabel}>Attendees</Text>
-            <Pressable style={styles.selectAllButton} onPress={selectAllAttendees}>
-              <Text style={styles.selectAllText}>Select all</Text>
-            </Pressable>
-            <View style={styles.attendeeGrid}>
-              {crew.map((member) => {
-                const selected = selectedAttendeeIds.includes(member.id);
-                return (
-                  <Pressable key={member.id} style={[styles.attendeeChip, selected && styles.attendeeChipSelected]} onPress={() => toggleAttendee(member.id)}>
-                    <Text style={[styles.attendeeText, selected && styles.attendeeTextSelected]}>{member.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <TextInput
-              value={newNote}
-              onChangeText={setNewNote}
-              placeholder="Notes"
-              placeholderTextColor={colors.textSecondary}
-              style={[styles.input, styles.notesInput]}
-              multiline
-            />
-
-            <Text style={styles.statusLabel}>Status</Text>
-            <View style={styles.statusOptions}>
-              {(['upcoming', 'active', 'completed'] as ItineraryEventStatus[]).map((status) => {
-                const selected = newStatus === status;
-
-                return (
-                  <Pressable
-                    key={status}
-                    onPress={() => setNewStatus(status)}
-                    style={[
-                      styles.statusOption,
-                      selected && styles.statusOptionSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusOptionText,
-                        selected && styles.statusOptionTextSelected,
-                      ]}
-                    >
-                      {status}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <View style={styles.modalActions}>
-              <PrimaryButton title="Save Plan" onPress={handleAddPlan} />
-              <PrimaryButton
-                title="Cancel"
-                variant="secondary"
-                onPress={() => setModalVisible(false)}
+              <TextInput
+                value={title}
+                onChangeText={setTitle}
+                placeholder="Event title"
+                placeholderTextColor={colors.textSecondary}
+                style={styles.input}
               />
+
+              <Pressable style={styles.timeField} onPress={() => setTimeModalVisible(true)}>
+                <View>
+                  <Text style={styles.fieldLabel}>Time</Text>
+                  <Text style={styles.timeValue}>{time}</Text>
+                </View>
+                <Text style={styles.chevron}>Change</Text>
+              </Pressable>
+
+              <TextInput
+                value={location}
+                onChangeText={setLocation}
+                onBlur={validateLocation}
+                placeholder="Location"
+                placeholderTextColor={colors.textSecondary}
+                style={styles.input}
+              />
+              <Pressable style={styles.softChip} onPress={validateLocation}>
+                <Text style={styles.softChipText}>Check map location</Text>
+              </Pressable>
+              {locationStatus ? <Text style={styles.locationStatus}>{locationStatus}</Text> : null}
+
+              <View style={styles.attendeeHeader}>
+                <Text style={styles.fieldLabel}>Attendees</Text>
+                <Pressable onPress={() => setSelectedAttendeeIds(crew.map((member) => member.id))}>
+                  <Text style={styles.selectAllText}>Select all</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.attendeeGrid}>
+                {crew.map((member) => {
+                  const selected = selectedAttendeeIds.includes(member.id);
+                  return (
+                    <Pressable
+                      key={member.id}
+                      style={[styles.attendeeChip, selected && styles.attendeeChipSelected]}
+                      onPress={() => toggleAttendee(member.id)}
+                    >
+                      <Text style={[styles.attendeeText, selected && styles.attendeeTextSelected]}>{member.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <TextInput
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Notes"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.input, styles.notesInput]}
+                multiline
+              />
+
+              <View style={styles.modalActions}>
+                <PrimaryButton title={saving ? 'Saving...' : 'Save Event'} onPress={handleSavePlan} disabled={saving} />
+                <PrimaryButton title="Cancel" variant="secondary" onPress={() => setEventModalVisible(false)} />
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={timeModalVisible} transparent animationType="fade" onRequestClose={() => setTimeModalVisible(false)}>
+        <View style={styles.timeOverlay}>
+          <View style={styles.timeSheet}>
+            <Text style={styles.modalTitle}>Select time</Text>
+            <View style={styles.timeWheelWrap}>
+              <TimeWheel values={timeHours} selected={selectedTime.hour} onSelect={(value) => setTimePart('hour', value)} />
+              <TimeWheel values={timeMinutes} selected={selectedTime.minute} onSelect={(value) => setTimePart('minute', value)} />
+              <TimeWheel values={timePeriods} selected={selectedTime.period} onSelect={(value) => setTimePart('period', value)} />
+            </View>
+            <View style={styles.modalActions}>
+              <PrimaryButton title="Use Time" onPress={() => setTimeModalVisible(false)} />
+              <PrimaryButton title="Cancel" variant="secondary" onPress={() => setTimeModalVisible(false)} />
             </View>
           </View>
         </View>
@@ -658,15 +535,16 @@ export default function ItineraryScreen({ navigation }: Props) {
   );
 }
 
-function SummaryPill({ value }: { value: string }) {
+function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.summaryPill}>
-      <Text style={styles.summaryPillText}>{value}</Text>
+    <View style={styles.miniStat}>
+      <Text style={styles.miniStatValue}>{value}</Text>
+      <Text style={styles.miniStatLabel}>{label}</Text>
     </View>
   );
 }
 
-function TimeColumn({
+function TimeWheel({
   values,
   selected,
   onSelect,
@@ -676,12 +554,12 @@ function TimeColumn({
   onSelect: (value: string) => void;
 }) {
   return (
-    <ScrollView style={styles.timeColumn} showsVerticalScrollIndicator={false}>
+    <ScrollView style={styles.timeWheel} showsVerticalScrollIndicator={false} contentContainerStyle={styles.timeWheelContent}>
       {values.map((value) => {
         const active = value === selected;
         return (
-          <Pressable key={value} style={[styles.timeOption, active && styles.timeOptionSelected]} onPress={() => onSelect(value)}>
-            <Text style={[styles.timeOptionText, active && styles.timeOptionTextSelected]}>{value}</Text>
+          <Pressable key={value} style={[styles.timeWheelItem, active && styles.timeWheelItemActive]} onPress={() => onSelect(value)}>
+            <Text style={[styles.timeWheelText, active && styles.timeWheelTextActive]}>{value}</Text>
           </Pressable>
         );
       })}
@@ -689,104 +567,51 @@ function TimeColumn({
   );
 }
 
-function PlanRow({
-  plan,
+function EventRow({
+  event,
   isLast,
   canManage,
   onEdit,
   onDelete,
   onComplete,
-  onUndoComplete,
+  onUndo,
 }: {
-  plan: {
-    id: string;
-    time: string;
-    title: string;
-    location: string;
-    note: string;
-    attendees: string;
-    status: ItineraryEventStatus;
-  };
+  event: ItineraryDay['events'][number];
   isLast: boolean;
   canManage: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onComplete: () => void;
-  onUndoComplete: () => void;
+  onUndo: () => void;
 }) {
-  const markerStyle =
-    plan.status === 'completed'
-      ? styles.markerCompleted
-      : plan.status === 'active'
-      ? styles.markerActive
-      : styles.markerUpcoming;
-
-  const titleStyle =
-    plan.status === 'completed' ? styles.planTitleCompleted : null;
-
-  const statusText =
-    plan.status === 'completed'
-      ? 'Completed'
-      : plan.status === 'active'
-      ? 'Happening now'
-      : 'Upcoming';
-
-  const statusPillStyle =
-    plan.status === 'completed'
-      ? styles.statusCompleted
-      : plan.status === 'active'
-      ? styles.statusActive
-      : styles.statusUpcoming;
-
-  const statusTextStyle =
-    plan.status === 'completed'
-      ? styles.statusCompletedText
-      : plan.status === 'active'
-      ? styles.statusActiveText
-      : styles.statusUpcomingText;
+  const isCompleted = event.status === 'completed';
+  const isActive = event.status === 'active';
 
   return (
-    <View style={styles.planRow}>
-      <View style={styles.leftRail}>
-        <Text style={styles.time}>{plan.time}</Text>
-        <View style={[styles.marker, markerStyle]} />
-        {!isLast && <View style={styles.railLine} />}
+    <View style={styles.eventRow}>
+      <View style={styles.timelineRail}>
+        <Text style={styles.eventTime}>{event.time}</Text>
+        <View style={[styles.timelineDot, isCompleted && styles.timelineDotDone, isActive && styles.timelineDotActive]} />
+        {!isLast ? <View style={styles.timelineLine} /> : null}
       </View>
 
-      <View style={styles.planCard}>
-        <View style={styles.planTop}>
-          <Text style={[styles.planTitle, titleStyle]}>{plan.title}</Text>
-
-          <View style={[styles.statusPill, statusPillStyle]}>
-            <Text style={[styles.statusPillText, statusTextStyle]}>
-              {statusText}
-            </Text>
-          </View>
-        </View>
-
-        <Text style={styles.planLocation}>{plan.location}</Text>
-        <Text style={styles.planNote}>{plan.note}</Text>
-
-        <View style={styles.planFooter}>
-          <Text style={styles.planAttendees}>{plan.attendees}</Text>
-        </View>
+      <View style={[styles.eventCard, isActive && styles.eventCardActive]}>
+        {isActive ? <Text style={styles.nowLabel}>Active now</Text> : null}
+        <Text style={[styles.eventTitle, isCompleted && styles.eventTitleDone]}>{event.title}</Text>
+        <Text style={styles.eventLocation}>{event.location}</Text>
+        <Text style={styles.eventNotes}>{event.notes}</Text>
+        <Text style={styles.eventAttendees}>{event.attendees.join(', ') || 'Crew pending'}</Text>
 
         {canManage ? (
-          <View style={styles.planActions}>
-            {plan.status === 'completed' ? (
-              <Pressable style={styles.actionChip} onPress={onUndoComplete}>
-                <Text style={styles.actionChipText}>Undo</Text>
-              </Pressable>
-            ) : (
-              <Pressable style={styles.actionChip} onPress={onComplete}>
-                <Text style={styles.actionChipText}>Complete</Text>
-              </Pressable>
-            )}
-            <Pressable style={styles.actionChip} onPress={onEdit}>
-              <Text style={styles.actionChipText}>Edit</Text>
+          <View style={styles.eventActions}>
+            <Pressable style={styles.eventAction} onPress={isCompleted ? onUndo : onComplete}>
+              <Text style={styles.eventActionText}>{isCompleted ? 'Undo' : 'Complete'}</Text>
             </Pressable>
-            <Pressable style={styles.deleteChip} onPress={onDelete}>
-              <Text style={styles.deleteChipText}>Delete</Text>
+            <Pressable style={styles.eventAction} onPress={onEdit}>
+              <Text style={styles.eventActionText}>Edit</Text>
+            </Pressable>
+            <Pressable style={styles.eventDeleteAction} onPress={onDelete}>
+              <Text style={styles.eventDeleteText}>Delete</Text>
             </Pressable>
           </View>
         ) : null}
@@ -797,419 +622,390 @@ function PlanRow({
 
 const styles = StyleSheet.create({
   scrollContent: {
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.xxxl,
+    gap: spacing.md,
   },
-  headerTop: {
+  heroCard: {
+    backgroundColor: '#FFFFFF',
+  },
+  heroTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
+    gap: spacing.md,
   },
-  headerInfo: {
+  heroText: {
     flex: 1,
-    paddingRight: spacing.sm,
+  },
+  eyebrow: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   tripTitle: {
-    fontSize: 22,
-    fontWeight: '800',
+    marginTop: 6,
     color: colors.textPrimary,
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: -0.8,
   },
   tripMeta: {
     marginTop: 6,
-    fontSize: 14,
     color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
   },
-  readyPill: {
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: radius.md,
-    alignSelf: 'flex-start',
-  },
-  readyPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.accent,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  summaryPill: {
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
+  detailsButton: {
+    height: 42,
     borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  summaryPillText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  nextCard: {
-    marginTop: spacing.md,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
-  nextEyebrow: {
+  detailsButtonText: {
+    color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '700',
-    color: colors.accent,
+    fontWeight: '900',
   },
-  nextHeaderRow: {
-    marginTop: 8,
-    gap: 6,
-  },
-  nextTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  nextTime: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  nextMeta: {
-    marginTop: 6,
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  contextRow: {
+  statsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginTop: spacing.md,
+    marginTop: spacing.lg,
   },
-  contextCard: {
+  miniStat: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
     borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#EAF0F8',
+    backgroundColor: '#F8FAFC',
     padding: spacing.md,
   },
-  contextLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    marginBottom: 6,
-  },
-  contextValue: {
-    fontSize: 15,
-    fontWeight: '800',
+  miniStatValue: {
+    fontSize: 18,
+    fontWeight: '900',
     color: colors.textPrimary,
   },
-  utilityActions: {
+  miniStatLabel: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  topActions: {
     gap: spacing.sm,
+  },
+  emptyCard: {
+    alignItems: 'flex-start',
+  },
+  emptyTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  emptyText: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  emptyAction: {
+    alignSelf: 'stretch',
+    marginTop: spacing.md,
   },
   dayList: {
     gap: spacing.md,
   },
+  dayCard: {
+    padding: spacing.md,
+  },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
+    gap: spacing.md,
     marginBottom: spacing.md,
   },
-  dayTitleWrap: {
-    flex: 1,
+  dayNumber: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
-  dayHeaderRight: {
+  dayTitle: {
+    marginTop: 5,
+    color: colors.textPrimary,
+    fontSize: 21,
+    fontWeight: '900',
+  },
+  dayDate: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  dayActions: {
     alignItems: 'flex-end',
     gap: spacing.sm,
   },
-  dayAddButton: {
-    minWidth: 120,
-  },
-  inlineDanger: {
-    paddingVertical: 4,
-  },
-  inlineDangerText: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  dayLabel: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  dayDate: {
-    marginTop: 4,
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  focusBadge: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: radius.md,
+  countPill: {
+    borderRadius: radius.pill,
+    backgroundColor: '#F3F6FB',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    alignSelf: 'flex-start',
   },
-  focusBadgeText: {
+  countPillText: {
+    color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
+    fontWeight: '800',
   },
-  timeline: {
+  iconButton: {
+    borderRadius: radius.pill,
+    backgroundColor: '#111827',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  iconButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  eventList: {
     gap: spacing.md,
   },
-  emptyPlanCard: {
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
+  emptyEvent: {
     borderRadius: radius.md,
-    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: '#EAF0F8',
     backgroundColor: '#F8FAFC',
+    padding: spacing.md,
   },
-  emptyPlanTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textPrimary,
+  deleteDayButton: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.md,
+    paddingVertical: 6,
   },
-  emptyPlanMeta: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 20,
-    color: colors.textSecondary,
+  deleteDayText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: '900',
   },
-  planRow: {
+  eventRow: {
     flexDirection: 'row',
-    alignItems: 'stretch',
     gap: spacing.md,
   },
-  leftRail: {
-    width: 74,
+  timelineRail: {
+    width: 68,
     alignItems: 'center',
   },
-  time: {
-    fontSize: 12,
-    fontWeight: '700',
+  eventTime: {
     color: colors.accent,
-    marginBottom: 10,
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 8,
   },
-  marker: {
+  timelineDot: {
     width: 14,
     height: 14,
     borderRadius: 7,
     borderWidth: 3,
-  },
-  markerCompleted: {
-    backgroundColor: colors.success,
-    borderColor: '#D1FAE5',
-  },
-  markerActive: {
-    backgroundColor: colors.accent,
-    borderColor: '#DBEAFE',
-  },
-  markerUpcoming: {
-    backgroundColor: '#FFFFFF',
     borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
   },
-  railLine: {
+  timelineDotActive: {
+    borderColor: '#DBEAFE',
+    backgroundColor: colors.accent,
+  },
+  timelineDotDone: {
+    borderColor: '#D1FAE5',
+    backgroundColor: colors.success,
+  },
+  timelineLine: {
     flex: 1,
     width: 2,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#E5EAF2',
     marginTop: 8,
     borderRadius: radius.pill,
   },
-  planCard: {
+  eventCard: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#EEF2F7',
-    borderRadius: radius.md,
+    borderColor: '#EAF0F8',
+    backgroundColor: '#FFFFFF',
     padding: spacing.md,
   },
-  planTop: {
-    gap: 10,
+  eventCardActive: {
+    borderColor: '#BFDBFE',
+    backgroundColor: '#F7FBFF',
   },
-  planTitle: {
-    fontSize: 16,
-    fontWeight: '800',
+  nowLabel: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    borderRadius: radius.pill,
+    backgroundColor: '#DBEAFE',
+    color: colors.accent,
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  eventTitle: {
     color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: -0.2,
   },
-  planTitleCompleted: {
-    opacity: 0.6,
+  eventTitleDone: {
+    color: '#94A3B8',
     textDecorationLine: 'line-through',
   },
-  statusPill: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  statusCompleted: {
-    backgroundColor: '#EAF8EE',
-  },
-  statusActive: {
-    backgroundColor: '#E8F0FF',
-  },
-  statusUpcoming: {
-    backgroundColor: '#F3F4F6',
-  },
-  statusPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  statusCompletedText: {
-    color: '#1F8A4C',
-  },
-  statusActiveText: {
-    color: colors.accent,
-  },
-  statusUpcomingText: {
-    color: colors.textSecondary,
-  },
-  planLocation: {
-    marginTop: 10,
-    fontSize: 13,
-    fontWeight: '700',
+  eventLocation: {
+    marginTop: 8,
     color: colors.textPrimary,
-  },
-  planNote: {
-    marginTop: 6,
     fontSize: 13,
-    lineHeight: 20,
-    color: colors.textSecondary,
+    fontWeight: '800',
   },
-  planFooter: {
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
+  eventNotes: {
+    marginTop: 5,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  eventAttendees: {
+    marginTop: 10,
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-  },
-  planAttendees: {
-    fontSize: 12,
-    fontWeight: '700',
+    borderTopColor: '#EEF2F7',
     color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
   },
-  planActions: {
+  eventActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
     marginTop: spacing.sm,
   },
-  actionChip: {
+  eventAction: {
     borderRadius: radius.pill,
     backgroundColor: '#EEF4FF',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
   },
-  actionChipText: {
+  eventActionText: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  deleteChip: {
+  eventDeleteAction: {
     borderRadius: radius.pill,
     backgroundColor: '#FEF2F2',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
   },
-  deleteChipText: {
+  eventDeleteText: {
     color: colors.danger,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  actions: {
+  bottomActions: {
     gap: spacing.sm,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.35)',
     justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
   },
-  modalSheet: {
+  eventSheet: {
+    maxHeight: '88%',
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    overflow: 'hidden',
+  },
+  eventSheetContent: {
     padding: spacing.lg,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.xxxl,
     gap: spacing.sm,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
     color: colors.textPrimary,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.5,
   },
   modalSubtitle: {
-    fontSize: 13,
-    lineHeight: 20,
     color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
     marginBottom: spacing.sm,
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    fontSize: 14,
+    borderColor: '#E3EAF4',
+    backgroundColor: '#FFFFFF',
     color: colors.textPrimary,
+    fontSize: 15,
+    paddingHorizontal: 15,
+    paddingVertical: 15,
   },
-  timePicker: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    height: 118,
-  },
-  timeColumn: {
-    flex: 1,
+  timeField: {
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: '#FFFFFF',
-  },
-  timeOption: {
-    paddingVertical: 12,
+    borderColor: '#E3EAF4',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  timeOptionSelected: {
-    backgroundColor: '#EEF4FF',
-  },
-  timeOptionText: {
-    fontSize: 16,
-    fontWeight: '700',
+  fieldLabel: {
     color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
-  timeOptionTextSelected: {
+  timeValue: {
+    marginTop: 5,
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  chevron: {
     color: colors.accent,
+    fontSize: 13,
+    fontWeight: '900',
   },
-  locationButton: {
+  softChip: {
     alignSelf: 'flex-start',
     borderRadius: radius.pill,
     backgroundColor: '#EEF4FF',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  locationButtonText: {
+  softChipText: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   locationStatus: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  selectAllButton: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  attendeeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.xs,
   },
   selectAllText: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '800',
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '900',
   },
   attendeeGrid: {
     flexDirection: 'row',
@@ -1219,58 +1015,75 @@ const styles = StyleSheet.create({
   attendeeChip: {
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderColor: '#E3EAF4',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 9,
   },
   attendeeChipSelected: {
-    borderColor: '#C7DAFF',
+    borderColor: '#BFDBFE',
     backgroundColor: '#EEF4FF',
   },
   attendeeText: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   attendeeTextSelected: {
     color: colors.accent,
   },
   notesInput: {
-    minHeight: 92,
+    minHeight: 110,
     textAlignVertical: 'top',
-  },
-  statusLabel: {
-    marginTop: spacing.xs,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  statusOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  statusOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: radius.pill,
-    backgroundColor: '#F3F4F6',
-  },
-  statusOptionSelected: {
-    backgroundColor: '#EEF2FF',
-  },
-  statusOptionText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  statusOptionTextSelected: {
-    color: colors.accent,
   },
   modalActions: {
     gap: spacing.sm,
     marginTop: spacing.sm,
+  },
+  timeOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  timeSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxxl,
+  },
+  timeWheelWrap: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    height: 220,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  timeWheel: {
+    flex: 1,
+    borderRadius: radius.lg,
+    backgroundColor: '#F8FAFC',
+  },
+  timeWheelContent: {
+    paddingVertical: 76,
+  },
+  timeWheelItem: {
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.md,
+    marginHorizontal: 6,
+  },
+  timeWheelItemActive: {
+    backgroundColor: '#111827',
+  },
+  timeWheelText: {
+    color: colors.textSecondary,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  timeWheelTextActive: {
+    color: '#FFFFFF',
+    fontSize: 21,
   },
 });
