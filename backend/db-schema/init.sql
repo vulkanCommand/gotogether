@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS itinerary_events (
     title TEXT NOT NULL,
     time_label TEXT NOT NULL,
     location TEXT NOT NULL,
+    location_is_mapped BOOLEAN NOT NULL DEFAULT FALSE,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'upcoming',
     attendee_summary TEXT,

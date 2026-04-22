@@ -1,15 +1,16 @@
 package models
 
 type ItineraryEventPayload struct {
-	ID          string   `json:"id"`
-	DayID       string   `json:"dayId,omitempty"`
-	Title       string   `json:"title"`
-	Time        string   `json:"time"`
-	Location    string   `json:"location"`
-	Notes       string   `json:"notes"`
-	Attendees   []string `json:"attendees"`
-	Status      string   `json:"status"`
-	CompletedAt string   `json:"completedAt,omitempty"`
+	ID               string   `json:"id"`
+	DayID            string   `json:"dayId,omitempty"`
+	Title            string   `json:"title"`
+	Time             string   `json:"time"`
+	Location         string   `json:"location"`
+	LocationIsMapped bool     `json:"locationIsMapped"`
+	Notes            string   `json:"notes"`
+	Attendees        []string `json:"attendees"`
+	Status           string   `json:"status"`
+	CompletedAt      string   `json:"completedAt,omitempty"`
 }
 
 type ItineraryDayPayload struct {

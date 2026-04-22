@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -71,6 +73,18 @@ const timeMinutes = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45',
 const timePeriods = ['AM', 'PM'];
 const placesApiKey =
   process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+
+const openMapsLocation = async (value?: string) => {
+  const query = value?.trim();
+  if (!query) {
+    return;
+  }
+  try {
+    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
+  } catch {
+    Alert.alert('Maps unavailable', 'Could not open this location in Maps.');
+  }
+};
 
 export default function ItineraryScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
@@ -197,7 +211,7 @@ export default function ItineraryScreen({ navigation }: Props) {
     setSelectedAttendeeIds(crew.filter((member) => event.attendees.includes(member.name)).map((member) => member.id));
     setLocationStatus('');
     setLocationSuggestions([]);
-    setSelectedLocationId('');
+    setSelectedLocationId(event.locationIsMapped ? 'existing-map-location' : '');
     setTimePickerOpen(false);
     setEventModalVisible(true);
   };
@@ -273,6 +287,7 @@ export default function ItineraryScreen({ navigation }: Props) {
       title: title.trim(),
       time,
       location: location.trim() || 'Location TBD',
+      locationIsMapped: Boolean(selectedLocationId),
       notes: notes.trim() || 'No notes added yet.',
       attendees: selectedAttendeeNames(),
       status: formStatus,
@@ -749,7 +764,18 @@ function EventRow({
       <View style={[styles.eventCard, isActive && styles.eventCardActive]}>
         {isActive ? <Text style={styles.nowLabel}>Active now</Text> : null}
         <Text style={[styles.eventTitle, isCompleted && styles.eventTitleDone]}>{event.title}</Text>
-        <Text style={styles.eventLocation}>{event.location}</Text>
+        {event.locationIsMapped ? (
+          <Pressable
+            style={styles.eventLocationIcon}
+            onPress={() => openMapsLocation(event.location)}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${event.location} in Maps`}
+          >
+            <Ionicons name="location" size={20} color={colors.accent} />
+          </Pressable>
+        ) : (
+          <Text style={styles.eventLocation}>{event.location}</Text>
+        )}
         <Text style={styles.eventNotes}>{event.notes}</Text>
         <Text style={styles.eventAttendees}>{event.attendees.join(', ') || 'No attendees selected'}</Text>
 
@@ -1016,6 +1042,15 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '800',
+  },
+  eventLocationIcon: {
+    marginTop: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EEF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   eventNotes: {
     marginTop: 5,

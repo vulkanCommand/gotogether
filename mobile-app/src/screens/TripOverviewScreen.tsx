@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo } from 'react';
 import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -203,9 +204,20 @@ export default function TripOverviewScreen({ navigation }: Props) {
               <>
                 <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
                 <Text style={styles.nextMeta}>{nextPlan.day} - {nextPlan.event.time}</Text>
-                <Pressable onPress={() => openMapsLocation(nextPlan.event.location)}>
-                  <Text style={styles.nextLocation}>{nextPlan.event.location}</Text>
-                </Pressable>
+                {nextPlan.event.locationIsMapped ? (
+                  <Pressable
+                    style={styles.locationIcon}
+                    onPress={() => openMapsLocation(nextPlan.event.location)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${nextPlan.event.location} in Maps`}
+                  >
+                    <Ionicons name="location" size={22} color={colors.accent} />
+                  </Pressable>
+                ) : (
+                  <Pressable onPress={() => openMapsLocation(nextPlan.event.location)}>
+                    <Text style={styles.nextLocation}>{nextPlan.event.location}</Text>
+                  </Pressable>
+                )}
               </>
             ) : (
               <Text style={styles.nextMeta}>No upcoming itinerary event yet.</Text>
@@ -368,6 +380,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     textDecorationLine: 'underline',
+  },
+  locationIcon: {
+    marginTop: spacing.sm,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EEF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   leadLabel: {
     fontSize: 12,

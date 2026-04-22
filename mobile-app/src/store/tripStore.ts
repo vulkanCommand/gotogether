@@ -23,6 +23,7 @@ export type ItineraryEvent = {
   title: string;
   time: string;
   location: string;
+  locationIsMapped?: boolean;
   attendees: string[];
   notes: string;
   status: ItineraryEventStatus;

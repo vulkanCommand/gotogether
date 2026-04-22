@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -68,6 +69,18 @@ const pickHomeTrip = (trips: ApiTrip[]) => {
   return trips
     .filter((trip) => trip.completed_at)
     .sort((a, b) => dateValue(b.end_date) - dateValue(a.end_date))[0] ?? null;
+};
+
+const openMapsLocation = async (value?: string) => {
+  const query = value?.trim();
+  if (!query) {
+    return;
+  }
+  try {
+    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
+  } catch {
+    Alert.alert('Maps unavailable', 'Could not open this location in Maps.');
+  }
 };
 
 export default function HomeScreen({ navigation }: Props) {
@@ -240,7 +253,9 @@ export default function HomeScreen({ navigation }: Props) {
                 <Text style={styles.meta}>
                   {overview.trip.start_date} - {overview.trip.end_date}
                 </Text>
-                <Text style={styles.meta}>{overview.trip.destination}</Text>
+                <Pressable onPress={() => openMapsLocation(overview.trip.destination)}>
+                  <Text style={[styles.meta, styles.locationLink]}>{overview.trip.destination}</Text>
+                </Pressable>
               </View>
               <View style={styles.statusPill}>
                 <Text style={styles.statusText}>{overview.trip.completed_at ? 'Completed' : overview.setupRequired ? 'Setup' : 'Live'}</Text>
@@ -259,8 +274,22 @@ export default function HomeScreen({ navigation }: Props) {
                 <>
                   <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
                   <Text style={styles.nextMeta}>
-                    {nextPlan.day} - {nextPlan.event.time} - {nextPlan.event.location}
+                    {nextPlan.day} - {nextPlan.event.time}
                   </Text>
+                  {nextPlan.event.locationIsMapped ? (
+                    <Pressable
+                      style={styles.locationIcon}
+                      onPress={() => openMapsLocation(nextPlan.event.location)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open ${nextPlan.event.location} in Maps`}
+                    >
+                      <Ionicons name="location" size={22} color={colors.accent} />
+                    </Pressable>
+                  ) : (
+                    <Pressable onPress={() => openMapsLocation(nextPlan.event.location)}>
+                      <Text style={styles.nextLocation}>{nextPlan.event.location}</Text>
+                    </Pressable>
+                  )}
                   <Text style={styles.mapHint}>Tap to open live map</Text>
                 </>
               ) : overview.setupRequired ? (
@@ -333,6 +362,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
   },
+  locationLink: {
+    color: colors.accent,
+    fontWeight: '800',
+    textDecorationLine: 'underline',
+  },
   statusPill: {
     borderRadius: radius.pill,
     backgroundColor: '#EEF4FF',
@@ -385,6 +419,21 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  nextLocation: {
+    marginTop: 6,
+    color: colors.accent,
+    fontWeight: '900',
+    textDecorationLine: 'underline',
+  },
+  locationIcon: {
+    marginTop: spacing.sm,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EEF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mapHint: {
     marginTop: spacing.sm,

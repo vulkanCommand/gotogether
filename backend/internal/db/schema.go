@@ -72,6 +72,7 @@ var schemaStatements = []string{
 		title TEXT NOT NULL,
 		time_label TEXT NOT NULL,
 		location TEXT NOT NULL,
+		location_is_mapped BOOLEAN NOT NULL DEFAULT FALSE,
 		notes TEXT,
 		status TEXT NOT NULL DEFAULT 'upcoming',
 		attendee_summary TEXT,
@@ -82,6 +83,7 @@ var schemaStatements = []string{
 	)`,
 	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`,
 	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS location_is_mapped BOOLEAN NOT NULL DEFAULT FALSE`,
 	`CREATE TABLE IF NOT EXISTS expense_groups (
 		id SERIAL PRIMARY KEY,
 		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,

@@ -106,10 +106,10 @@ func SaveTripItinerary(c *gin.Context) {
 
 			if _, err := tx.Exec(`
 				INSERT INTO itinerary_events (
-					itinerary_day_id, title, time_label, location, notes, status, attendee_summary, event_order
+					itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, attendee_summary, event_order
 				)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			`, itineraryDayID, title, timeLabel, location, notes, normalizeEventStatus(event.Status), strings.Join(event.Attendees, "||"), eventIndex); err != nil {
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			`, itineraryDayID, title, timeLabel, location, event.LocationIsMapped, notes, normalizeEventStatus(event.Status), strings.Join(event.Attendees, "||"), eventIndex); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save itinerary event", "details": err.Error()})
 				return
 			}
@@ -343,9 +343,9 @@ func UpdateItineraryEvent(c *gin.Context) {
 
 	if _, err := db.DB.Exec(`
 		UPDATE itinerary_events
-		SET title = $1, time_label = $2, location = $3, notes = $4, attendee_summary = $5
-		WHERE id = $6
-	`, title, timeLabel, location, strings.TrimSpace(req.Notes), strings.Join(req.Attendees, "||"), eventID); err != nil {
+		SET title = $1, time_label = $2, location = $3, location_is_mapped = $4, notes = $5, attendee_summary = $6
+		WHERE id = $7
+	`, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), strings.Join(req.Attendees, "||"), eventID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update event", "details": err.Error()})
 		return
 	}
@@ -684,6 +684,7 @@ func loadTripItinerary(tripID int) ([]models.ItineraryDayPayload, error) {
 			title,
 			time_label,
 			location,
+			COALESCE(location_is_mapped, FALSE),
 			COALESCE(notes, ''),
 			status,
 			COALESCE(attendee_summary, ''),
@@ -704,7 +705,7 @@ func loadTripItinerary(tripID int) ([]models.ItineraryDayPayload, error) {
 		var eventID, itineraryDayID, eventOrder int
 		var attendeeSummary string
 		var event models.ItineraryEventPayload
-		if err := eventRows.Scan(&eventID, &itineraryDayID, &event.Title, &event.Time, &event.Location, &event.Notes, &event.Status, &attendeeSummary, &event.CompletedAt, &eventOrder); err != nil {
+		if err := eventRows.Scan(&eventID, &itineraryDayID, &event.Title, &event.Time, &event.Location, &event.LocationIsMapped, &event.Notes, &event.Status, &attendeeSummary, &event.CompletedAt, &eventOrder); err != nil {
 			return nil, err
 		}
 		event.ID = fmt.Sprintf("event-%d", eventID)
@@ -771,23 +772,24 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 
 	var eventID int
 	err := db.DB.QueryRow(`
-		INSERT INTO itinerary_events (itinerary_day_id, title, time_label, location, notes, status, attendee_summary, event_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO itinerary_events (itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, attendee_summary, event_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id
-	`, dayID, title, timeLabel, location, strings.TrimSpace(req.Notes), status, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
+	`, dayID, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), status, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
 	if err != nil {
 		return models.ItineraryEventPayload{}, err
 	}
 
 	return models.ItineraryEventPayload{
-		ID:        fmt.Sprintf("event-%d", eventID),
-		DayID:     fmt.Sprintf("day-%d", dayID),
-		Title:     title,
-		Time:      timeLabel,
-		Location:  location,
-		Notes:     strings.TrimSpace(req.Notes),
-		Attendees: req.Attendees,
-		Status:    status,
+		ID:               fmt.Sprintf("event-%d", eventID),
+		DayID:            fmt.Sprintf("day-%d", dayID),
+		Title:            title,
+		Time:             timeLabel,
+		Location:         location,
+		LocationIsMapped: req.LocationIsMapped,
+		Notes:            strings.TrimSpace(req.Notes),
+		Attendees:        req.Attendees,
+		Status:           status,
 	}, nil
 }
 
