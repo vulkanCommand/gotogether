@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>501556960072-4b1ml6tusn7j2hj0ob6ff6331u9o1al5.apps.googleusercontent.com</string>
+	<string>501556960072-68i7ngrseu0jgur8h5ekvcpa1l9at69g.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.501556960072-4b1ml6tusn7j2hj0ob6ff6331u9o1al5</string>
+	<string>com.googleusercontent.apps.501556960072-68i7ngrseu0jgur8h5ekvcpa1l9at69g</string>
 	<key>API_KEY</key>
 	<string>AIzaSyBzc19vX005rUj5fObVwopX2YIu1Ru--Rc</string>
 	<key>GCM_SENDER_ID</key>
@@ -13,7 +13,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.gotogether.app</string>
+	<string>com.trenith.gotogether</string>
 	<key>PROJECT_ID</key>
 	<string>gotogether-783eb</string>
 	<key>STORAGE_BUCKET</key>
@@ -29,6 +29,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:501556960072:ios:2e438c0c0cd6c8e3eb717d</string>
+	<string>1:501556960072:ios:f0928ad14d015dabeb717d</string>
 </dict>
 </plist>
