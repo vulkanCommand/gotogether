@@ -266,10 +266,23 @@ func createUserNotification(userID int, tripID int, title string, body string, k
 		}
 	}
 
-	_, _ = db.DB.Exec(`
+	var notificationID int
+	err := db.DB.QueryRow(`
 		INSERT INTO notifications (
 			user_id, trip_id, title, body, kind, requires_action, action_type, target_id, actor_user_id
 		)
 		VALUES ($1, NULLIF($2, 0), $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, 0), NULLIF($9, 0))
-	`, userID, tripID, strings.TrimSpace(title), strings.TrimSpace(body), strings.TrimSpace(kind), requiresAction, actionType, targetID, actorUserID)
+		RETURNING id
+	`, userID, tripID, strings.TrimSpace(title), strings.TrimSpace(body), strings.TrimSpace(kind), requiresAction, actionType, targetID, actorUserID).Scan(&notificationID)
+	if err != nil {
+		return
+	}
+
+	go sendPushNotificationToUser(userID, title, body, map[string]any{
+		"screen":         "Notifications",
+		"notificationId": notificationID,
+		"tripId":         tripID,
+		"kind":           strings.TrimSpace(kind),
+		"requiresAction": requiresAction,
+	})
 }

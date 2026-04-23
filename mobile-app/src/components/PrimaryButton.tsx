@@ -1,6 +1,5 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 
@@ -23,14 +22,9 @@ export default function PrimaryButton({
       style={({ pressed }) => [styles.wrap, disabled && styles.disabled, pressed && !disabled && styles.pressed]}
     >
       {variant === 'primary' ? (
-        <LinearGradient
-          colors={disabled ? ['#CBD5E1', '#CBD5E1'] : ['#111827', '#2563EB']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.button}
-        >
+        <View style={[styles.button, styles.primaryButton, disabled && styles.primaryButtonDisabled]}>
           <Text style={styles.primaryText}>{title}</Text>
-        </LinearGradient>
+        </View>
       ) : (
         <View style={styles.secondaryButton}>
           <Text style={styles.secondaryText}>{title}</Text>
@@ -63,6 +57,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
+  },
+  primaryButton: {
+    backgroundColor: colors.accent,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: '#AFC7F7',
   },
   primaryText: {
     color: '#FFFFFF',

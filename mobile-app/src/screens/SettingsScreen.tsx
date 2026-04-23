@@ -8,8 +8,9 @@ import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
 import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { deleteMyAccount, fetchFriends } from '../config/api';
+import { deleteMyAccount, fetchFriends, unregisterPushToken } from '../config/api';
 import { firebaseAuth } from '../config/firebase';
+import { clearStoredPushToken, getStoredPushToken } from '../config/pushNotifications';
 import { useAuthStore } from '../store/authStore';
 import { useFriendStore } from '../store/friendStore';
 import { useTripStore } from '../store/tripStore';
@@ -34,6 +35,16 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const handleSignOut = async () => {
+    const pushToken = await getStoredPushToken();
+    if (pushToken) {
+      try {
+        await unregisterPushToken({ token: pushToken });
+      } catch (error) {
+        console.log('Push unregister failed', error);
+      } finally {
+        await clearStoredPushToken();
+      }
+    }
     await signOut(firebaseAuth);
     clearFriends();
     resetTrip();
@@ -48,6 +59,16 @@ export default function SettingsScreen({ navigation }: Props) {
         style: 'destructive',
         onPress: async () => {
           try {
+            const pushToken = await getStoredPushToken();
+            if (pushToken) {
+              try {
+                await unregisterPushToken({ token: pushToken });
+              } catch (error) {
+                console.log('Push unregister failed', error);
+              } finally {
+                await clearStoredPushToken();
+              }
+            }
             await deleteMyAccount();
             await signOut(firebaseAuth);
             clearFriends();

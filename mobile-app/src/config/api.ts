@@ -243,6 +243,20 @@ export async function deleteMyAccount() {
   });
 }
 
+export async function registerPushToken(payload: { token: string; platform: string }) {
+  return apiRequest<{ saved: boolean }>('/api/me/push-token', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function unregisterPushToken(payload: { token: string }) {
+  return apiRequest<{ removed: boolean }>('/api/me/push-token', {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function syncDeviceContacts(payload: { emails: string[]; phones: string[] }) {
   return apiRequest<{ friends: Friend[] }>('/api/contacts/sync', {
     method: 'POST',

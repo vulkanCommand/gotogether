@@ -150,6 +150,14 @@ var schemaStatements = []string{
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE (trip_id, user_id)
 	)`,
+	`CREATE TABLE IF NOT EXISTS user_push_tokens (
+		id SERIAL PRIMARY KEY,
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		expo_push_token TEXT NOT NULL UNIQUE,
+		platform TEXT NOT NULL DEFAULT 'expo',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
 	`CREATE TABLE IF NOT EXISTS notifications (
 		id SERIAL PRIMARY KEY,
 		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -192,6 +200,7 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_expenses_group_id ON expenses (expense_group_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_expense_splits_expense_id ON expense_splits (expense_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, cleared_at, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_id ON user_push_tokens (user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_event_completion_confirmations_event ON event_completion_confirmations (event_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_completion_confirmations_trip ON trip_completion_confirmations (trip_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_member_setup_trip_user ON trip_member_setup (trip_id, user_id)`,

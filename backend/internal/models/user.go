@@ -21,6 +21,11 @@ type UpdateProfileRequest struct {
 	Bio      string `json:"bio"`
 }
 
+type PushTokenRequest struct {
+	Token    string `json:"token"`
+	Platform string `json:"platform"`
+}
+
 type ContactSyncRequest struct {
 	Emails []string `json:"emails"`
 	Phones []string `json:"phones"`

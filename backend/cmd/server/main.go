@@ -31,6 +31,8 @@ func main() {
 	api.GET("/me", handlers.GetMe)
 	api.PUT("/me", handlers.UpdateMe)
 	api.DELETE("/me", handlers.DeleteMe)
+	api.POST("/me/push-token", handlers.RegisterPushToken)
+	api.DELETE("/me/push-token", handlers.UnregisterPushToken)
 	api.POST("/contacts/sync", handlers.SyncContacts)
 	api.GET("/friends", handlers.GetFriends)
 	api.GET("/notifications", handlers.GetNotifications)

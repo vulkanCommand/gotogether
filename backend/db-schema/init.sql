@@ -141,6 +141,15 @@ CREATE TABLE IF NOT EXISTS trip_member_setup (
     UNIQUE (trip_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_push_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expo_push_token TEXT NOT NULL UNIQUE,
+    platform TEXT NOT NULL DEFAULT 'expo',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
