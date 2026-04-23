@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
 import MapView, { Marker, Polyline } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
@@ -40,6 +41,26 @@ const defaultRegion = {
   longitude: -122.4324,
   latitudeDelta: 0.08,
   longitudeDelta: 0.08,
+};
+
+const openMapsLocation = async (value?: string) => {
+  const query = value?.trim();
+  if (!query) {
+    return;
+  }
+  try {
+    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
+  } catch {
+    Alert.alert('Maps unavailable', 'Could not open this location in Maps.');
+  }
+};
+
+const shouldShowLocationIcon = (location?: string, locationIsMapped?: boolean) => {
+  const normalized = location?.trim() ?? '';
+  if (!normalized || normalized.toLowerCase() === 'location tbd') {
+    return false;
+  }
+  return Boolean(locationIsMapped || normalized.includes(','));
 };
 
 export default function LiveScreen() {
@@ -262,7 +283,18 @@ export default function LiveScreen() {
                 <Text style={styles.destinationMeta}>
                   {activeDestination.dayTitle} - {activeDestination.event.time}
                 </Text>
-                <Text style={styles.destinationMeta}>{activeDestination.event.location}</Text>
+                {shouldShowLocationIcon(activeDestination.event.location, activeDestination.event.locationIsMapped) ? (
+                  <Pressable
+                    style={styles.locationIcon}
+                    onPress={() => openMapsLocation(activeDestination.event.location)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${activeDestination.event.location} in Maps`}
+                  >
+                    <Ionicons name="location" size={22} color={colors.accent} />
+                  </Pressable>
+                ) : (
+                  <Text style={styles.destinationMeta}>{activeDestination.event.location}</Text>
+                )}
                 <Text style={styles.distanceText}>
                   {selfDistance !== null ? `${formatMiles(selfDistance)} from you` : destinationStatus || 'Share your location to see your distance.'}
                 </Text>
@@ -422,6 +454,15 @@ const styles = StyleSheet.create({
   destinationMeta: {
     marginTop: 5,
     color: colors.textSecondary,
+  },
+  locationIcon: {
+    marginTop: spacing.sm,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EEF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   distanceText: {
     marginTop: spacing.sm,

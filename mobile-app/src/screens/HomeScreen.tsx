@@ -83,6 +83,14 @@ const openMapsLocation = async (value?: string) => {
   }
 };
 
+const shouldShowLocationIcon = (location?: string, locationIsMapped?: boolean) => {
+  const normalized = location?.trim() ?? '';
+  if (!normalized || normalized.toLowerCase() === 'location tbd') {
+    return false;
+  }
+  return Boolean(locationIsMapped || normalized.includes(','));
+};
+
 export default function HomeScreen({ navigation }: Props) {
   const [overview, setOverview] = useState<HomeOverview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -276,7 +284,7 @@ export default function HomeScreen({ navigation }: Props) {
                   <Text style={styles.nextMeta}>
                     {nextPlan.day} - {nextPlan.event.time}
                   </Text>
-                  {nextPlan.event.locationIsMapped ? (
+                  {shouldShowLocationIcon(nextPlan.event.location, nextPlan.event.locationIsMapped) ? (
                     <Pressable
                       style={styles.locationIcon}
                       onPress={() => openMapsLocation(nextPlan.event.location)}

@@ -20,6 +20,14 @@ type Props = NativeStackScreenProps<RootStackParamList, 'TripOverview'>;
 
 const heroImage = 'https://images.unsplash.com/photo-1501785888041-af3ef285b470';
 
+const shouldShowLocationIcon = (location?: string, locationIsMapped?: boolean) => {
+  const normalized = location?.trim() ?? '';
+  if (!normalized || normalized.toLowerCase() === 'location tbd') {
+    return false;
+  }
+  return Boolean(locationIsMapped || normalized.includes(','));
+};
+
 export default function TripOverviewScreen({ navigation }: Props) {
   const {
     currentTrip,
@@ -204,7 +212,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
               <>
                 <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
                 <Text style={styles.nextMeta}>{nextPlan.day} - {nextPlan.event.time}</Text>
-                {nextPlan.event.locationIsMapped ? (
+                {shouldShowLocationIcon(nextPlan.event.location, nextPlan.event.locationIsMapped) ? (
                   <Pressable
                     style={styles.locationIcon}
                     onPress={() => openMapsLocation(nextPlan.event.location)}

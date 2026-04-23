@@ -86,6 +86,14 @@ const openMapsLocation = async (value?: string) => {
   }
 };
 
+const shouldShowLocationIcon = (location?: string, locationIsMapped?: boolean) => {
+  const normalized = location?.trim() ?? '';
+  if (!normalized || normalized.toLowerCase() === 'location tbd') {
+    return false;
+  }
+  return Boolean(locationIsMapped || normalized.includes(','));
+};
+
 export default function ItineraryScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
   const bestMatchRange = useTripStore((state) => state.bestMatchRange);
@@ -764,7 +772,7 @@ function EventRow({
       <View style={[styles.eventCard, isActive && styles.eventCardActive]}>
         {isActive ? <Text style={styles.nowLabel}>Active now</Text> : null}
         <Text style={[styles.eventTitle, isCompleted && styles.eventTitleDone]}>{event.title}</Text>
-        {event.locationIsMapped ? (
+        {shouldShowLocationIcon(event.location, event.locationIsMapped) ? (
           <Pressable
             style={styles.eventLocationIcon}
             onPress={() => openMapsLocation(event.location)}
