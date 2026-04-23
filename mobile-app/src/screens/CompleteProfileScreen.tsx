@@ -1,0 +1,201 @@
+import React, { useState } from 'react';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import * as ImagePicker from 'expo-image-picker';
+
+import Screen from '../components/Screen';
+import AppCard from '../components/AppCard';
+import PrimaryButton from '../components/PrimaryButton';
+import SectionTitle from '../components/SectionTitle';
+import { RootStackParamList } from '../navigation/AppNavigator';
+import { colors } from '../theme/colors';
+import { radius, spacing } from '../theme/spacing';
+import { updateMyProfile, updateMyProfileImage } from '../config/api';
+import { useAuthStore } from '../store/authStore';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'CompleteProfile'>;
+
+export default function CompleteProfileScreen({ navigation }: Props) {
+  const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
+
+  const [name, setName] = useState(user?.name ?? '');
+  const [username, setUsername] = useState(user?.username ?? '');
+  const [phone, setPhone] = useState(user?.phone ?? '');
+  const [homeCity, setHomeCity] = useState(user?.home_city ?? '');
+  const [bio, setBio] = useState(user?.bio ?? '');
+  const [profilePhoto, setProfilePhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const pickProfileImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('Photos permission needed', 'Allow photo access to add a profile picture.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setProfilePhoto(result.assets[0]);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!name.trim() || !username.trim()) {
+      Alert.alert('Missing details', 'Name and username are required.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await updateMyProfile({
+        name: name.trim(),
+        username: username.trim(),
+        phone: phone.trim(),
+        home_city: homeCity.trim(),
+        bio: bio.trim(),
+      });
+      let updatedUser = response.user;
+      if (profilePhoto) {
+        const imageResponse = await updateMyProfileImage({
+          photo: {
+            uri: profilePhoto.uri,
+            name: profilePhoto.fileName || 'profile.jpg',
+            type: profilePhoto.mimeType || 'image/jpeg',
+          },
+        });
+        updatedUser = imageResponse.user;
+      }
+      setUser(updatedUser);
+      navigation.replace('PermissionsSetup');
+    } catch (error: any) {
+      console.log('Profile update failed', error);
+      Alert.alert('Save failed', error?.message || 'Could not save profile');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Screen>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+        <SectionTitle
+          title="Finish your profile"
+          subtitle="A few basics make the rest of the app personal and easier to use."
+        />
+
+        <AppCard>
+          <Text style={styles.emailLabel}>{user?.email || 'Signed in account'}</Text>
+
+          <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
+            {profilePhoto ? (
+              <Image source={{ uri: profilePhoto.uri }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarText}>Add profile photo</Text>
+            )}
+          </Pressable>
+
+          <TextInput
+            style={styles.input}
+            placeholder="Full name"
+            placeholderTextColor={colors.textSecondary}
+            value={name}
+            onChangeText={setName}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Username"
+            placeholderTextColor={colors.textSecondary}
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Phone number"
+            placeholderTextColor={colors.textSecondary}
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Home city"
+            placeholderTextColor={colors.textSecondary}
+            value={homeCity}
+            onChangeText={setHomeCity}
+          />
+
+          <TextInput
+            style={[styles.input, styles.bioInput]}
+            placeholder="Short bio"
+            placeholderTextColor={colors.textSecondary}
+            value={bio}
+            onChangeText={setBio}
+            multiline
+          />
+        </AppCard>
+
+        <PrimaryButton
+          title={saving ? 'Saving profile...' : 'Save and continue'}
+          onPress={handleSave}
+        />
+      </ScrollView>
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  content: {
+    paddingBottom: spacing.xl,
+  },
+  emailLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.accent,
+    marginBottom: spacing.md,
+  },
+  avatarWrap: {
+    height: 120,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#EEF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    marginBottom: spacing.md,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarText: {
+    color: colors.accent,
+    fontWeight: '800',
+  },
+  input: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: colors.textPrimary,
+    fontSize: 15,
+    marginBottom: spacing.sm,
+  },
+  bioInput: {
+    minHeight: 96,
+    textAlignVertical: 'top',
+    marginBottom: 0,
+  },
+});

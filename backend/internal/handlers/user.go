@@ -1,65 +1,117 @@
 package handlers
 
 import (
-	"database/sql"
+	"context"
 	"net/http"
+	"strings"
 
+	"gotogether-backend/internal/auth"
 	"gotogether-backend/internal/db"
+	"gotogether-backend/internal/models"
 
 	"github.com/gin-gonic/gin"
 )
 
 func GetMe(c *gin.Context) {
-	uid, _ := c.Get("uid")
-	println("DEBUG UID:", uid)
-	email, _ := c.Get("email")
-	name, _ := c.Get("name")
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
 
-	uidStr, _ := uid.(string)
-	emailStr, _ := email.(string)
-	nameStr, _ := name.(string)
-
-	if db.DB != nil {
-		var userID int
-
-		err := db.DB.QueryRow(`
-			INSERT INTO users (firebase_uid, email, name)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (firebase_uid)
-			DO UPDATE SET
-				email = EXCLUDED.email,
-				name = EXCLUDED.name
-			RETURNING id
-		`, uidStr, emailStr, nameStr).Scan(&userID)
-
-		if err != nil && err != sql.ErrNoRows {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "failed to sync user",
-				"details": err.Error(),
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Authenticated user",
-			"user": gin.H{
-				"id":           userID,
-				"firebase_uid": uidStr,
-				"email":        emailStr,
-				"name":         nameStr,
-			},
-		})
+	user, err := loadUserByID(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load user", "details": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Authenticated user",
-		"user": gin.H{
-			"id":           nil,
-			"firebase_uid": uidStr,
-			"email":        emailStr,
-			"name":         nameStr,
-		},
-		"db": "not connected",
+		"user":    user,
+	})
+}
+
+func UpdateMe(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	var req models.UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.Phone = normalizePhone(req.Phone)
+	req.Username = strings.TrimSpace(req.Username)
+	req.HomeCity = strings.TrimSpace(req.HomeCity)
+	req.Bio = strings.TrimSpace(req.Bio)
+
+	if req.Name == "" || req.Username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name and username are required"})
+		return
+	}
+
+	_, err := db.DB.Exec(`
+		UPDATE users
+		SET
+			name = $2,
+			phone = $3,
+			username = $4,
+			home_city = $5,
+			bio = $6,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`, userID, req.Name, req.Phone, req.Username, req.HomeCity, req.Bio)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile", "details": err.Error()})
+		return
+	}
+
+	user, err := loadUserByID(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load user", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+func DeleteMe(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	uidValue, _ := c.Get("uid")
+	uid, _ := uidValue.(string)
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	if _, err := tx.Exec(`DELETE FROM users WHERE id = $1`, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete account", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
+		return
+	}
+
+	authDeleted := true
+	if strings.TrimSpace(uid) != "" {
+		if err := auth.FirebaseAuth.DeleteUser(context.Background(), uid); err != nil {
+			authDeleted = false
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"deleted":      true,
+		"auth_deleted": authDeleted,
 	})
 }

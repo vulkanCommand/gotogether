@@ -13,7 +13,16 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gotogether.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSContactsUsageDescription": "GoTogether uses your contacts to find friends who already use the app.",
+        "NSLocationWhenInUseUsageDescription": "GoTogether uses your location to show your trip crew on the live map.",
+        "NSPhotoLibraryUsageDescription": "GoTogether uses your photos so you can upload trip memories.",
+        "NSPhotoLibraryAddUsageDescription": "GoTogether saves trip memories you upload."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,10 +30,30 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "READ_CONTACTS",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "default",
+          "color": "#3A86FF"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d3d501ad-2e9a-44a7-8142-26a3d7018aa7"
+      }
     }
   }
 }

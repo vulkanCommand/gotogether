@@ -1,0 +1,8 @@
+.git
+.gitignore
+.env
+firebase-admin.json
+*.log
+tmp
+dist
+node_modules

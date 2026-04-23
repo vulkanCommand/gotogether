@@ -3,13 +3,15 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 import { spacing } from '../theme/spacing';
+import AppFooter from './AppFooter';
 
 type Props = {
   children: ReactNode;
   scroll?: boolean;
+  showFooter?: boolean;
 };
 
-export default function Screen({ children, scroll = true }: Props) {
+export default function Screen({ children, scroll = true, showFooter = false }: Props) {
   const content = scroll ? (
     <ScrollView
       contentContainerStyle={styles.scrollContent}
@@ -21,7 +23,12 @@ export default function Screen({ children, scroll = true }: Props) {
     <View style={styles.staticContent}>{children}</View>
   );
 
-  return <SafeAreaView style={styles.safe}>{content}</SafeAreaView>;
+  return (
+    <SafeAreaView style={styles.safe}>
+      {content}
+      {showFooter ? <AppFooter /> : null}
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
