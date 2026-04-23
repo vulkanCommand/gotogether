@@ -209,7 +209,7 @@ export async function syncAuthenticatedUser() {
 export async function updateMyProfile(payload: {
   name: string;
   phone?: string;
-  username: string;
+  username?: string;
   home_city?: string;
   bio?: string;
 }) {

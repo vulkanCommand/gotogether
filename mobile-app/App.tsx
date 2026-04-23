@@ -1,9 +1,9 @@
+import 'expo-dev-client';
 import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
 import { NavigationContainer, DefaultTheme, createNavigationContainerRef } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { onIdTokenChanged } from 'firebase/auth';
 import AppNavigator from './src/navigation/AppNavigator';
 import { RootStackParamList } from './src/navigation/AppNavigator';
 import { colors } from './src/theme/colors';
@@ -36,7 +36,7 @@ function AuthBootstrap() {
   const setUser = useAuthStore((state) => state.setUser);
 
   useEffect(() => {
-    const unsubscribe = onIdTokenChanged(firebaseAuth, async (user) => {
+    const unsubscribe = firebaseAuth.onIdTokenChanged(async (user) => {
       try {
         if (!user) {
           clearSession();

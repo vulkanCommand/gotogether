@@ -14,6 +14,7 @@ import (
 )
 
 var nonDigitPattern = regexp.MustCompile(`\D+`)
+var nonUsernamePattern = regexp.MustCompile(`[^a-z0-9]+`)
 
 func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 	if db.DB == nil {
@@ -39,19 +40,22 @@ func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 	emailStr, _ := email.(string)
 	nameStr, _ := name.(string)
 	phoneStr, _ := phone.(string)
+	normalizedPhone := normalizePhone(phoneStr)
+	defaultUsername := generateDefaultUsername(nameStr, normalizedPhone, uid)
 
 	var userID int
 	err := db.DB.QueryRow(`
-		INSERT INTO users (firebase_uid, email, name, phone)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO users (firebase_uid, email, name, phone, username)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (firebase_uid)
 		DO UPDATE SET
 			email = COALESCE(NULLIF(EXCLUDED.email, ''), users.email),
 			name = COALESCE(NULLIF(EXCLUDED.name, ''), users.name),
 			phone = COALESCE(NULLIF(EXCLUDED.phone, ''), users.phone),
+			username = COALESCE(NULLIF(users.username, ''), NULLIF(EXCLUDED.username, ''), users.username),
 			updated_at = CURRENT_TIMESTAMP
 		RETURNING id
-	`, strings.TrimSpace(uid), strings.TrimSpace(emailStr), strings.TrimSpace(nameStr), normalizePhone(phoneStr)).Scan(&userID)
+	`, strings.TrimSpace(uid), strings.TrimSpace(emailStr), strings.TrimSpace(nameStr), normalizedPhone, defaultUsername).Scan(&userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to sync authenticated user",
@@ -93,7 +97,7 @@ func loadUserByID(userID int) (models.User, error) {
 		return user, err
 	}
 
-	user.ProfileComplete = strings.TrimSpace(user.Name) != "" && strings.TrimSpace(user.Username) != ""
+	user.ProfileComplete = strings.TrimSpace(user.Name) != ""
 	return user, nil
 }
 
@@ -188,4 +192,34 @@ func normalizePhone(value string) string {
 	}
 
 	return digits
+}
+
+func generateDefaultUsername(name string, phone string, uid string) string {
+	base := strings.ToLower(strings.TrimSpace(name))
+	replacer := strings.NewReplacer(" ", "", "-", "", "_", "", ".", "")
+	base = replacer.Replace(base)
+	base = nonUsernamePattern.ReplaceAllString(base, "")
+	if len(base) >= 3 {
+		return "gt" + base
+	}
+
+	normalizedPhone := normalizePhone(phone)
+	if len(normalizedPhone) >= 4 {
+		return "traveler" + normalizedPhone[len(normalizedPhone)-4:]
+	}
+
+	trimmedUID := strings.ToLower(strings.TrimSpace(uid))
+	if trimmedUID == "" {
+		return "traveler"
+	}
+
+	allowed := nonUsernamePattern.ReplaceAllString(trimmedUID, "")
+	if len(allowed) > 6 {
+		allowed = allowed[:6]
+	}
+	if len(allowed) == 0 {
+		return "traveler"
+	}
+
+	return "traveler" + allowed
 }

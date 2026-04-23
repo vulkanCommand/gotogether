@@ -135,7 +135,7 @@ export default function ProfileScreen({ navigation }: Props) {
 
             <View style={styles.identity}>
               <Text style={styles.name}>{user?.name || 'Your name'}</Text>
-              <Text style={styles.email}>{user?.email || 'Signed in user'}</Text>
+              <Text style={styles.email}>{user?.email || user?.phone || 'Signed in user'}</Text>
               <Text style={styles.stat}>{friends.length} connected friends</Text>
             </View>
           </View>

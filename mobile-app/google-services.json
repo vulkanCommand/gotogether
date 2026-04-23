@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "501556960072",
+    "project_id": "gotogether-783eb",
+    "storage_bucket": "gotogether-783eb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:501556960072:android:3e7897f878011a02eb717d",
+        "android_client_info": {
+          "package_name": "com.gotogether.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "501556960072-8bsocnoprord93t8r6j96v1qlepsq9qk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCoD2pyCh_3wd5HCUG549R7SvExFCvRxbE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "501556960072-8bsocnoprord93t8r6j96v1qlepsq9qk.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "501556960072-4b1ml6tusn7j2hj0ob6ff6331u9o1al5.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.gotogether.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
