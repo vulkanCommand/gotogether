@@ -5,6 +5,11 @@ export type CrewMember = {
   name: string;
   avatar?: string;
   role?: string;
+  availableDates?: string[];
+  leadVoteUserId?: number;
+  setupCompletedAt?: string;
+  isViewer?: boolean;
+  proposalStatus?: 'confirmed' | 'needs_response' | 'waiting' | string;
 };
 
 export type DestinationOption = {
@@ -78,6 +83,10 @@ export type CurrentTrip = {
   completed_at?: string;
   viewer_role?: string;
   lead_user_id?: number;
+  setup_completed_count?: number;
+  setup_pending_count?: number;
+  setup_required?: boolean;
+  readiness_status?: 'completed' | 'needs_your_response' | 'waiting_on_crew' | 'ready' | string;
 };
 
 type TripStore = {

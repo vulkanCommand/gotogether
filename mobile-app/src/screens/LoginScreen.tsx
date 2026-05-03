@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
-import { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import { FirebaseAuthTypes, signInWithPhoneNumber } from '@react-native-firebase/auth';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
+import Pill from '../components/Pill';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import TextField from '../components/TextField';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -15,6 +18,20 @@ import { firebaseAuth } from '../config/firebase';
 import { formatPhoneForFirebase, maskPhoneForOtp } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
+
+function getPhoneAuthErrorMessage(error: any) {
+  const code = error?.code as string | undefined;
+
+  if (code === 'auth/too-many-requests') {
+    return 'Firebase has temporarily blocked OTP requests from this device because of too many recent attempts. Wait a while before trying again, or use a different device/number for testing.';
+  }
+
+  if (code === 'auth/invalid-phone-number') {
+    return 'Enter a valid phone number with country code, or use a 10-digit US number.';
+  }
+
+  return error?.message || 'We could not send the OTP right now.';
+}
 
 export default function LoginScreen({ navigation }: Props) {
   const isExpoGo = Constants.appOwnership === 'expo';
@@ -44,14 +61,11 @@ export default function LoginScreen({ navigation }: Props) {
 
     try {
       setLoading(true);
-      const result = await firebaseAuth.signInWithPhoneNumber(formattedPhone);
+      const result = await signInWithPhoneNumber(firebaseAuth, formattedPhone);
       setConfirmation(result);
       setVerificationCode('');
     } catch (error: any) {
-      Alert.alert(
-        'Could not send code',
-        error?.message || 'We could not send the OTP right now.'
-      );
+      Alert.alert('Could not send code', getPhoneAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -84,6 +98,16 @@ export default function LoginScreen({ navigation }: Props) {
 
   return (
     <Screen>
+      <LinearGradient colors={['#0F172A', '#173A75', '#2563EB']} style={styles.hero}>
+        <Pill label={confirmation ? 'Secure sign-in' : 'Premium trip access'} tone="accent" />
+        <Text style={styles.heroTitle}>{confirmation ? 'One step left' : 'Welcome back to the crew'}</Text>
+        <Text style={styles.heroSubtitle}>
+          {confirmation
+            ? 'Enter the 6-digit code and we will drop you into your shared trip workspace.'
+            : 'Phone-first sign-in keeps the group fast, secure, and easy to join from any device.'}
+        </Text>
+      </LinearGradient>
+
       <SectionTitle
         title={confirmation ? 'Enter OTP' : 'Continue with phone'}
         subtitle={
@@ -98,12 +122,11 @@ export default function LoginScreen({ navigation }: Props) {
           {!confirmation ? (
             <>
               <Text style={styles.helperText}>
-                Enter `+countrycode` for international numbers, or just the 10-digit number for the US.
+                Enter +countrycode for international numbers, or just the 10-digit number for the US.
               </Text>
-              <TextInput
+              <TextField
+                label="Phone number"
                 placeholder="Phone number"
-                placeholderTextColor={colors.textSecondary}
-                style={styles.input}
                 value={phoneNumber}
                 onChangeText={setPhoneNumber}
                 keyboardType="phone-pad"
@@ -118,10 +141,9 @@ export default function LoginScreen({ navigation }: Props) {
             </>
           ) : (
             <>
-              <TextInput
+              <TextField
+                label="Verification code"
                 placeholder="6-digit code"
-                placeholderTextColor={colors.textSecondary}
-                style={styles.input}
                 value={verificationCode}
                 onChangeText={setVerificationCode}
                 keyboardType="number-pad"
@@ -166,18 +188,24 @@ export default function LoginScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  hero: {
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    gap: spacing.sm,
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -0.9,
+  },
+  heroSubtitle: {
+    color: '#DBEAFE',
+    fontSize: 14,
+    lineHeight: 21,
+  },
   form: {
     gap: spacing.md,
-  },
-  input: {
-    backgroundColor: colors.muted,
-    borderRadius: radius.md,
-    paddingHorizontal: 16,
-    paddingVertical: 15,
-    fontSize: 15,
-    color: colors.textPrimary,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   helperTitle: {
     fontSize: 16,

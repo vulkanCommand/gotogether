@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, ScrollView, StyleSheet } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { signOut } from '@react-native-firebase/auth';
 
 import Screen from '../components/Screen';
 import PrimaryButton from '../components/PrimaryButton';
@@ -44,7 +45,7 @@ export default function SettingsScreen({ navigation }: Props) {
         await clearStoredPushToken();
       }
     }
-    await firebaseAuth.signOut();
+    await signOut(firebaseAuth);
     clearFriends();
     resetTrip();
     clearSession();
@@ -69,7 +70,7 @@ export default function SettingsScreen({ navigation }: Props) {
               }
             }
             await deleteMyAccount();
-            await firebaseAuth.signOut();
+            await signOut(firebaseAuth);
             clearFriends();
             resetTrip();
             clearSession();

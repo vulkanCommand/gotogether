@@ -4,6 +4,7 @@ import React, { useEffect } from 'react';
 import { NavigationContainer, DefaultTheme, createNavigationContainerRef } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { getIdToken, onIdTokenChanged } from '@react-native-firebase/auth';
 import AppNavigator from './src/navigation/AppNavigator';
 import { RootStackParamList } from './src/navigation/AppNavigator';
 import { colors } from './src/theme/colors';
@@ -36,14 +37,14 @@ function AuthBootstrap() {
   const setUser = useAuthStore((state) => state.setUser);
 
   useEffect(() => {
-    const unsubscribe = firebaseAuth.onIdTokenChanged(async (user) => {
+    const unsubscribe = onIdTokenChanged(firebaseAuth, async (user) => {
       try {
         if (!user) {
           clearSession();
           return;
         }
 
-        const freshToken = await user.getIdToken(true);
+        const freshToken = await getIdToken(user);
         setSession(freshToken);
         const response = await syncAuthenticatedUser();
         setUser(response.user);

@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
+import Pill from '../components/Pill';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import TextField from '../components/TextField';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -84,6 +86,7 @@ export default function CompleteProfileScreen({ navigation }: Props) {
         />
 
         <AppCard>
+          <Pill label="Verified phone number" tone="accent" />
           <Text style={styles.phoneLabel}>{formatPhoneForDisplay(user?.phone || '') || 'Verified phone number'}</Text>
 
           <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
@@ -94,10 +97,9 @@ export default function CompleteProfileScreen({ navigation }: Props) {
             )}
           </Pressable>
 
-          <TextInput
-            style={styles.input}
+          <TextField
+            label="Full name"
             placeholder="Full name"
-            placeholderTextColor={colors.textSecondary}
             value={name}
             onChangeText={setName}
           />
@@ -118,8 +120,9 @@ const styles = StyleSheet.create({
   },
   phoneLabel: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.accent,
+    marginTop: spacing.sm,
     marginBottom: spacing.md,
   },
   avatarWrap: {
@@ -140,16 +143,5 @@ const styles = StyleSheet.create({
   avatarText: {
     color: colors.accent,
     fontWeight: '800',
-  },
-  input: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: colors.textPrimary,
-    fontSize: 15,
-    marginBottom: 0,
   },
 });

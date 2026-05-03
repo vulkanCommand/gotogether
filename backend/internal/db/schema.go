@@ -40,6 +40,15 @@ var schemaStatements = []string{
 	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS image_url TEXT`,
 	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`,
 	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+	`CREATE TABLE IF NOT EXISTS destination_cover_cache (
+		id SERIAL PRIMARY KEY,
+		destination_key TEXT NOT NULL UNIQUE,
+		destination_label TEXT NOT NULL,
+		image_url TEXT NOT NULL,
+		source TEXT NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
 	`CREATE TABLE IF NOT EXISTS trip_members (
 		id SERIAL PRIMARY KEY,
 		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
@@ -204,6 +213,7 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_event_completion_confirmations_event ON event_completion_confirmations (event_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_completion_confirmations_trip ON trip_completion_confirmations (trip_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_member_setup_trip_user ON trip_member_setup (trip_id, user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_destination_cover_cache_key ON destination_cover_cache (destination_key)`,
 }
 
 func ensureSchema(db *sql.DB) error {

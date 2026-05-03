@@ -23,7 +23,7 @@ export default function SectionTitle({ title, subtitle, action }: Props) {
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: 6,
+    gap: 8,
   },
   row: {
     flexDirection: 'row',
@@ -33,14 +33,14 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 32,
+    fontWeight: '900',
     color: colors.textPrimary,
-    letterSpacing: -0.7,
+    letterSpacing: -1.1,
   },
   subtitle: {
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 22,
     color: colors.textSecondary,
   },
 });

@@ -13,6 +13,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func computeTripReadiness(completedAt string, viewerSetupCompletedAt string, membersCount int, setupCompletedCount int) (string, bool, int) {
+	pendingCount := membersCount - setupCompletedCount
+	if pendingCount < 0 {
+		pendingCount = 0
+	}
+
+	if strings.TrimSpace(completedAt) != "" {
+		return "completed", false, 0
+	}
+	if strings.TrimSpace(viewerSetupCompletedAt) == "" {
+		return "needs_your_response", true, pendingCount
+	}
+	if pendingCount > 0 {
+		return "waiting_on_crew", false, pendingCount
+	}
+	return "ready", false, 0
+}
+
 func CreateTrip(c *gin.Context) {
 	userID, ok := getOrCreateAuthenticatedUserID(c)
 	if !ok {
@@ -68,8 +86,21 @@ func CreateTrip(c *gin.Context) {
 	if !allowedLead {
 		leadUserID = userID
 	}
-	trip.LeadUserID = userID
+	trip.LeadUserID = leadUserID
 	trip.ViewerRole = "lead"
+
+	availableDates := ""
+	if len(req.AvailableDates) > 0 {
+		normalizedDates := make([]string, 0, len(req.AvailableDates))
+		for _, value := range req.AvailableDates {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			normalizedDates = append(normalizedDates, value)
+		}
+		availableDates = strings.Join(normalizedDates, ",")
+	}
 
 	_, err = tx.Exec(`
 		INSERT INTO trip_members (trip_id, user_id, role)
@@ -108,12 +139,13 @@ func CreateTrip(c *gin.Context) {
 
 	if _, err := tx.Exec(`
 		INSERT INTO trip_member_setup (trip_id, user_id, available_dates, lead_vote_user_id, completed_at, updated_at)
-		VALUES ($1, $2, '', $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		ON CONFLICT (trip_id, user_id) DO UPDATE SET
+			available_dates = EXCLUDED.available_dates,
 			lead_vote_user_id = EXCLUDED.lead_vote_user_id,
 			completed_at = CURRENT_TIMESTAMP,
 			updated_at = CURRENT_TIMESTAMP
-	`, trip.ID, userID, leadUserID); err != nil {
+	`, trip.ID, userID, availableDates, leadUserID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save lead vote", "details": err.Error()})
 		return
 	}
@@ -139,21 +171,25 @@ func GetTrips(c *gin.Context) {
 			t.start_date::text,
 			t.end_date::text,
 			t.created_by,
-			COUNT(tm.user_id)::int AS members_count,
+			COUNT(DISTINCT tm.user_id)::int AS members_count,
 			COALESCE(t.image_url, '') AS image_url,
 			COALESCE(t.completed_at::text, '') AS completed_at,
 			COALESCE(viewer.role, '') AS viewer_role,
-			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id
+			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id,
+			COUNT(DISTINCT CASE WHEN setup.completed_at IS NOT NULL THEN setup.user_id END)::int AS setup_completed_count,
+			COALESCE(viewer_setup.completed_at::text, '') AS viewer_setup_completed_at
 		FROM trips t
 		LEFT JOIN trip_members tm ON tm.trip_id = t.id
 		LEFT JOIN trip_members viewer ON viewer.trip_id = t.id AND viewer.user_id = $1
+		LEFT JOIN trip_member_setup setup ON setup.trip_id = t.id AND setup.user_id = tm.user_id
+		LEFT JOIN trip_member_setup viewer_setup ON viewer_setup.trip_id = t.id AND viewer_setup.user_id = $1
 		WHERE t.created_by = $1
 		   OR t.id IN (
 				SELECT trip_id
 				FROM trip_members
 				WHERE user_id = $1
 		   )
-		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by, t.image_url, t.completed_at, viewer.role
+		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by, t.image_url, t.completed_at, viewer.role, viewer_setup.completed_at
 		ORDER BY t.start_date ASC, t.id ASC
 	`, userID)
 	if err != nil {
@@ -165,10 +201,31 @@ func GetTrips(c *gin.Context) {
 	trips := make([]models.TripListItem, 0)
 	for rows.Next() {
 		var trip models.TripListItem
-		if err := rows.Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &trip.MembersCount, &trip.ImageURL, &trip.CompletedAt, &trip.ViewerRole, &trip.LeadUserID); err != nil {
+		var viewerSetupCompletedAt string
+		if err := rows.Scan(
+			&trip.ID,
+			&trip.Name,
+			&trip.Destination,
+			&trip.StartDate,
+			&trip.EndDate,
+			&trip.CreatedBy,
+			&trip.MembersCount,
+			&trip.ImageURL,
+			&trip.CompletedAt,
+			&trip.ViewerRole,
+			&trip.LeadUserID,
+			&trip.SetupCompletedCount,
+			&viewerSetupCompletedAt,
+		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read trips", "details": err.Error()})
 			return
 		}
+		trip.ReadinessStatus, trip.SetupRequired, trip.SetupPendingCount = computeTripReadiness(
+			trip.CompletedAt,
+			viewerSetupCompletedAt,
+			trip.MembersCount,
+			trip.SetupCompletedCount,
+		)
 		trips = append(trips, trip)
 	}
 	if err := rows.Err(); err != nil {
@@ -194,6 +251,7 @@ func GetTripByID(c *gin.Context) {
 
 	var trip models.Trip
 	var membersCount int
+	var viewerSetupCompletedAt string
 	err = db.DB.QueryRow(`
 		SELECT
 			t.id,
@@ -202,25 +260,43 @@ func GetTripByID(c *gin.Context) {
 			t.start_date::text,
 			t.end_date::text,
 			t.created_by,
-			COUNT(tm.user_id)::int AS members_count,
+			COUNT(DISTINCT tm.user_id)::int AS members_count,
 			COALESCE(t.image_url, '') AS image_url,
 			COALESCE(t.completed_at::text, '') AS completed_at,
 			COALESCE(viewer.role, '') AS viewer_role,
-			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id
+			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id,
+			COUNT(DISTINCT CASE WHEN setup.completed_at IS NOT NULL THEN setup.user_id END)::int AS setup_completed_count,
+			COALESCE(viewer_setup.completed_at::text, '') AS viewer_setup_completed_at
 		FROM trips t
 		LEFT JOIN trip_members tm ON tm.trip_id = t.id
 		LEFT JOIN trip_members viewer ON viewer.trip_id = t.id AND viewer.user_id = $2
+		LEFT JOIN trip_member_setup setup ON setup.trip_id = t.id AND setup.user_id = tm.user_id
+		LEFT JOIN trip_member_setup viewer_setup ON viewer_setup.trip_id = t.id AND viewer_setup.user_id = $2
 		WHERE t.id = $1
 		  AND (
 				t.created_by = $2
 				OR t.id IN (
 					SELECT trip_id
 					FROM trip_members
-					WHERE user_id = $2
+				WHERE user_id = $2
 				)
 		  )
-		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by, t.image_url, t.completed_at, viewer.role
-	`, tripID, userID).Scan(&trip.ID, &trip.Name, &trip.Destination, &trip.StartDate, &trip.EndDate, &trip.CreatedBy, &membersCount, &trip.ImageURL, &trip.CompletedAt, &trip.ViewerRole, &trip.LeadUserID)
+		GROUP BY t.id, t.name, t.destination, t.start_date, t.end_date, t.created_by, t.image_url, t.completed_at, viewer.role, viewer_setup.completed_at
+	`, tripID, userID).Scan(
+		&trip.ID,
+		&trip.Name,
+		&trip.Destination,
+		&trip.StartDate,
+		&trip.EndDate,
+		&trip.CreatedBy,
+		&membersCount,
+		&trip.ImageURL,
+		&trip.CompletedAt,
+		&trip.ViewerRole,
+		&trip.LeadUserID,
+		&trip.SetupCompletedCount,
+		&viewerSetupCompletedAt,
+	)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "trip not found"})
@@ -229,14 +305,32 @@ func GetTripByID(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch trip", "details": err.Error()})
 		return
 	}
+	trip.SetupPendingCount = membersCount - trip.SetupCompletedCount
+	if trip.SetupPendingCount < 0 {
+		trip.SetupPendingCount = 0
+	}
+	trip.ReadinessStatus, trip.SetupRequired, _ = computeTripReadiness(
+		trip.CompletedAt,
+		viewerSetupCompletedAt,
+		membersCount,
+		trip.SetupCompletedCount,
+	)
 
 	memberRows, err := db.DB.Query(`
-		SELECT u.id, COALESCE(u.name, ''), COALESCE(tm.role, 'member')
+		SELECT
+			u.id,
+			COALESCE(u.name, ''),
+			COALESCE(tm.role, 'member'),
+			COALESCE(setup.available_dates, ''),
+			COALESCE(setup.lead_vote_user_id, 0),
+			COALESCE(setup.completed_at::text, ''),
+			CASE WHEN tm.user_id = $2 THEN TRUE ELSE FALSE END AS is_viewer
 		FROM trip_members tm
 		INNER JOIN users u ON u.id = tm.user_id
+		LEFT JOIN trip_member_setup setup ON setup.trip_id = tm.trip_id AND setup.user_id = tm.user_id
 		WHERE tm.trip_id = $1
 		ORDER BY tm.joined_at ASC, tm.id ASC
-	`, tripID)
+	`, tripID, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch trip members", "details": err.Error()})
 		return
@@ -247,30 +341,49 @@ func GetTripByID(c *gin.Context) {
 	for memberRows.Next() {
 		var memberID int
 		var memberName, memberRole string
-		if err := memberRows.Scan(&memberID, &memberName, &memberRole); err != nil {
+		var availableDates string
+		var leadVoteUserID int
+		var setupCompletedAt string
+		var isViewer bool
+		if err := memberRows.Scan(&memberID, &memberName, &memberRole, &availableDates, &leadVoteUserID, &setupCompletedAt, &isViewer); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read trip members", "details": err.Error()})
 			return
 		}
+		proposalStatus := "waiting"
+		if strings.TrimSpace(setupCompletedAt) != "" {
+			proposalStatus = "confirmed"
+		} else if isViewer {
+			proposalStatus = "needs_response"
+		}
 		members = append(members, gin.H{
-			"id":   memberID,
-			"name": memberName,
-			"role": memberRole,
+			"id":                 memberID,
+			"name":               memberName,
+			"role":               memberRole,
+			"available_dates":    splitSetupDates(availableDates),
+			"lead_vote_user_id":  leadVoteUserID,
+			"setup_completed_at": setupCompletedAt,
+			"is_viewer":          isViewer,
+			"proposal_status":    proposalStatus,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"trip": gin.H{
-			"id":            trip.ID,
-			"name":          trip.Name,
-			"destination":   trip.Destination,
-			"start_date":    trip.StartDate,
-			"end_date":      trip.EndDate,
-			"created_by":    trip.CreatedBy,
-			"members_count": membersCount,
-			"image_url":     trip.ImageURL,
-			"completed_at":  trip.CompletedAt,
-			"viewer_role":   trip.ViewerRole,
-			"lead_user_id":  trip.LeadUserID,
+			"id":                    trip.ID,
+			"name":                  trip.Name,
+			"destination":           trip.Destination,
+			"start_date":            trip.StartDate,
+			"end_date":              trip.EndDate,
+			"created_by":            trip.CreatedBy,
+			"members_count":         membersCount,
+			"image_url":             trip.ImageURL,
+			"completed_at":          trip.CompletedAt,
+			"viewer_role":           trip.ViewerRole,
+			"lead_user_id":          trip.LeadUserID,
+			"setup_completed_count": trip.SetupCompletedCount,
+			"setup_pending_count":   trip.SetupPendingCount,
+			"setup_required":        trip.SetupRequired,
+			"readiness_status":      trip.ReadinessStatus,
 		},
 		"members": members,
 		"permissions": gin.H{

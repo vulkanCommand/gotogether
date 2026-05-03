@@ -16,13 +16,14 @@ export default function NotificationBell() {
 
 const styles = StyleSheet.create({
   button: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    boxShadow: `0px 10px 22px ${colors.shadow}`,
   },
 });

@@ -1,272 +1,233 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
-import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
-import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
-import { ApiTrip, fetchTripDetails, fetchTripSetupStatus, fetchTrips } from '../config/api';
+import { ApiTrip, fetchTripDetails, fetchTrips, tripCoverFileUrl } from '../config/api';
 import { useTripStore } from '../store/tripStore';
+import { useAuthStore } from '../store/authStore';
+import { colors } from '../theme/colors';
+import { spacing } from '../theme/spacing';
+import { prototypeImages } from '../utils/prototypeAssets';
+import { formatTripRange, mapApiMembersToCrew, tripTimelineStatus } from '../utils/tripFlow';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Trips'>,
   NativeStackScreenProps<RootStackParamList>
 >;
 
-type TripFilter = 'Current' | 'Upcoming' | 'Completed';
-
-const filters: TripFilter[] = ['Current', 'Upcoming', 'Completed'];
-
-const todayValue = () => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return today.getTime();
-};
-
-const dateValue = (value?: string) => {
-  if (!value) {
-    return 0;
-  }
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-};
-
-const tripStatus = (trip: ApiTrip): TripFilter => {
-  if (trip.completed_at) {
-    return 'Completed';
-  }
-  return dateValue(trip.start_date) > todayValue() ? 'Upcoming' : 'Current';
-};
-
 export default function TripsScreen({ navigation }: Props) {
-  const [trips, setTrips] = useState<ApiTrip[]>([]);
-  const [activeFilter, setActiveFilter] = useState<TripFilter>('Current');
-  const [loading, setLoading] = useState(true);
-  const [openingTripId, setOpeningTripId] = useState<number | null>(null);
-
+  const token = useAuthStore((state) => state.token);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
   const setCrew = useTripStore((state) => state.setCrew);
   const setTripLead = useTripStore((state) => state.setTripLead);
 
-  const loadTrips = useCallback(async () => {
+  const [trips, setTrips] = useState<ApiTrip[]>([]);
+  const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
+
+  const loadTrips = useCallback(async (showSpinner = false) => {
     try {
-      setLoading(true);
+      if (showSpinner) {
+        setLoading(true);
+      }
       const response = await fetchTrips();
       setTrips(Array.isArray(response.trips) ? response.trips : []);
+      hasLoadedRef.current = true;
     } catch (error) {
       console.log('Trips fetch failed', error);
-      setTrips([]);
+      if (!hasLoadedRef.current) {
+        setTrips([]);
+      }
     } finally {
-      setLoading(false);
+      if (showSpinner) {
+        setLoading(false);
+      }
     }
   }, []);
 
-  useEffect(() => {
-    loadTrips();
-  }, [loadTrips]);
-
   useFocusEffect(
     useCallback(() => {
-      loadTrips();
+      loadTrips(!hasLoadedRef.current);
     }, [loadTrips])
   );
 
-  const counts = useMemo(
+  const sortedTrips = useMemo(
     () =>
-      filters.reduce(
-        (acc, filter) => ({
-          ...acc,
-          [filter]: trips.filter((trip) => tripStatus(trip) === filter).length,
-        }),
-        {} as Record<TripFilter, number>
-      ),
+      [...trips].sort((a, b) => {
+        const aValue = new Date(`${a.start_date}T00:00:00`).getTime();
+        const bValue = new Date(`${b.start_date}T00:00:00`).getTime();
+        return aValue - bValue;
+      }),
     [trips]
-  );
-
-  const visibleTrips = useMemo(
-    () =>
-      trips
-        .filter((trip) => tripStatus(trip) === activeFilter)
-        .sort((a, b) => {
-          if (activeFilter === 'Completed') {
-            return dateValue(b.end_date) - dateValue(a.end_date);
-          }
-          return dateValue(a.start_date) - dateValue(b.start_date);
-        }),
-    [activeFilter, trips]
   );
 
   const openTrip = async (trip: ApiTrip) => {
     try {
-      setOpeningTripId(trip.id);
       const details = await fetchTripDetails(trip.id);
-      const setup = await fetchTripSetupStatus(trip.id);
-      const crew = details.members.map((member) => ({
-        id: String(member.id),
-        name: member.name,
-        role: member.role,
-      }));
-
+      const crew = mapApiMembersToCrew(details.members);
       setCurrentTrip(details.trip);
       setCrew(crew);
-      setTripLead(crew.find((member) => member.role === 'lead') ?? null);
-      navigation.navigate(setup.required ? 'TripSetup' : 'TripOverview');
+      setTripLead(crew.find((member) => member.role === 'lead') ?? crew[0] ?? null);
+      navigation.navigate('TripOverview');
     } catch (error) {
       console.log('Open trip failed', error);
-    } finally {
-      setOpeningTripId(null);
     }
   };
 
   return (
-    <Screen>
-      <SectionTitle
-        title="Trips"
-        subtitle="Browse your current, upcoming, and completed trip groups."
-        action={<NotificationBell />}
-      />
+    <View style={styles.screen}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={styles.title}>My Trips</Text>
+          <Text style={styles.subtitle}>{trips.length} trips planned</Text>
+        </View>
 
-      <View style={styles.toggleRow}>
-        {filters.map((filter) => {
-          const selected = filter === activeFilter;
-          return (
-            <Pressable key={filter} style={[styles.toggle, selected && styles.toggleSelected]} onPress={() => setActiveFilter(filter)}>
-              <Text style={[styles.toggleText, selected && styles.toggleTextSelected]}>{filter}</Text>
-              <Text style={[styles.toggleCount, selected && styles.toggleTextSelected]}>{counts[filter] ?? 0}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+        {loading && trips.length === 0 ? (
+          <View style={styles.loadingCard}>
+            <ActivityIndicator color={colors.accent} />
+          </View>
+        ) : (
+          <View style={styles.list}>
+            {sortedTrips.map((trip, index) => (
+              <Pressable key={trip.id} onPress={() => openTrip(trip)} style={styles.tripCard}>
+                <View style={styles.imageWrap}>
+                  <Image
+                    source={
+                      trip.image_url && token
+                        ? ({ uri: tripCoverFileUrl(trip.id), headers: { Authorization: `Bearer ${token}` }, cache: 'force-cache' } as any)
+                        : index % 3 === 0
+                          ? prototypeImages.tripHero
+                          : index % 3 === 1
+                            ? prototypeImages.alps
+                            : prototypeImages.santorini
+                    }
+                    style={styles.tripImage}
+                  />
+                  <View style={styles.statusWrap}>
+                    <Text style={[styles.statusText, tripTimelineStatus(trip) === 'Active' && styles.statusTextActive]}>
+                      {tripTimelineStatus(trip)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.tripContent}>
+                  <Text style={styles.tripTitle}>{trip.name}</Text>
+                  <Text style={styles.tripMeta}>
+                    {formatTripRange(trip.start_date, trip.end_date)} · {trip.members_count ?? 1} members
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
 
-      {loading ? (
-        <AppCard>
-          <ActivityIndicator color={colors.accent} />
-        </AppCard>
-      ) : null}
-
-      {!loading && visibleTrips.length === 0 ? (
-        <AppCard>
-          <Text style={styles.emptyTitle}>No {activeFilter.toLowerCase()} trips</Text>
-          <Text style={styles.emptyText}>
-            {activeFilter === 'Current'
-              ? 'Trips that are active now will show here.'
-              : activeFilter === 'Upcoming'
-                ? 'Future trip groups will show here.'
-                : 'Completed trips move here after crew confirmation.'}
-          </Text>
-        </AppCard>
-      ) : null}
-
-      <View style={styles.tripList}>
-        {visibleTrips.map((trip) => (
-          <Pressable key={trip.id} style={styles.tripRow} onPress={() => openTrip(trip)}>
-            <View style={styles.tripInfo}>
-              <Text style={styles.tripTitle}>{trip.name}</Text>
-              <Text style={styles.meta}>
-                {trip.start_date} - {trip.end_date}
-              </Text>
-              <Text style={styles.meta}>{trip.destination}</Text>
-            </View>
-            <View style={styles.pill}>
-              <Text style={styles.pillText}>
-                {openingTripId === trip.id ? 'Opening' : `${trip.members_count ?? 1} people`}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
-      </View>
-
-      <PrimaryButton title="Create Group" onPress={() => navigation.navigate('CreateGroup')} />
-    </Screen>
+            {sortedTrips.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No trips yet</Text>
+                <Text style={styles.emptyCopy}>Create a group to start your first clear trip flow.</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  toggleRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  toggle: {
+  screen: {
     flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 120,
+  },
+  header: {
+    marginBottom: spacing.lg,
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: colors.textPrimary,
+    letterSpacing: -0.8,
+  },
+  subtitle: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
+  loadingCard: {
+    minHeight: 160,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  toggleSelected: {
-    backgroundColor: '#EEF4FF',
-    borderColor: '#C7DAFF',
+  list: {
+    gap: spacing.lg,
   },
-  toggleText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.textSecondary,
-  },
-  toggleTextSelected: {
-    color: colors.accent,
-  },
-  toggleCount: {
-    marginTop: 3,
-    fontSize: 12,
-    fontWeight: '800',
-    color: colors.textSecondary,
-  },
-  tripList: {
-    gap: spacing.sm,
-  },
-  tripRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    borderRadius: radius.lg,
-    padding: spacing.md,
+  tripCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
     backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  tripInfo: {
-    flex: 1,
+  imageWrap: {
+    position: 'relative',
+  },
+  tripImage: {
+    width: '100%',
+    height: 144,
+  },
+  statusWrap: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  statusText: {
+    color: colors.textPrimary,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  statusTextActive: {
+    color: colors.success,
+  },
+  tripContent: {
+    padding: 16,
   },
   tripTitle: {
-    fontSize: 18,
-    fontWeight: '800',
     color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '700',
   },
-  meta: {
+  tripMeta: {
     marginTop: 4,
-    fontSize: 13,
     color: colors.textSecondary,
-  },
-  pill: {
-    backgroundColor: '#EEF2FF',
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignSelf: 'flex-start',
-  },
-  pillText: {
-    color: colors.accent,
     fontSize: 12,
-    fontWeight: '800',
+  },
+  emptyCard: {
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 20,
   },
   emptyTitle: {
+    color: colors.textPrimary,
     fontSize: 18,
     fontWeight: '800',
-    color: colors.textPrimary,
   },
-  emptyText: {
+  emptyCopy: {
     marginTop: 8,
-    fontSize: 14,
     color: colors.textSecondary,
     lineHeight: 20,
   },
