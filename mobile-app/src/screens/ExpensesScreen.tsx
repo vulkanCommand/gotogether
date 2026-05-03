@@ -6,6 +6,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
+import Pill from '../components/Pill';
 import SectionTitle from '../components/SectionTitle';
 import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
@@ -14,6 +15,7 @@ import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { createExpenseGroup, deleteTripExpense, fetchExpenseGroups, fetchTripDetails, fetchTrips } from '../config/api';
 import PrimaryButton from '../components/PrimaryButton';
+import TextField from '../components/TextField';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Expenses'>,
@@ -103,7 +105,18 @@ export default function ExpensesScreen({ navigation }: Props) {
     try {
       const details = await fetchTripDetails(trip.id);
       setCurrentTrip(details.trip);
-      setCrew(details.members.map((member) => ({ id: String(member.id), name: member.name, role: member.role })));
+        setCrew(
+          details.members.map((member) => ({
+            id: String(member.id),
+            name: member.name,
+            role: member.role,
+            availableDates: member.available_dates,
+            leadVoteUserId: member.lead_vote_user_id,
+            setupCompletedAt: member.setup_completed_at,
+            isViewer: member.is_viewer,
+            proposalStatus: member.proposal_status,
+          }))
+        );
       setSelectedTrip(details.trip);
     } catch {
       setCurrentTrip(trip);
@@ -234,7 +247,11 @@ export default function ExpensesScreen({ navigation }: Props) {
         </AppCard>
       ) : null}
 
-      <AppCard>
+      <AppCard style={styles.summaryHero}>
+        <View style={styles.summaryHeroTop}>
+          <Pill label="Money hub" tone="accent" />
+          <Pill label={`${expenses.length} active splits`} />
+        </View>
         <Text style={styles.oweLabel}>Expense groups</Text>
         <Text style={styles.oweAmount}>{tripSections.reduce((sum, section) => sum + section.groups.length, 0)}</Text>
         <View style={styles.summaryRow}>
@@ -263,11 +280,12 @@ export default function ExpensesScreen({ navigation }: Props) {
               <Pressable key={group.id} style={styles.groupCard} onPress={() => openGroup(section.trip, group)}>
                 <View style={styles.rowBetween}>
                   <View style={styles.leftBlock}>
+                    <Pill label={(group.expenses ?? []).length === 0 ? 'New group' : 'Active group'} tone="neutral" />
                     <Text style={styles.title}>{group.name}</Text>
-                  <Text style={styles.meta}>
-                    {(group.expenses ?? []).length} split{(group.expenses ?? []).length === 1 ? '' : 's'}
-                  </Text>
-                </View>
+                    <Text style={styles.meta}>
+                      {(group.expenses ?? []).length} split{(group.expenses ?? []).length === 1 ? '' : 's'}
+                    </Text>
+                  </View>
                   <Text style={styles.openText}>Open</Text>
                 </View>
               </Pressable>
@@ -287,12 +305,11 @@ export default function ExpensesScreen({ navigation }: Props) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>New expense group</Text>
-            <TextInput
+            <TextField
+              label="Group name"
               value={newGroupName}
               onChangeText={setNewGroupName}
               placeholder="Group name, for example Hotel"
-              placeholderTextColor={colors.textSecondary}
-              style={styles.input}
             />
             <PrimaryButton title="Create group" onPress={createGroup} />
             <PrimaryButton title="Cancel" variant="secondary" onPress={() => setGroupModalVisible(false)} />
@@ -304,6 +321,16 @@ export default function ExpensesScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  summaryHero: {
+    backgroundColor: '#F8FBFF',
+    borderColor: '#D7E6FF',
+  },
+  summaryHeroTop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
   oweLabel: {
     fontSize: 14,
     color: colors.textSecondary,
@@ -338,10 +365,11 @@ const styles = StyleSheet.create({
   groupCard: {
     marginTop: spacing.sm,
     borderWidth: 1,
-    borderColor: '#EEF2F7',
+    borderColor: '#E8EFF7',
     borderRadius: radius.md,
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.9)',
     padding: spacing.md,
+    boxShadow: `0px 10px 20px ${colors.shadow}`,
   },
   meta: {
     marginTop: 4,
@@ -509,8 +537,8 @@ const styles = StyleSheet.create({
   },
   modalSheet: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     padding: spacing.lg,
     paddingBottom: spacing.xl,
     gap: spacing.sm,
@@ -518,16 +546,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    fontSize: 14,
     color: colors.textPrimary,
   },
 });

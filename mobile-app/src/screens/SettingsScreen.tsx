@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert, ScrollView, StyleSheet } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { signOut } from 'firebase/auth';
+import { signOut } from '@react-native-firebase/auth';
 
 import Screen from '../components/Screen';
 import PrimaryButton from '../components/PrimaryButton';

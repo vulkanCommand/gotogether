@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
+import Pill from '../components/Pill';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import TextField from '../components/TextField';
 import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
@@ -175,17 +177,14 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
                 {crewList.length} crew members - {expenses.length} logged split{expenses.length === 1 ? '' : 's'}
               </Text>
             </View>
-            <View style={styles.totalPill}>
-              <Text style={styles.totalPillLabel}>Total</Text>
-              <Text style={styles.totalPillValue}>${totalExpenseAmount().toFixed(2)}</Text>
-            </View>
+            <Pill label={`$${totalExpenseAmount().toFixed(2)} total`} tone="accent" />
           </View>
         </AppCard>
 
         <AppCard>
           <Text style={styles.eyebrow}>Expense details</Text>
-          <TextInput value={title} onChangeText={setTitle} placeholder="Expense title" placeholderTextColor={colors.textSecondary} style={styles.input} />
-          <TextInput value={amount} onChangeText={setAmount} placeholder="Amount" placeholderTextColor={colors.textSecondary} keyboardType="numeric" style={styles.input} />
+          <TextField label="Expense title" value={title} onChangeText={setTitle} placeholder="Expense title" />
+          <TextField label="Amount" value={amount} onChangeText={setAmount} placeholder="Amount" keyboardType="numeric" />
 
           <Text style={styles.fieldLabel}>Expense group</Text>
           <View style={styles.chipRow}>
@@ -213,7 +212,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             </>
           ) : null}
 
-          <TextInput value={notes} onChangeText={setNotes} placeholder="Notes" placeholderTextColor={colors.textSecondary} style={[styles.input, styles.notesInput]} multiline />
+          <TextField label="Notes" value={notes} onChangeText={setNotes} placeholder="Notes" multiline />
         </AppCard>
 
         <AppCard>
@@ -231,12 +230,12 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
               {crewList.map((member) => (
                 <View key={member.id} style={styles.customRow}>
                   <Text style={styles.previewName}>{member.name}</Text>
-                  <TextInput
+                  <TextField
                     value={customAmounts[member.id] ?? ''}
                     onChangeText={(value) => setCustomAmounts((current) => ({ ...current, [member.id]: value }))}
                     placeholder="0.00"
-                    placeholderTextColor={colors.textSecondary}
                     keyboardType="numeric"
+                    containerStyle={styles.amountFieldWrap}
                     style={styles.amountInput}
                   />
                 </View>
@@ -318,40 +317,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.textSecondary,
   },
-  totalPill: {
-    backgroundColor: '#EEF4FF',
-    borderRadius: radius.lg,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    alignItems: 'flex-end',
-  },
-  totalPillLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.accent,
-  },
-  totalPillValue: {
-    marginTop: 2,
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.accent,
-  },
-  input: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderColor: colors.border,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: colors.textPrimary,
-    fontSize: 15,
-    marginBottom: spacing.sm,
-  },
-  notesInput: {
-    minHeight: 96,
-    textAlignVertical: 'top',
-    marginBottom: 0,
-  },
   fieldLabel: {
     fontSize: 13,
     fontWeight: '700',
@@ -423,14 +388,10 @@ const styles = StyleSheet.create({
   },
   amountInput: {
     width: 110,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderColor: colors.border,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
     textAlign: 'right',
-    color: colors.textPrimary,
+  },
+  amountFieldWrap: {
+    width: 110,
   },
   customHint: {
     color: colors.textSecondary,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,8 +8,10 @@ import * as ImagePicker from 'expo-image-picker';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
+import Pill from '../components/Pill';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import TextField from '../components/TextField';
 import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
@@ -135,8 +137,11 @@ export default function ProfileScreen({ navigation }: Props) {
 
             <View style={styles.identity}>
               <Text style={styles.name}>{user?.name || 'Your name'}</Text>
-              <Text style={styles.email}>{user?.email || 'Signed in user'}</Text>
-              <Text style={styles.stat}>{friends.length} connected friends</Text>
+              <Text style={styles.email}>{user?.email || user?.phone || 'Signed in user'}</Text>
+              <View style={styles.identityPills}>
+                <Pill label={`${friends.length} connected friends`} tone="accent" />
+                <Pill label={user?.username ? `@${user.username}` : 'Profile ready'} />
+              </View>
             </View>
           </View>
 
@@ -162,11 +167,11 @@ export default function ProfileScreen({ navigation }: Props) {
 
           {editing ? (
             <>
-              <TextInput style={styles.input} placeholder="Full name" placeholderTextColor={colors.textSecondary} value={name} onChangeText={setName} />
-              <TextInput style={styles.input} placeholder="Username" placeholderTextColor={colors.textSecondary} value={username} onChangeText={setUsername} autoCapitalize="none" />
-              <TextInput style={styles.input} placeholder="Phone number" placeholderTextColor={colors.textSecondary} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-              <TextInput style={styles.input} placeholder="Home city" placeholderTextColor={colors.textSecondary} value={homeCity} onChangeText={setHomeCity} />
-              <TextInput style={[styles.input, styles.bioInput]} placeholder="Short bio" placeholderTextColor={colors.textSecondary} value={bio} onChangeText={setBio} multiline />
+              <TextField label="Full name" placeholder="Full name" value={name} onChangeText={setName} />
+              <TextField label="Username" placeholder="Username" value={username} onChangeText={setUsername} autoCapitalize="none" />
+              <TextField label="Phone number" placeholder="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+              <TextField label="Home city" placeholder="Home city" value={homeCity} onChangeText={setHomeCity} />
+              <TextField label="Short bio" placeholder="Short bio" value={bio} onChangeText={setBio} multiline />
               <PrimaryButton title={saving ? 'Saving...' : 'Save profile'} onPress={saveProfile} />
             </>
           ) : (
@@ -250,6 +255,12 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontWeight: '700',
   },
+  identityPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
   imageActions: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -296,20 +307,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.textPrimary,
     lineHeight: 21,
-  },
-  input: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: colors.textPrimary,
-    fontSize: 15,
-    marginBottom: spacing.sm,
-  },
-  bioInput: {
-    minHeight: 96,
-    textAlignVertical: 'top',
   },
 });

@@ -25,6 +25,22 @@ type SaveItineraryRequest struct {
 	Days []ItineraryDayPayload `json:"days"`
 }
 
+type GenerateItineraryDraftRequest struct {
+	Notes string `json:"notes"`
+}
+
+type GenerateItineraryDraftResponse struct {
+	Days []ItineraryDayPayload `json:"days"`
+}
+
+type DestinationBriefResponse struct {
+	Vibe         string   `json:"vibe"`
+	IdealFor     string   `json:"ideal_for"`
+	Pace         string   `json:"pace"`
+	Highlights   []string `json:"highlights"`
+	PlanningTips []string `json:"planning_tips"`
+}
+
 type ExpenseSplitPayload struct {
 	MemberID   string  `json:"memberId"`
 	MemberName string  `json:"memberName"`

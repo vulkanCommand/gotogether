@@ -66,58 +66,8 @@ func SaveTripItinerary(c *gin.Context) {
 		return
 	}
 
-	if _, err := tx.Exec(`DELETE FROM itinerary_days WHERE trip_id = $1`, tripID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear existing itinerary", "details": err.Error()})
-		return
-	}
-
-	for dayIndex, day := range req.Days {
-		dayTitle := strings.TrimSpace(day.Title)
-		dayDateLabel := strings.TrimSpace(day.DateLabel)
-		if dayTitle == "" {
-			dayTitle = fmt.Sprintf("Day %d", dayIndex+1)
-		}
-		if dayDateLabel == "" {
-			dayDateLabel = dayTitle
-		}
-
-		var itineraryDayID int
-		err = tx.QueryRow(`
-			INSERT INTO itinerary_days (trip_id, title, date_label, day_order)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id
-		`, tripID, dayTitle, dayDateLabel, dayIndex).Scan(&itineraryDayID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save itinerary day", "details": err.Error()})
-			return
-		}
-
-		for eventIndex, event := range day.Events {
-			title := strings.TrimSpace(event.Title)
-			timeLabel := strings.TrimSpace(event.Time)
-			location := strings.TrimSpace(event.Location)
-			notes := strings.TrimSpace(event.Notes)
-			if title == "" || timeLabel == "" {
-				continue
-			}
-			if location == "" {
-				location = "Location TBD"
-			}
-
-			if _, err := tx.Exec(`
-				INSERT INTO itinerary_events (
-					itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, attendee_summary, event_order
-				)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			`, itineraryDayID, title, timeLabel, location, event.LocationIsMapped, notes, normalizeEventStatus(event.Status), strings.Join(event.Attendees, "||"), eventIndex); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save itinerary event", "details": err.Error()})
-				return
-			}
-		}
-	}
-
-	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+	if err := replaceTripItineraryTx(tx, tripID, req.Days); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save itinerary", "details": err.Error()})
 		return
 	}
 
@@ -797,6 +747,56 @@ func dayBelongsToTrip(dayID int, tripID int) bool {
 	var exists bool
 	err := db.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM itinerary_days WHERE id = $1 AND trip_id = $2)`, dayID, tripID).Scan(&exists)
 	return err == nil && exists
+}
+
+func replaceTripItineraryTx(tx *sql.Tx, tripID int, days []models.ItineraryDayPayload) error {
+	if _, err := tx.Exec(`DELETE FROM itinerary_days WHERE trip_id = $1`, tripID); err != nil {
+		return err
+	}
+
+	for dayIndex, day := range days {
+		dayTitle := strings.TrimSpace(day.Title)
+		dayDateLabel := strings.TrimSpace(day.DateLabel)
+		if dayTitle == "" {
+			dayTitle = fmt.Sprintf("Day %d", dayIndex+1)
+		}
+		if dayDateLabel == "" {
+			dayDateLabel = dayTitle
+		}
+
+		var itineraryDayID int
+		if err := tx.QueryRow(`
+			INSERT INTO itinerary_days (trip_id, title, date_label, day_order)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+		`, tripID, dayTitle, dayDateLabel, dayIndex).Scan(&itineraryDayID); err != nil {
+			return err
+		}
+
+		for eventIndex, event := range day.Events {
+			title := strings.TrimSpace(event.Title)
+			timeLabel := strings.TrimSpace(event.Time)
+			location := strings.TrimSpace(event.Location)
+			notes := strings.TrimSpace(event.Notes)
+			if title == "" || timeLabel == "" {
+				continue
+			}
+			if location == "" {
+				location = "Location TBD"
+			}
+
+			if _, err := tx.Exec(`
+				INSERT INTO itinerary_events (
+					itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, attendee_summary, event_order
+				)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			`, itineraryDayID, title, timeLabel, location, event.LocationIsMapped, notes, normalizeEventStatus(event.Status), strings.Join(event.Attendees, "||"), eventIndex); err != nil {
+				return err
+			}
+		}
+	}
+
+	return normalizeTripActiveEventTx(tx, tripID)
 }
 
 func normalizeTripActiveEventTx(tx *sql.Tx, tripID int) error {

@@ -25,6 +25,16 @@ CREATE TABLE IF NOT EXISTS trips (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS destination_cover_cache (
+    id SERIAL PRIMARY KEY,
+    destination_key TEXT NOT NULL UNIQUE,
+    destination_label TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS trip_members (
     id SERIAL PRIMARY KEY,
     trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,

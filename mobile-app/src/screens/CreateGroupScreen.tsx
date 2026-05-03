@@ -1,18 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 
-import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
-import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
-import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
 import { useFriendStore } from '../store/friendStore';
 import { useAuthStore } from '../store/authStore';
+import { colors } from '../theme/colors';
+import { radius, spacing } from '../theme/spacing';
 import { syncDeviceContacts } from '../config/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
@@ -23,32 +19,42 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const setFriends = useFriendStore((state) => state.setFriends);
   const user = useAuthStore((state) => state.user);
 
-  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const filteredFriends = useMemo(() => {
-    const value = query.trim().toLowerCase();
+    const value = search.trim().toLowerCase();
     if (!value) {
       return friends;
     }
 
-    return friends.filter((friend) => {
-      const haystack = `${friend.name} ${friend.email} ${friend.username}`.toLowerCase();
-      return haystack.includes(value);
-    });
-  }, [friends, query]);
+    return friends.filter((friend) =>
+      `${friend.name} ${friend.email} ${friend.username}`.toLowerCase().includes(value)
+    );
+  }, [friends, search]);
 
   const selectedFriends = useMemo(
     () => friends.filter((friend) => selectedIds.includes(friend.id)),
     [friends, selectedIds]
   );
 
-  const toggleFriend = (friendId: number) => {
+  const toggle = (id: number) => {
     setSelectedIds((current) =>
-      current.includes(friendId)
-        ? current.filter((id) => id !== friendId)
-        : [...current, friendId]
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
     );
+  };
+
+  const connectByEmail = async () => {
+    const email = search.trim().toLowerCase();
+    if (!email.includes('@')) {
+      return;
+    }
+    try {
+      const response = await syncDeviceContacts({ emails: [email], phones: [] });
+      setFriends(response.friends);
+    } catch (error) {
+      console.log('Manual friend connect failed', error);
+    }
   };
 
   const handleContinue = () => {
@@ -72,301 +78,294 @@ export default function CreateGroupScreen({ navigation }: Props) {
     navigation.navigate('TripCreate');
   };
 
-  const connectByEmail = async () => {
-    const email = query.trim().toLowerCase();
-    if (!email.includes('@')) {
-      return;
-    }
-
-    try {
-      const response = await syncDeviceContacts({ emails: [email], phones: [] });
-      setFriends(response.friends);
-    } catch (error) {
-      console.log('Manual friend connect failed', error);
-    }
-  };
-
   return (
-    <Screen showFooter>
+    <View style={styles.screen}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <SectionTitle
-          title="Create Group"
-          subtitle="Start with your contacts who already use the app, then move into trip planning."
-          action={<NotificationBell />}
-        />
+        <View style={styles.header}>
+          <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Create Group</Text>
+        </View>
 
-        <AppCard>
-          <Text style={styles.eyebrow}>Connected friends</Text>
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search by name or email"
-            placeholderTextColor={colors.textSecondary}
-            style={styles.input}
-          />
-
-          {friends.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No contacts matched yet</Text>
-              <Text style={styles.emptyMeta}>
-                You can still continue solo, or grant contacts access from Profile to discover friends.
-              </Text>
-              {query.trim().includes('@') ? (
-                <Pressable style={styles.emailSearchButton} onPress={connectByEmail}>
-                  <Text style={styles.emailSearchButtonText}>Connect {query.trim()} by email</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : (
-            <View style={styles.resultsWrap}>
-              {filteredFriends.map((friend) => {
-                const selected = selectedIds.includes(friend.id);
-
-                return (
-                  <Pressable
-                    key={friend.id}
-                    onPress={() => toggleFriend(friend.id)}
-                    style={[styles.memberChip, selected && styles.memberChipSelected]}
-                  >
-                    <View style={[styles.avatar, selected && styles.avatarSelected]}>
-                      <Text style={[styles.avatarText, selected && styles.avatarTextSelected]}>
-                        {(friend.name || friend.email).charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-
-                    <View style={styles.friendMeta}>
-                      <Text
-                        style={[
-                          styles.memberChipText,
-                          selected && styles.memberChipTextSelected,
-                        ]}
-                      >
-                        {friend.name || friend.email}
-                      </Text>
-                      <Text style={styles.memberChipSubtext}>
-                        {friend.email || friend.username}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </AppCard>
-
-        <AppCard>
-          <View style={styles.summaryHeader}>
-            <View>
-              <Text style={styles.eyebrow}>Selected crew</Text>
-              <Text style={styles.summaryTitle}>{selectedFriends.length + 1} people ready</Text>
-            </View>
-
-            <View style={styles.summaryPill}>
-              <Text style={styles.summaryPillText}>Real users</Text>
-            </View>
-          </View>
-
-          <View style={styles.selectedWrap}>
-            {user ? (
-              <View style={styles.selectedCard}>
-                <View style={styles.selectedAvatar}>
-                  <Text style={styles.selectedAvatarText}>
-                    {(user.name || user.email).charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-                <View>
-                  <Text style={styles.selectedName}>{user.name || user.email}</Text>
-                  <Text style={styles.selectedRole}>You</Text>
-                </View>
-              </View>
-            ) : null}
-
+        {selectedFriends.length > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.selectedRow}>
             {selectedFriends.map((friend) => (
-              <View key={friend.id} style={styles.selectedCard}>
-                <View style={styles.selectedAvatar}>
-                  <Text style={styles.selectedAvatarText}>
+              <View key={friend.id} style={styles.selectedChip}>
+                <View style={styles.selectedAvatarWrap}>
+                  <View style={styles.selectedAvatar}>
+                    <Text style={styles.selectedAvatarText}>
+                      {(friend.name || friend.email).charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Pressable style={styles.removeButton} onPress={() => toggle(friend.id)}>
+                    <Ionicons name="close" size={10} color="#FFFFFF" />
+                  </Pressable>
+                </View>
+                <Text numberOfLines={1} style={styles.selectedName}>
+                  {(friend.name || friend.email).split(' ')[0]}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        ) : null}
+
+        <View style={styles.searchCard}>
+          <Ionicons name="search" size={16} color={colors.textMuted} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search friends..."
+            placeholderTextColor={colors.textMuted}
+            style={styles.searchInput}
+          />
+        </View>
+
+        <View style={styles.list}>
+          {filteredFriends.map((friend) => {
+            const isSelected = selectedIds.includes(friend.id);
+
+            return (
+              <Pressable
+                key={friend.id}
+                onPress={() => toggle(friend.id)}
+                style={[styles.friendRow, isSelected && styles.friendRowSelected]}
+              >
+                <View style={styles.friendAvatar}>
+                  <Text style={styles.friendAvatarText}>
                     {(friend.name || friend.email).charAt(0).toUpperCase()}
                   </Text>
                 </View>
-                <View>
-                  <Text style={styles.selectedName}>{friend.name || friend.email}</Text>
-                  <Text style={styles.selectedRole}>{friend.email}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        </AppCard>
 
-        <PrimaryButton title="Continue to Trip Planning" onPress={handleContinue} />
+                <Text style={styles.friendName}>{friend.name || friend.email}</Text>
+
+                <View style={[styles.checkCircle, isSelected && styles.checkCircleSelected]}>
+                  {isSelected ? <Ionicons name="checkmark" size={12} color="#FFFFFF" /> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+
+          {filteredFriends.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No friends found</Text>
+              <Text style={styles.emptyCopy}>
+                Search for a connected friend, or continue with just your own trip crew for now.
+              </Text>
+              {search.trim().includes('@') ? (
+                <Pressable onPress={connectByEmail} style={styles.connectButton}>
+                  <Text style={styles.connectButtonText}>Connect {search.trim()}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
-    </Screen>
+
+      {selectedIds.length > 0 ? (
+        <View style={styles.footer}>
+          <Pressable onPress={handleContinue} style={styles.ctaButton}>
+            <Text style={styles.ctaText}>Create Group · {selectedIds.length + 1} members</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
   content: {
-    paddingBottom: spacing.xl,
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 140,
   },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.accent,
-    marginBottom: spacing.sm,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: spacing.lg,
   },
-  input: {
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderColor: colors.border,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '800',
     color: colors.textPrimary,
+  },
+  selectedRow: {
+    gap: 12,
+    paddingBottom: spacing.md,
+  },
+  selectedChip: {
+    width: 62,
+    alignItems: 'center',
+    gap: 4,
+  },
+  selectedAvatarWrap: {
+    position: 'relative',
+  },
+  selectedAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#DCEAFF',
+    borderWidth: 2,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedAvatarText: {
+    color: colors.accentStrong,
     fontSize: 15,
+    fontWeight: '900',
   },
-  resultsWrap: {
-    gap: spacing.sm,
-    marginTop: spacing.md,
+  removeButton: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  memberChip: {
+  selectedName: {
+    maxWidth: 56,
+    fontSize: 10,
+    color: colors.textSecondary,
+  },
+  searchCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textPrimary,
+    paddingVertical: 0,
+  },
+  list: {
+    gap: 8,
+  },
+  friendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  memberChipSelected: {
-    backgroundColor: '#EEF4FF',
-    borderColor: '#C7DAFF',
+  friendRowSelected: {
+    backgroundColor: 'rgba(37,99,235,0.08)',
+    borderColor: 'rgba(37,99,235,0.24)',
   },
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#D8E6FF',
+  friendAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E7F0FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarSelected: {
+  friendAvatarText: {
+    color: colors.accentStrong,
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  friendName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  checkCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkCircleSelected: {
+    borderColor: colors.accent,
     backgroundColor: colors.accent,
   },
-  avatarText: {
-    color: colors.accent,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  avatarTextSelected: {
-    color: '#FFFFFF',
-  },
-  friendMeta: {
-    flex: 1,
-  },
-  memberChipText: {
-    color: colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  memberChipTextSelected: {
-    color: colors.accent,
-  },
-  memberChipSubtext: {
-    marginTop: 3,
-    color: colors.textSecondary,
-    fontSize: 12,
-  },
-  summaryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  summaryTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  summaryPill: {
-    backgroundColor: '#EEF4FF',
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  summaryPillText: {
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  selectedWrap: {
-    gap: spacing.sm,
-  },
-  selectedCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  emptyState: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  selectedAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E8F0FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  selectedAvatarText: {
-    color: colors.accent,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  selectedName: {
-    color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  selectedRole: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  emptyState: {
-    marginTop: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
+    padding: spacing.lg,
+    marginTop: spacing.sm,
   },
   emptyTitle: {
     color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '700',
-    marginBottom: 4,
   },
-  emptyMeta: {
+  emptyCopy: {
+    marginTop: 6,
     color: colors.textSecondary,
-    fontSize: 14,
     lineHeight: 20,
   },
-  emailSearchButton: {
-    marginTop: spacing.md,
+  connectButton: {
     alignSelf: 'flex-start',
+    marginTop: spacing.md,
     backgroundColor: colors.accent,
     borderRadius: radius.pill,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  emailSearchButtonText: {
+  connectButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 20,
+    paddingBottom: 28,
+    paddingTop: 12,
+    backgroundColor: colors.background,
+  },
+  ctaButton: {
+    borderRadius: 20,
+    backgroundColor: colors.accent,
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

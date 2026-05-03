@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 
@@ -22,9 +23,14 @@ export default function PrimaryButton({
       style={({ pressed }) => [styles.wrap, disabled && styles.disabled, pressed && !disabled && styles.pressed]}
     >
       {variant === 'primary' ? (
-        <View style={[styles.button, styles.primaryButton, disabled && styles.primaryButtonDisabled]}>
+        <LinearGradient
+          colors={disabled ? ['#AFC7F7', '#A7C0F5'] : [colors.accent, colors.violet]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.button, styles.primaryButton]}
+        >
           <Text style={styles.primaryText}>{title}</Text>
-        </View>
+        </LinearGradient>
       ) : (
         <View style={styles.secondaryButton}>
           <Text style={styles.secondaryText}>{title}</Text>
@@ -37,47 +43,45 @@ export default function PrimaryButton({
 const styles = StyleSheet.create({
   wrap: {
     borderRadius: radius.lg,
-    shadowColor: '#111827',
-    shadowOpacity: 0.14,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 3,
+    overflow: 'hidden',
+    boxShadow: `0px 16px 30px ${colors.shadowStrong}`,
   },
   pressed: {
-    opacity: 0.9,
-    transform: [{ translateY: 1 }, { scale: 0.992 }],
+    opacity: 0.96,
+    transform: [{ translateY: 1 }, { scale: 0.994 }],
   },
   disabled: {
     opacity: 0.62,
-    shadowOpacity: 0,
-    elevation: 0,
+    boxShadow: 'none',
   },
   button: {
     borderRadius: radius.lg,
+    minHeight: 56,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryButton: {
-    backgroundColor: colors.accent,
-  },
-  primaryButtonDisabled: {
-    backgroundColor: '#AFC7F7',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   primaryText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+    fontWeight: '900',
+    letterSpacing: 0.3,
   },
   secondaryButton: {
     borderRadius: radius.lg,
+    minHeight: 56,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.82)',
     borderWidth: 1,
-    borderColor: '#DDE6F3',
+    borderColor: colors.border,
   },
   secondaryText: {
     color: colors.textPrimary,

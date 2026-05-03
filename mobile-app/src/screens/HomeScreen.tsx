@@ -1,500 +1,415 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
-import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
-import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
+import { useAuthStore } from '../store/authStore';
+import { useTripStore } from '../store/tripStore';
+import { ApiNotification, ApiTrip, fetchNotifications, fetchTripDetails, fetchTrips, tripCoverFileUrl } from '../config/api';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { useAuthStore } from '../store/authStore';
-import { CrewMember, ItineraryDay, useTripStore } from '../store/tripStore';
-import { apiRequest, ApiTrip, fetchTripDetails, fetchTripSetupStatus, fetchTrips } from '../config/api';
+import { prototypeImages } from '../utils/prototypeAssets';
+import { formatTripRange, mapApiMembersToCrew, pickPrimaryTrip, tripTimelineStatus } from '../utils/tripFlow';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
   NativeStackScreenProps<RootStackParamList>
 >;
 
-type HomeOverview = {
-  trip: ApiTrip;
-  crew: CrewMember[];
-  days: ItineraryDay[];
-  setupRequired: boolean;
-};
-
-const todayValue = () => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return today.getTime();
-};
-
-const dateValue = (value?: string) => {
-  if (!value) {
-    return 0;
-  }
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-};
-
-const pickHomeTrip = (trips: ApiTrip[]) => {
-  const today = todayValue();
-  const active = trips
-    .filter((trip) => !trip.completed_at && dateValue(trip.start_date) <= today && dateValue(trip.end_date) >= today)
-    .sort((a, b) => dateValue(b.start_date) - dateValue(a.start_date));
-  if (active[0]) {
-    return active[0];
-  }
-
-  const upcoming = trips
-    .filter((trip) => !trip.completed_at)
-    .sort((a, b) => dateValue(a.start_date) - dateValue(b.start_date));
-  if (upcoming[0]) {
-    return upcoming[0];
-  }
-
-  const recentlyEnded = trips
-    .filter((trip) => !trip.completed_at)
-    .sort((a, b) => dateValue(b.end_date) - dateValue(a.end_date));
-  if (recentlyEnded[0]) {
-    return recentlyEnded[0];
-  }
-
-  return trips
-    .filter((trip) => trip.completed_at)
-    .sort((a, b) => dateValue(b.end_date) - dateValue(a.end_date))[0] ?? null;
-};
-
-const openMapsLocation = async (value?: string) => {
-  const query = value?.trim();
-  if (!query) {
-    return;
-  }
-  try {
-    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
-  } catch {
-    Alert.alert('Maps unavailable', 'Could not open this location in Maps.');
-  }
-};
-
-const shouldShowLocationIcon = (location?: string, locationIsMapped?: boolean) => {
-  const normalized = location?.trim() ?? '';
-  if (!normalized || normalized.toLowerCase() === 'location tbd') {
-    return false;
-  }
-  return Boolean(locationIsMapped || normalized.includes(','));
-};
-
 export default function HomeScreen({ navigation }: Props) {
-  const [overview, setOverview] = useState<HomeOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const token = useAuthStore((state) => state.token);
   const user = useAuthStore((state) => state.user);
+  const token = useAuthStore((state) => state.token);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
   const setCrew = useTripStore((state) => state.setCrew);
-  const setItineraryDays = useTripStore((state) => state.setItineraryDays);
   const setTripLead = useTripStore((state) => state.setTripLead);
 
-  const hydrateTrip = useCallback(
-    async (trip: ApiTrip) => {
-      const details = await fetchTripDetails(trip.id);
-      const setup = await fetchTripSetupStatus(trip.id);
-      const itinerary = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${trip.id}/itinerary`);
-      const crew = details.members.map((member) => ({
-        id: String(member.id),
-        name: member.name,
-        role: member.role,
-      }));
-      const lead = crew.find((member) => member.role === 'lead') ?? null;
+  const [trips, setTrips] = useState<ApiTrip[]>([]);
+  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
 
-      setCurrentTrip(details.trip);
-      setCrew(crew);
-      setTripLead(lead);
-      setItineraryDays(Array.isArray(itinerary.days) ? itinerary.days : []);
-
-      return {
-        trip: details.trip,
-        crew,
-        days: Array.isArray(itinerary.days) ? itinerary.days : [],
-        setupRequired: Boolean(setup.required),
-      };
-    },
-    [setCrew, setCurrentTrip, setItineraryDays, setTripLead]
-  );
-
-  const fetchHomeData = useCallback(async () => {
+  const loadHome = useCallback(async (showSpinner = false) => {
     try {
-      if (!token) {
-        setOverview(null);
-        return;
+      if (showSpinner) {
+        setLoading(true);
       }
-
-      setLoading(true);
-      const response = await fetchTrips();
-      const selectedTrip = pickHomeTrip(Array.isArray(response.trips) ? response.trips : []);
-      if (!selectedTrip) {
-        setOverview(null);
-        setCurrentTrip(null);
-        setCrew([]);
-        setItineraryDays([]);
-        setTripLead(null);
-        return;
+      const [tripResponse, notificationResponse] = await Promise.all([fetchTrips(), fetchNotifications()]);
+      setTrips(Array.isArray(tripResponse.trips) ? tripResponse.trips : []);
+      setNotifications(Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : []);
+      hasLoadedRef.current = true;
+    } catch (error) {
+      console.log('Home load failed', error);
+      if (!hasLoadedRef.current) {
+        setTrips([]);
+        setNotifications([]);
       }
-
-      setOverview(await hydrateTrip(selectedTrip));
-    } catch (err) {
-      console.log('Home overview fetch error', err);
-      setOverview(null);
     } finally {
-      setLoading(false);
+      if (showSpinner) {
+        setLoading(false);
+      }
     }
-  }, [hydrateTrip, setCrew, setCurrentTrip, setItineraryDays, setTripLead, token]);
-
-  useEffect(() => {
-    fetchHomeData();
-  }, [fetchHomeData]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      fetchHomeData();
-    }, [fetchHomeData])
+      loadHome(!hasLoadedRef.current);
+    }, [loadHome])
   );
 
-  const nextPlan = useMemo(() => {
-    if (!overview) {
-      return null;
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) {
+      return 'Good morning';
     }
-    for (const day of overview.days) {
-      const active = day.events.find((event) => event.status === 'active');
-      if (active) {
-        return { day: day.title, event: active };
-      }
-      const upcoming = day.events.find((event) => event.status === 'upcoming');
-      if (upcoming) {
-        return { day: day.title, event: upcoming };
-      }
+    if (hour < 18) {
+      return 'Good afternoon';
     }
-    return null;
-  }, [overview]);
+    return 'Good evening';
+  }, []);
 
-  const completedPlans = useMemo(
-    () => overview?.days.reduce((sum, day) => sum + day.events.filter((event) => event.status === 'completed').length, 0) ?? 0,
-    [overview]
+  const primaryTrip = useMemo(() => pickPrimaryTrip(trips), [trips]);
+  const upcomingTrips = useMemo(
+    () => trips.filter((trip) => trip.id !== primaryTrip?.id && !trip.completed_at).slice(0, 4),
+    [primaryTrip?.id, trips]
   );
-  const totalPlans = useMemo(() => overview?.days.reduce((sum, day) => sum + day.events.length, 0) ?? 0, [overview]);
-  const lead = overview?.crew.find((member) => member.role === 'lead') ?? null;
 
-  const openTrip = () => {
-    if (!overview) {
-      navigation.navigate('CreateGroup');
-      return;
+  const openTrip = async (trip: ApiTrip) => {
+    try {
+      const details = await fetchTripDetails(trip.id);
+      const crew = mapApiMembersToCrew(details.members);
+      setCurrentTrip(details.trip);
+      setCrew(crew);
+      setTripLead(crew.find((member) => member.role === 'lead') ?? crew[0] ?? null);
+      navigation.navigate('TripOverview');
+    } catch (error) {
+      console.log('Open trip failed', error);
     }
-    setCurrentTrip(overview.trip);
-    setCrew(overview.crew);
-    setItineraryDays(overview.days);
-    setTripLead(lead);
-    navigation.navigate(overview.setupRequired ? 'TripSetup' : 'TripOverview');
   };
 
-  const openProtectedScreen = (screen: 'Itinerary' | 'AddExpense') => {
-    if (!overview) {
-      return;
-    }
-    setCurrentTrip(overview.trip);
-    setCrew(overview.crew);
-    setItineraryDays(overview.days);
-    setTripLead(lead);
-    navigation.navigate(overview.setupRequired ? 'TripSetup' : screen);
-  };
-
-  const openLiveMap = () => {
-    if (!overview || !nextPlan) {
-      return;
-    }
-    setCurrentTrip(overview.trip);
-    setCrew(overview.crew);
-    setItineraryDays(overview.days);
-    setTripLead(lead);
-    navigation.navigate('Live');
-  };
-
-  if (loading) {
-    return (
-      <Screen>
-        <ActivityIndicator size="large" color={colors.accent} />
-      </Screen>
-    );
-  }
+  const activityItems = notifications.slice(0, 3);
 
   return (
-    <Screen>
-      <SectionTitle
-        title="Home"
-        subtitle={`Welcome ${user?.name || user?.email || 'back'}`}
-        action={<NotificationBell />}
-      />
-
-      {!overview ? (
-        <AppCard>
-          <Text style={styles.emptyTitle}>No trip overview yet</Text>
-          <Text style={styles.emptyText}>
-            Create a group and your current trip overview will show here when you open the app.
-          </Text>
-          <View style={styles.cardAction}>
-            <PrimaryButton title="Create Group" onPress={() => navigation.navigate('CreateGroup')} />
+    <View style={styles.screen}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>{greeting},</Text>
+            <Text style={styles.name}>{user?.name || user?.email || 'Traveler'}</Text>
           </View>
-        </AppCard>
-      ) : (
-        <>
-          <AppCard>
-            <View style={styles.overviewHeader}>
-              <View style={styles.tripInfo}>
-                <Text style={styles.label}>Current trip overview</Text>
-                <Text style={styles.tripTitle}>{overview.trip.name}</Text>
-                <Text style={styles.meta}>
-                  {overview.trip.start_date} - {overview.trip.end_date}
-                </Text>
-                <Pressable onPress={() => openMapsLocation(overview.trip.destination)}>
-                  <Text style={[styles.meta, styles.locationLink]}>{overview.trip.destination}</Text>
-                </Pressable>
-              </View>
-              <View style={styles.statusPill}>
-                <Text style={styles.statusText}>{overview.trip.completed_at ? 'Completed' : overview.setupRequired ? 'Setup' : 'Live'}</Text>
-              </View>
-            </View>
 
-            <View style={styles.statsRow}>
-              <StatCard value={String(overview.trip.members_count ?? overview.crew.length)} label="Crew" />
-              <StatCard value={String(overview.days.length)} label="Days" />
-              <StatCard value={`${completedPlans}/${totalPlans}`} label="Plans done" />
-            </View>
-
-            <Pressable style={styles.nextCard} onPress={openLiveMap} disabled={!nextPlan || overview.setupRequired}>
-              <Text style={styles.label}>Next up</Text>
-              {nextPlan ? (
-                <>
-                  <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
-                  <Text style={styles.nextMeta}>
-                    {nextPlan.day} - {nextPlan.event.time}
-                  </Text>
-                  {shouldShowLocationIcon(nextPlan.event.location, nextPlan.event.locationIsMapped) ? (
-                    <Pressable
-                      style={styles.locationIcon}
-                      onPress={() => openMapsLocation(nextPlan.event.location)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Open ${nextPlan.event.location} in Maps`}
-                    >
-                      <Ionicons name="location" size={22} color={colors.accent} />
-                    </Pressable>
-                  ) : (
-                    <Pressable onPress={() => openMapsLocation(nextPlan.event.location)}>
-                      <Text style={styles.nextLocation}>{nextPlan.event.location}</Text>
-                    </Pressable>
-                  )}
-                  <Text style={styles.mapHint}>Tap to open live map</Text>
-                </>
-              ) : overview.setupRequired ? (
-                <Text style={styles.nextMeta}>Finish your availability and lead vote before planning starts.</Text>
-              ) : (
-                <Text style={styles.nextMeta}>No upcoming itinerary event yet.</Text>
-              )}
+          <View style={styles.headerActions}>
+            <Pressable onPress={() => navigation.navigate('CreateGroup')} style={styles.headerButton}>
+              <Ionicons name="add" size={21} color={colors.accent} />
             </Pressable>
+            <Pressable onPress={() => navigation.navigate('Notifications')} style={styles.headerButton}>
+              <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
+              {notifications.length > 0 ? <View style={styles.dot} /> : null}
+            </Pressable>
+          </View>
+        </View>
 
-            <View style={styles.leadCard}>
-              <Text style={styles.label}>Trip lead</Text>
-              <Text style={styles.leadName}>{lead?.name || 'Lead vote pending'}</Text>
+        {loading && trips.length === 0 ? (
+          <View style={styles.loadingCard}>
+            <ActivityIndicator color={colors.accent} />
+          </View>
+        ) : primaryTrip ? (
+          <Pressable onPress={() => openTrip(primaryTrip)} style={styles.activeCard}>
+            <Image
+              source={
+                primaryTrip.image_url && token
+                  ? ({ uri: tripCoverFileUrl(primaryTrip.id), headers: { Authorization: `Bearer ${token}` }, cache: 'force-cache' } as any)
+                  : prototypeImages.tripHero
+              }
+              style={styles.activeImage}
+            />
+            <View style={styles.activeOverlay} />
+            <View style={styles.activeContent}>
+              <View style={styles.statusPill}>
+                <Text style={styles.statusPillText}>{tripTimelineStatus(primaryTrip)}</Text>
+              </View>
+              <Text style={styles.activeTitle}>{primaryTrip.name}</Text>
+              <Text style={styles.activeMeta}>
+                {formatTripRange(primaryTrip.start_date, primaryTrip.end_date)} · {primaryTrip.members_count ?? 1} members
+              </Text>
             </View>
-          </AppCard>
+          </Pressable>
+        ) : (
+          <Pressable onPress={() => navigation.navigate('CreateGroup')} style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Start your first trip</Text>
+            <Text style={styles.emptyCopy}>Create a group and the whole trip flow will open from there.</Text>
+          </Pressable>
+        )}
 
-          <View style={styles.actions}>
-            <PrimaryButton title={overview.setupRequired ? 'Finish Setup' : 'Open Trip'} onPress={openTrip} />
-            <PrimaryButton title="View Itinerary" variant="secondary" onPress={() => openProtectedScreen('Itinerary')} />
-            <PrimaryButton title="Split Expenses" variant="secondary" onPress={() => openProtectedScreen('AddExpense')} />
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Upcoming</Text>
+            <Pressable onPress={() => navigation.navigate('Trips')}>
+              <Text style={styles.sectionLink}>See all</Text>
+            </Pressable>
           </View>
 
-          <AppCard>
-            <Text style={styles.label}>Crew</Text>
-            <View style={styles.crewList}>
-              {overview.crew.map((member) => (
-                <View key={member.id} style={styles.crewRow}>
-                  <Text style={styles.crewName}>{member.name}</Text>
-                  <Text style={styles.crewRole}>{member.role || 'member'}</Text>
-                </View>
-              ))}
-            </View>
-          </AppCard>
-        </>
-      )}
-    </Screen>
-  );
-}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalList}>
+            {upcomingTrips.length > 0 ? (
+              upcomingTrips.map((trip) => (
+                <Pressable key={trip.id} onPress={() => openTrip(trip)} style={styles.upcomingCard}>
+                  <Text style={styles.upcomingTitle}>{trip.name}</Text>
+                  <Text style={styles.upcomingMeta}>{formatTripRange(trip.start_date, trip.end_date)}</Text>
+                  <Text style={styles.upcomingSupport}>{trip.members_count ?? 1} members</Text>
+                </Pressable>
+              ))
+            ) : (
+              <View style={styles.upcomingCard}>
+                <Text style={styles.upcomingTitle}>No upcoming trips yet</Text>
+                <Text style={styles.upcomingMeta}>Create a group to start planning one.</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
 
-function StatCard({ value, label }: { value: string; label: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <View style={styles.activityList}>
+            {activityItems.length > 0 ? (
+              activityItems.map((item) => (
+                <View key={item.id} style={styles.activityRow}>
+                  <View style={styles.activityAvatar}>
+                    <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.activityCopy}>
+                    <Text style={styles.activityText}>{item.title}</Text>
+                    <Text style={styles.activitySubtext}>{item.body}</Text>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.activityRow}>
+                <View style={styles.activityAvatar}>
+                  <Text style={styles.activityAvatarText}>T</Text>
+                </View>
+                <View style={styles.activityCopy}>
+                  <Text style={styles.activityText}>Trip activity will appear here</Text>
+                  <Text style={styles.activitySubtext}>New events, expenses, and updates will show up as your crew uses the app.</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+      </ScrollView>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  overviewHeader: {
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 120,
+  },
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  tripInfo: {
-    flex: 1,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.accent,
-    marginBottom: spacing.xs,
-  },
-  tripTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  meta: {
-    marginTop: 5,
-    fontSize: 14,
-    color: colors.textSecondary,
-  },
-  locationLink: {
-    color: colors.accent,
-    fontWeight: '800',
-    textDecorationLine: 'underline',
-  },
-  statusPill: {
-    borderRadius: radius.pill,
-    backgroundColor: '#EEF4FF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignSelf: 'flex-start',
-  },
-  statusText: {
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginBottom: spacing.lg,
   },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  statLabel: {
-    marginTop: 4,
-    fontSize: 12,
+  greeting: {
+    fontSize: 14,
+    fontWeight: '600',
     color: colors.textSecondary,
   },
-  nextCard: {
-    marginTop: spacing.md,
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
-  nextTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  nextMeta: {
-    marginTop: 6,
-    color: colors.textSecondary,
-    lineHeight: 20,
-  },
-  nextLocation: {
-    marginTop: 6,
-    color: colors.accent,
+  name: {
+    marginTop: 2,
+    fontSize: 30,
     fontWeight: '900',
-    textDecorationLine: 'underline',
+    color: colors.textPrimary,
+    letterSpacing: -0.8,
   },
-  locationIcon: {
-    marginTop: spacing.sm,
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#EEF4FF',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mapHint: {
-    marginTop: spacing.sm,
-    color: colors.accent,
-    fontWeight: '900',
+  dot: {
+    position: 'absolute',
+    top: 9,
+    right: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.accent,
   },
-  leadCard: {
-    marginTop: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: '#EEF4FF',
-    padding: spacing.md,
-  },
-  leadName: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  actions: {
-    gap: spacing.sm,
-  },
-  crewList: {
-    gap: spacing.sm,
-  },
-  crewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
+  loadingCard: {
+    minHeight: 180,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  crewName: {
-    fontSize: 14,
+  activeCard: {
+    minHeight: 176,
+    borderRadius: 24,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  activeImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: undefined,
+    height: undefined,
+  },
+  activeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.48)',
+  },
+  activeContent: {
+    padding: 20,
+    justifyContent: 'flex-end',
+    flex: 1,
+  },
+  statusPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.success,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 8,
+  },
+  statusPillText: {
+    color: '#FFFFFF',
+    fontSize: 10,
     fontWeight: '800',
-    color: colors.textPrimary,
   },
-  crewRole: {
-    color: colors.textSecondary,
-    fontSize: 13,
+  activeTitle: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: -0.7,
+  },
+  activeMeta: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 12,
+  },
+  emptyCard: {
+    minHeight: 176,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 20,
+    justifyContent: 'center',
   },
   emptyTitle: {
-    fontSize: 20,
+    color: colors.textPrimary,
+    fontSize: 22,
     fontWeight: '800',
+  },
+  emptyCopy: {
+    marginTop: 8,
+    color: colors.textSecondary,
+    lineHeight: 21,
+  },
+  section: {
+    marginTop: spacing.xl,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
-  emptyText: {
-    marginTop: 8,
-    fontSize: 14,
-    color: colors.textSecondary,
-    lineHeight: 20,
+  sectionLink: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '700',
   },
-  cardAction: {
+  horizontalList: {
+    gap: spacing.md,
+  },
+  upcomingCard: {
+    width: 208,
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+  },
+  upcomingTitle: {
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  upcomingMeta: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  upcomingSupport: {
+    marginTop: 12,
+    color: colors.textMuted,
+    fontSize: 11,
+  },
+  activityList: {
+    gap: spacing.md,
     marginTop: spacing.md,
+  },
+  activityRow: {
+    flexDirection: 'row',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+  },
+  activityAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#E7F0FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activityAvatarText: {
+    color: colors.accentStrong,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  activityCopy: {
+    flex: 1,
+  },
+  activityText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  activitySubtext: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
 });

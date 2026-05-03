@@ -94,10 +94,42 @@ function MainTabs() {
   );
 }
 
-function BootScreen() {
+function BootScreen({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-      <ActivityIndicator size="large" color={colors.accent} />
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background, paddingHorizontal: 28 }}>
+      <View
+        style={{
+          width: '100%',
+          maxWidth: 360,
+          borderRadius: 28,
+          backgroundColor: colors.surface,
+          borderWidth: 1,
+          borderColor: colors.border,
+          paddingHorizontal: 24,
+          paddingVertical: 32,
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <View
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            backgroundColor: '#EEF4FF',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <ActivityIndicator size="large" color={colors.accent} />
+        </View>
+        <Text style={{ fontSize: 22, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 }}>
+          {title}
+        </Text>
+        <Text style={{ textAlign: 'center', color: colors.textSecondary, lineHeight: 21 }}>
+          {subtitle}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -107,8 +139,22 @@ export default function AppNavigator() {
   const authChecked = useAuthStore((state) => state.authChecked);
   const user = useAuthStore((state) => state.user);
 
-  if (!authChecked || (token && !user)) {
-    return <BootScreen />;
+  if (!authChecked) {
+    return (
+      <BootScreen
+        title="Checking your session"
+        subtitle="Warming up your travel space and restoring your sign-in."
+      />
+    );
+  }
+
+  if (token && !user) {
+    return (
+      <BootScreen
+        title="Loading your profile"
+        subtitle="Syncing your account and getting the app ready for takeoff."
+      />
+    );
   }
 
   return (

@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
+import Pill from '../components/Pill';
 import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
+import TextField from '../components/TextField';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { updateMyProfile, updateMyProfileImage } from '../config/api';
 import { useAuthStore } from '../store/authStore';
+import { formatPhoneForDisplay } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CompleteProfile'>;
 
@@ -20,10 +23,6 @@ export default function CompleteProfileScreen({ navigation }: Props) {
   const setUser = useAuthStore((state) => state.setUser);
 
   const [name, setName] = useState(user?.name ?? '');
-  const [username, setUsername] = useState(user?.username ?? '');
-  const [phone, setPhone] = useState(user?.phone ?? '');
-  const [homeCity, setHomeCity] = useState(user?.home_city ?? '');
-  const [bio, setBio] = useState(user?.bio ?? '');
   const [profilePhoto, setProfilePhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -46,8 +45,8 @@ export default function CompleteProfileScreen({ navigation }: Props) {
   };
 
   const handleSave = async () => {
-    if (!name.trim() || !username.trim()) {
-      Alert.alert('Missing details', 'Name and username are required.');
+    if (!name.trim()) {
+      Alert.alert('Missing details', 'Your name is required.');
       return;
     }
 
@@ -55,10 +54,7 @@ export default function CompleteProfileScreen({ navigation }: Props) {
       setSaving(true);
       const response = await updateMyProfile({
         name: name.trim(),
-        username: username.trim(),
-        phone: phone.trim(),
-        home_city: homeCity.trim(),
-        bio: bio.trim(),
+        phone: user?.phone ?? '',
       });
       let updatedUser = response.user;
       if (profilePhoto) {
@@ -85,12 +81,13 @@ export default function CompleteProfileScreen({ navigation }: Props) {
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <SectionTitle
-          title="Finish your profile"
-          subtitle="A few basics make the rest of the app personal and easier to use."
+          title="Finish sign up"
+          subtitle="Add your name and a profile photo so your trip crew knows it is you."
         />
 
         <AppCard>
-          <Text style={styles.emailLabel}>{user?.email || 'Signed in account'}</Text>
+          <Pill label="Verified phone number" tone="accent" />
+          <Text style={styles.phoneLabel}>{formatPhoneForDisplay(user?.phone || '') || 'Verified phone number'}</Text>
 
           <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
             {profilePhoto ? (
@@ -100,52 +97,16 @@ export default function CompleteProfileScreen({ navigation }: Props) {
             )}
           </Pressable>
 
-          <TextInput
-            style={styles.input}
+          <TextField
+            label="Full name"
             placeholder="Full name"
-            placeholderTextColor={colors.textSecondary}
             value={name}
             onChangeText={setName}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Username"
-            placeholderTextColor={colors.textSecondary}
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Phone number"
-            placeholderTextColor={colors.textSecondary}
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Home city"
-            placeholderTextColor={colors.textSecondary}
-            value={homeCity}
-            onChangeText={setHomeCity}
-          />
-
-          <TextInput
-            style={[styles.input, styles.bioInput]}
-            placeholder="Short bio"
-            placeholderTextColor={colors.textSecondary}
-            value={bio}
-            onChangeText={setBio}
-            multiline
           />
         </AppCard>
 
         <PrimaryButton
-          title={saving ? 'Saving profile...' : 'Save and continue'}
+          title={saving ? 'Saving profile...' : 'Continue'}
           onPress={handleSave}
         />
       </ScrollView>
@@ -157,10 +118,11 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: spacing.xl,
   },
-  emailLabel: {
+  phoneLabel: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.accent,
+    marginTop: spacing.sm,
     marginBottom: spacing.md,
   },
   avatarWrap: {
@@ -181,21 +143,5 @@ const styles = StyleSheet.create({
   avatarText: {
     color: colors.accent,
     fontWeight: '800',
-  },
-  input: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: colors.textPrimary,
-    fontSize: 15,
-    marginBottom: spacing.sm,
-  },
-  bioInput: {
-    minHeight: 96,
-    textAlignVertical: 'top',
-    marginBottom: 0,
   },
 });

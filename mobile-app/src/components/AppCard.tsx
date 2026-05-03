@@ -14,15 +14,11 @@ export default function AppCard({ children, style }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceElevated,
     borderRadius: radius.lg,
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    boxShadow: `0px 18px 40px ${colors.shadow}, 0px 2px 6px rgba(15, 23, 42, 0.04)`,
   },
 });

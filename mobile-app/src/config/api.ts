@@ -10,6 +10,11 @@ export type ApiTripMember = {
   id: number;
   name: string;
   role?: string;
+  available_dates?: string[];
+  lead_vote_user_id?: number;
+  setup_completed_at?: string;
+  is_viewer?: boolean;
+  proposal_status?: 'confirmed' | 'needs_response' | 'waiting' | string;
 };
 
 export type ApiTrip = {
@@ -24,6 +29,10 @@ export type ApiTrip = {
   completed_at?: string;
   viewer_role?: string;
   lead_user_id?: number;
+  setup_completed_count?: number;
+  setup_pending_count?: number;
+  setup_required?: boolean;
+  readiness_status?: 'completed' | 'needs_your_response' | 'waiting_on_crew' | 'ready' | string;
 };
 
 export type ApiTripDetails = {
@@ -34,6 +43,19 @@ export type ApiTripDetails = {
     can_edit_itinerary: boolean;
     can_complete_trip: boolean;
   };
+};
+
+export type ApiTripCoverResult = {
+  image_url: string;
+  source: 'existing' | 'wikipedia' | 'openai';
+};
+
+export type ApiDestinationBrief = {
+  vibe: string;
+  ideal_for: string;
+  pace: string;
+  highlights: string[];
+  planning_tips: string[];
 };
 
 export type ApiExpense = {
@@ -209,7 +231,7 @@ export async function syncAuthenticatedUser() {
 export async function updateMyProfile(payload: {
   name: string;
   phone?: string;
-  username: string;
+  username?: string;
   home_city?: string;
   bio?: string;
 }) {
@@ -406,6 +428,23 @@ export async function updateTripCover(
   return apiRequest<{ image_url: string }>(`/api/trips/${tripId}/cover`, {
     method: 'POST',
     body: formData,
+  });
+}
+
+export async function ensureTripCoverFromDestination(tripId: number) {
+  return apiRequest<ApiTripCoverResult>(`/api/trips/${tripId}/cover/auto`, {
+    method: 'POST',
+  });
+}
+
+export async function fetchDestinationBrief(tripId: number) {
+  return apiRequest<{ brief: ApiDestinationBrief }>(`/api/trips/${tripId}/destination-brief`);
+}
+
+export async function generateItineraryDraft(tripId: number, payload: { notes?: string }) {
+  return apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(`/api/trips/${tripId}/itinerary/ai-draft`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 

@@ -48,9 +48,15 @@ func UpdateMe(c *gin.Context) {
 	req.HomeCity = strings.TrimSpace(req.HomeCity)
 	req.Bio = strings.TrimSpace(req.Bio)
 
-	if req.Name == "" || req.Username == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name and username are required"})
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
+	}
+
+	if req.Username == "" {
+		uidValue, _ := c.Get("uid")
+		uid, _ := uidValue.(string)
+		req.Username = generateDefaultUsername(req.Name, req.Phone, uid)
 	}
 
 	_, err := db.DB.Exec(`

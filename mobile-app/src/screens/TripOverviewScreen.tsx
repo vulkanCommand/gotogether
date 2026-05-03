@@ -1,48 +1,36 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
-import { Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 
-import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
-import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { useTripStore } from '../store/tripStore';
+import { apiRequest, fetchTripDetails, tripCoverFileUrl } from '../config/api';
+import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { ItineraryDay, useTripStore } from '../store/tripStore';
-import { apiRequest, deleteTripCover, fetchTripDetails, fetchTripSetupStatus, tripCoverFileUrl, updateTripCover } from '../config/api';
-import { useAuthStore } from '../store/authStore';
+import { prototypeImages } from '../utils/prototypeAssets';
+import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripOverview'>;
 
-const heroImage = 'https://images.unsplash.com/photo-1501785888041-af3ef285b470';
-
-const shouldShowLocationIcon = (location?: string, locationIsMapped?: boolean) => {
-  const normalized = location?.trim() ?? '';
-  if (!normalized || normalized.toLowerCase() === 'location tbd') {
-    return false;
-  }
-  return Boolean(locationIsMapped || normalized.includes(','));
+type Milestone = {
+  label: string;
+  done: boolean;
 };
 
 export default function TripOverviewScreen({ navigation }: Props) {
-  const {
-    currentTrip,
-    crew,
-    bestMatchRange,
-    destinationOptions,
-    selectedDestinationId,
-    tripLead,
-    itineraryDays,
-    setCrew,
-    setCurrentTrip,
-    setItineraryDays,
-    setTripLead,
-  } = useTripStore();
+  const currentTrip = useTripStore((state) => state.currentTrip);
+  const crew = useTripStore((state) => state.crew);
+  const tripLead = useTripStore((state) => state.tripLead);
+  const itineraryDays = useTripStore((state) => state.itineraryDays);
+  const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
+  const setCrew = useTripStore((state) => state.setCrew);
+  const setTripLead = useTripStore((state) => state.setTripLead);
+  const setItineraryDays = useTripStore((state) => state.setItineraryDays);
   const token = useAuthStore((state) => state.token);
+
+  const [loading, setLoading] = useState(false);
 
   const hydrateTrip = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -50,366 +38,327 @@ export default function TripOverviewScreen({ navigation }: Props) {
     }
 
     try {
-      const response = await fetchTripDetails(currentTrip.id);
-      setCurrentTrip(response.trip);
-      setCrew(
-        response.members.map((member) => ({
-          id: String(member.id),
-          name: member.name,
-          role: member.role,
-        }))
-      );
-      const lead = response.members.find((member) => member.role === 'lead');
-      if (lead) {
-        setTripLead({ id: String(lead.id), name: lead.name, role: lead.role });
-      }
-      const setup = await fetchTripSetupStatus(currentTrip.id);
-      if (setup.required) {
-        navigation.replace('TripSetup');
-        return;
-      }
-      const itinerary = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
+      setLoading(true);
+      const [details, itinerary] = await Promise.all([
+        fetchTripDetails(currentTrip.id),
+        apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`),
+      ]);
+
+      const nextCrew = mapApiMembersToCrew(details.members);
+      setCurrentTrip(details.trip);
+      setCrew(nextCrew);
+      setTripLead(nextCrew.find((member) => member.role === 'lead') ?? nextCrew[0] ?? null);
       setItineraryDays(Array.isArray(itinerary.days) ? itinerary.days : []);
     } catch (error) {
-      console.log('Fetch trip details failed', error);
+      console.log('Fetch trip overview failed', error);
+    } finally {
+      setLoading(false);
     }
-  }, [currentTrip?.id, navigation, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
+  }, [currentTrip?.id, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
 
   useEffect(() => {
     hydrateTrip();
   }, [hydrateTrip]);
 
-  const selectedDestination = useMemo(
-    () => destinationOptions.find((item) => item.id === selectedDestinationId) ?? null,
-    [destinationOptions, selectedDestinationId]
+  const milestones = useMemo<Milestone[]>(
+    () => [
+      { label: 'Dates', done: Boolean(currentTrip?.start_date && currentTrip?.end_date) },
+      { label: 'Destination', done: Boolean(currentTrip?.destination) },
+      { label: 'Lead', done: Boolean(tripLead?.name) },
+      { label: 'Itinerary', done: itineraryDays.length > 0 },
+    ],
+    [currentTrip?.destination, currentTrip?.end_date, currentTrip?.start_date, itineraryDays.length, tripLead?.name]
   );
 
-  const totalPlans = itineraryDays.reduce((sum, day) => sum + day.events.length, 0);
-  const nextPlan = useMemo(() => {
-    for (const day of itineraryDays) {
-      const active = day.events.find((event) => event.status === 'active');
-      if (active) {
-        return { day: day.title, event: active };
-      }
-      const upcoming = day.events.find((event) => event.status === 'upcoming');
-      if (upcoming) {
-        return { day: day.title, event: upcoming };
-      }
-    }
-    return null;
-  }, [itineraryDays]);
-
-  const tripName = currentTrip?.name ?? selectedDestination?.name ?? 'Your Trip';
-  const tripDates = currentTrip ? `${currentTrip.start_date} - ${currentTrip.end_date}` : bestMatchRange || 'Dates pending';
-  const tripDestination =
-    currentTrip?.destination ??
-    (selectedDestination
-      ? selectedDestination.country
-        ? `${selectedDestination.name}, ${selectedDestination.country}`
-        : selectedDestination.name
-      : 'Destination pending');
-  const canEditTrip = currentTrip?.viewer_role === 'lead';
   const heroSource =
     currentTrip?.image_url && token
-      ? { uri: tripCoverFileUrl(currentTrip.id), headers: { Authorization: `Bearer ${token}` } }
-      : { uri: heroImage };
+      ? { uri: tripCoverFileUrl(currentTrip.id), headers: { Authorization: `Bearer ${token}` }, cache: 'force-cache' }
+      : prototypeImages.tripHero;
 
-  const pickTripCover = async () => {
-    if (!currentTrip?.id || !canEditTrip) {
-      return;
-    }
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permission.status !== 'granted') {
-      Alert.alert('Photos permission needed', 'Allow photo access to update the trip picture.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 0.9,
-    });
-    if (result.canceled || !result.assets[0]) {
-      return;
-    }
-    try {
-      const asset = result.assets[0];
-      const response = await updateTripCover(currentTrip.id, {
-        photo: {
-          uri: asset.uri,
-          name: asset.fileName || 'trip-cover.jpg',
-          type: asset.mimeType || 'image/jpeg',
-        },
-      });
-      setCurrentTrip({ ...currentTrip, image_url: response.image_url });
-    } catch (error: any) {
-      Alert.alert('Upload failed', error?.message || 'Could not update trip photo');
-    }
-  };
-
-  const removeTripCover = async () => {
-    if (!currentTrip?.id || !canEditTrip) {
-      return;
-    }
-    try {
-      await deleteTripCover(currentTrip.id);
-      setCurrentTrip({ ...currentTrip, image_url: '' });
-    } catch (error: any) {
-      Alert.alert('Remove failed', error?.message || 'Could not remove trip photo');
-    }
-  };
-
-  const openMapsLocation = async (value?: string) => {
-    const query = value?.trim();
-    if (!query) {
-      return;
-    }
-    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
-    try {
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert('Maps unavailable', 'Could not open this location in Maps.');
-    }
-  };
+  const title = currentTrip?.name || 'Trip Overview';
+  const destination = currentTrip?.destination || 'Destination pending';
+  const travelRange = formatTripRange(currentTrip?.start_date, currentTrip?.end_date);
 
   return (
-    <Screen showFooter>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <SectionTitle title="Trip Overview" subtitle="Everything your crew needs in one place." action={<NotificationBell />} />
+    <View style={styles.screen}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+        <View style={styles.heroWrap}>
+          <Image source={heroSource as any} style={styles.heroImage} />
+          <View style={styles.heroOverlay} />
 
-        <Pressable onPress={pickTripCover} disabled={!canEditTrip}>
-          <Image source={heroSource} style={styles.hero} />
-        </Pressable>
-        {canEditTrip ? (
-          <View style={styles.coverActions}>
-            <Pressable style={styles.smallButton} onPress={pickTripCover}>
-              <Text style={styles.smallButtonText}>{currentTrip?.image_url ? 'Change trip photo' : 'Upload trip photo'}</Text>
-            </Pressable>
-            {currentTrip?.image_url ? (
-              <Pressable style={styles.smallButton} onPress={removeTripCover}>
-                <Text style={styles.smallButtonText}>Remove</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
-
-        <AppCard>
-          <Text style={styles.trip}>{tripName}</Text>
-          <Text style={styles.meta}>{tripDates}</Text>
-          <Pressable onPress={() => openMapsLocation(tripDestination)}>
-            <Text style={[styles.meta, styles.locationLink]}>{tripDestination}</Text>
+          <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={18} color="#FFFFFF" />
           </Pressable>
+        </View>
 
-          <View style={styles.statsRow}>
-            <StatCard value={String(currentTrip?.members_count ?? crew.length)} label="Crew" />
-            <StatCard value={String(itineraryDays.length)} label="Days" />
-            <StatCard value={String(totalPlans)} label="Plans" />
+        <View style={styles.body}>
+          <Text style={styles.title}>{title}</Text>
+
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>
+              <Ionicons name="calendar-outline" size={12} color={colors.textSecondary} /> {travelRange}
+            </Text>
+            <Text style={styles.metaText}>
+              <Ionicons name="location-outline" size={12} color={colors.textSecondary} /> {destination}
+            </Text>
           </View>
 
-          <View style={styles.nextCard}>
-            <Text style={styles.leadLabel}>Next up</Text>
-            {nextPlan ? (
-              <>
-                <Text style={styles.nextTitle}>{nextPlan.event.title}</Text>
-                <Text style={styles.nextMeta}>{nextPlan.day} - {nextPlan.event.time}</Text>
-                {shouldShowLocationIcon(nextPlan.event.location, nextPlan.event.locationIsMapped) ? (
-                  <Pressable
-                    style={styles.locationIcon}
-                    onPress={() => openMapsLocation(nextPlan.event.location)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open ${nextPlan.event.location} in Maps`}
-                  >
-                    <Ionicons name="location" size={22} color={colors.accent} />
-                  </Pressable>
-                ) : (
-                  <Pressable onPress={() => openMapsLocation(nextPlan.event.location)}>
-                    <Text style={styles.nextLocation}>{nextPlan.event.location}</Text>
-                  </Pressable>
-                )}
-              </>
-            ) : (
-              <Text style={styles.nextMeta}>No upcoming itinerary event yet.</Text>
-            )}
+          <View style={styles.crewRow}>
+            <View style={styles.avatarStack}>
+              {crew.slice(0, 5).map((member, index) => (
+                <View key={member.id} style={[styles.avatarCircle, { marginLeft: index === 0 ? 0 : -10 }]}>
+                  <Text style={styles.avatarText}>{member.name.charAt(0).toUpperCase()}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.crewMeta}>{crew.length} members</Text>
           </View>
 
-          <View style={styles.memberList}>
-            {crew.map((member) => (
-              <View key={member.id} style={styles.memberRow}>
-                <Text style={styles.memberName}>{member.name}</Text>
-                <Text style={styles.memberRole}>{member.role || 'Crew member'}</Text>
-              </View>
-            ))}
+          <View style={styles.progressCard}>
+            <Text style={styles.progressTitle}>Trip Progress</Text>
+            <View style={styles.milestoneRow}>
+              {milestones.map((milestone, index) => (
+                <View key={milestone.label} style={styles.milestoneItem}>
+                  <View style={styles.milestoneHeader}>
+                    <View style={[styles.milestoneCircle, milestone.done && styles.milestoneCircleDone]}>
+                      {milestone.done ? (
+                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                      ) : (
+                        <Text style={styles.milestoneNumber}>{index + 1}</Text>
+                      )}
+                    </View>
+                    {index < milestones.length - 1 ? (
+                      <View style={[styles.milestoneLine, milestone.done && styles.milestoneLineDone]} />
+                    ) : null}
+                  </View>
+                  <Text style={[styles.milestoneLabel, milestone.done && styles.milestoneLabelDone]}>
+                    {milestone.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
           </View>
 
-          <View style={styles.leadCard}>
-            <Text style={styles.leadLabel}>Trip lead</Text>
-            <Text style={styles.leadName}>{tripLead?.name || crew[0]?.name || 'Pending'}</Text>
-          </View>
-        </AppCard>
+          <View style={styles.actionGrid}>
+            <Pressable onPress={() => navigation.navigate('Itinerary')} style={styles.actionCard}>
+              <Ionicons name="time-outline" size={22} color={colors.accent} />
+              <Text style={styles.actionText}>View Itinerary</Text>
+            </Pressable>
 
-        <View style={styles.actions}>
-          <PrimaryButton title="View Itinerary" onPress={() => navigation.navigate('Itinerary')} />
-          <PrimaryButton
-            title="Split Expenses"
-            variant="secondary"
-            onPress={() => navigation.navigate('AddExpense')}
-          />
+            <Pressable
+              onPress={() => navigation.navigate('MainTabs', { screen: 'Live' })}
+              style={[styles.actionCard, styles.actionCardPrimary]}
+            >
+              <Ionicons name="location-outline" size={22} color="#FFFFFF" />
+              <Text style={styles.actionTextPrimary}>Open Live</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Trip lead</Text>
+            <Text style={styles.summaryValue}>{tripLead?.name || crew[0]?.name || 'Pending'}</Text>
+            <Text style={styles.summaryMeta}>
+              {loading
+                ? 'Refreshing your trip details...'
+                : itineraryDays.length > 0
+                  ? `${itineraryDays.length} itinerary day${itineraryDays.length === 1 ? '' : 's'} ready to explore.`
+                  : 'Your trip is created. Add itinerary moments next.'}
+            </Text>
+          </View>
         </View>
       </ScrollView>
-    </Screen>
-  );
-}
-
-function StatCard({ value, label }: { value: string; label: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollContent: {
-    paddingBottom: spacing.xl,
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
-  hero: {
-    height: 220,
-    borderRadius: radius.lg,
-    marginBottom: spacing.md,
+  content: {
+    paddingBottom: 40,
   },
-  coverActions: {
+  heroWrap: {
+    position: 'relative',
+  },
+  heroImage: {
+    width: '100%',
+    height: 224,
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.22)',
+  },
+  backButton: {
+    position: 'absolute',
+    top: 56,
+    left: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  body: {
+    marginTop: -36,
+    paddingHorizontal: 20,
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: colors.textPrimary,
+    letterSpacing: -0.9,
+  },
+  metaRow: {
+    marginTop: spacing.sm,
+    gap: 8,
+  },
+  metaText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  crewRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: -spacing.sm,
-    marginBottom: spacing.md,
+    alignItems: 'center',
+    gap: 12,
+    marginTop: spacing.lg,
   },
-  smallButton: {
+  avatarStack: {
+    flexDirection: 'row',
+  },
+  avatarCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: colors.accentStrong,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  crewMeta: {
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  progressCard: {
+    marginTop: spacing.xl,
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
   },
-  smallButtonText: {
-    color: colors.textPrimary,
+  progressTitle: {
+    fontSize: 13,
     fontWeight: '700',
-  },
-  trip: {
-    fontSize: 22,
-    fontWeight: '800',
     color: colors.textPrimary,
+    marginBottom: spacing.md,
   },
-  meta: {
-    marginTop: 6,
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  locationLink: {
-    color: colors.accent,
-    fontWeight: '800',
-    textDecorationLine: 'underline',
-  },
-  statsRow: {
+  milestoneRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
+    alignItems: 'flex-start',
   },
-  statCard: {
+  milestoneItem: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
+  },
+  milestoneHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  statValue: {
-    fontSize: 20,
+  milestoneCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  milestoneCircleDone: {
+    backgroundColor: colors.accent,
+  },
+  milestoneNumber: {
+    color: colors.textSecondary,
+    fontSize: 11,
     fontWeight: '800',
-    color: colors.textPrimary,
   },
-  statLabel: {
-    marginTop: 4,
-    fontSize: 12,
-    color: colors.textSecondary,
+  milestoneLine: {
+    flex: 1,
+    height: 2,
+    borderRadius: 999,
+    backgroundColor: colors.border,
+    marginHorizontal: 6,
   },
-  memberList: {
-    marginTop: spacing.md,
-    gap: spacing.sm,
+  milestoneLineDone: {
+    backgroundColor: colors.accent,
   },
-  memberRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md,
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
+  milestoneLabel: {
+    marginTop: 8,
+    fontSize: 10,
+    color: colors.textMuted,
   },
-  memberName: {
-    fontSize: 14,
+  milestoneLabelDone: {
+    color: colors.accent,
     fontWeight: '700',
-    color: colors.textPrimary,
   },
-  memberRole: {
+  actionGrid: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  actionCard: {
+    flex: 1,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  actionCardPrimary: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  actionText: {
+    color: colors.textPrimary,
     fontSize: 12,
+    fontWeight: '700',
+  },
+  actionTextPrimary: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  summaryCard: {
+    marginTop: spacing.lg,
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.textSecondary,
   },
-  leadCard: {
-    marginTop: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: '#EEF4FF',
-    padding: spacing.md,
-  },
-  nextCard: {
-    marginTop: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#EEF2F7',
-    padding: spacing.md,
-  },
-  nextTitle: {
+  summaryValue: {
     marginTop: 6,
     fontSize: 18,
     fontWeight: '800',
     color: colors.textPrimary,
   },
-  nextMeta: {
+  summaryMeta: {
     marginTop: 6,
     color: colors.textSecondary,
     lineHeight: 20,
-  },
-  nextLocation: {
-    marginTop: 6,
-    color: colors.accent,
-    fontSize: 14,
-    fontWeight: '900',
-    textDecorationLine: 'underline',
-  },
-  locationIcon: {
-    marginTop: spacing.sm,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#EEF4FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  leadLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.accent,
-  },
-  leadName: {
-    marginTop: 4,
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  actions: {
-    gap: spacing.sm,
   },
 });
