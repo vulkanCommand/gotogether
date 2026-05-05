@@ -160,7 +160,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   };
 
   return (
-    <Screen showFooter>
+    <Screen showFooter showBackButton>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <SectionTitle
           title={editingExpenseId ? 'Edit Split' : 'Add Split'}

@@ -83,7 +83,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen showFooter>
+    <Screen showFooter showBackButton>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <SectionTitle title="Settings" subtitle="Account actions and permission shortcuts." action={<NotificationBell />} />
 

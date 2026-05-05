@@ -1,15 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
+import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
 import { useFriendStore } from '../store/friendStore';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { syncDeviceContacts } from '../config/api';
+import { sendSMSInvite, syncDeviceContacts } from '../config/api';
+import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
 
@@ -21,6 +23,7 @@ export default function CreateGroupScreen({ navigation }: Props) {
 
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [inviting, setInviting] = useState(false);
 
   const filteredFriends = useMemo(() => {
     const value = search.trim().toLowerCase();
@@ -29,7 +32,7 @@ export default function CreateGroupScreen({ navigation }: Props) {
     }
 
     return friends.filter((friend) =>
-      `${friend.name} ${friend.email} ${friend.username}`.toLowerCase().includes(value)
+      `${friend.name} ${friend.email} ${friend.username} ${friend.phone}`.toLowerCase().includes(value)
     );
   }, [friends, search]);
 
@@ -54,6 +57,28 @@ export default function CreateGroupScreen({ navigation }: Props) {
       setFriends(response.friends);
     } catch (error) {
       console.log('Manual friend connect failed', error);
+    }
+  };
+
+  const normalizedInvitePhone = useMemo(() => formatPhoneForFirebase(search), [search]);
+  const canInviteBySMS = normalizedInvitePhone.length > 0;
+
+  const inviteBySMS = async () => {
+    if (!canInviteBySMS) {
+      return;
+    }
+
+    try {
+      setInviting(true);
+      await sendSMSInvite({
+        phone: normalizedInvitePhone,
+        name: search.trim(),
+      });
+      Alert.alert('Invite sent', `We sent an SMS invite to ${formatPhoneForDisplay(normalizedInvitePhone)}.`);
+    } catch (error: any) {
+      Alert.alert('Invite failed', error?.message || 'Could not send the SMS invite right now.');
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -157,6 +182,13 @@ export default function CreateGroupScreen({ navigation }: Props) {
                   <Text style={styles.connectButtonText}>Connect {search.trim()}</Text>
                 </Pressable>
               ) : null}
+              {canInviteBySMS ? (
+                <Pressable onPress={inviteBySMS} style={styles.connectButton}>
+                  <Text style={styles.connectButtonText}>
+                    {inviting ? 'Sending SMS...' : `Invite ${formatPhoneForDisplay(normalizedInvitePhone)}`}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -165,10 +197,11 @@ export default function CreateGroupScreen({ navigation }: Props) {
       {selectedIds.length > 0 ? (
         <View style={styles.footer}>
           <Pressable onPress={handleContinue} style={styles.ctaButton}>
-            <Text style={styles.ctaText}>Create Group · {selectedIds.length + 1} members</Text>
+            <Text style={styles.ctaText}>Create Group ({selectedIds.length + 1} members)</Text>
           </Pressable>
         </View>
       ) : null}
+      <AppFooter />
     </View>
   );
 }
@@ -181,7 +214,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 140,
+    paddingBottom: 220,
   },
   header: {
     flexDirection: 'row',
@@ -350,9 +383,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: 84,
     paddingHorizontal: 20,
-    paddingBottom: 28,
+    paddingBottom: 16,
     paddingTop: 12,
     backgroundColor: colors.background,
   },

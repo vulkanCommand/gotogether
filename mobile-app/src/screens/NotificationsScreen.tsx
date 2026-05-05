@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -23,27 +23,31 @@ export default function NotificationsScreen() {
   const [activeTab, setActiveTab] = useState<NotificationTab>('Pending tasks');
   const [loading, setLoading] = useState(false);
   const [acceptingId, setAcceptingId] = useState<number | null>(null);
+  const hasLoadedRef = useRef(false);
 
-  const loadNotifications = useCallback(async () => {
+  const loadNotifications = useCallback(async (showSpinner = false) => {
     try {
-      setLoading(true);
+      if (showSpinner) {
+        setLoading(true);
+      }
       const response = await fetchNotifications();
       setNotifications(response.notifications);
+      hasLoadedRef.current = true;
     } catch (error) {
       console.log('Notifications failed', error);
-      setNotifications([]);
+      if (!hasLoadedRef.current) {
+        setNotifications([]);
+      }
     } finally {
-      setLoading(false);
+      if (showSpinner) {
+        setLoading(false);
+      }
     }
   }, []);
 
-  useEffect(() => {
-    loadNotifications();
-  }, [loadNotifications]);
-
   useFocusEffect(
     useCallback(() => {
-      loadNotifications();
+      loadNotifications(!hasLoadedRef.current);
     }, [loadNotifications])
   );
 
@@ -99,7 +103,7 @@ export default function NotificationsScreen() {
   };
 
   return (
-    <Screen showFooter>
+    <Screen showFooter showBackButton>
       <SectionTitle title="Notifications" subtitle="Trip updates and pending confirmations." />
 
       <View style={styles.toggleRow}>
@@ -132,7 +136,7 @@ export default function NotificationsScreen() {
           </Text>
           <Text style={styles.emptyText}>
             {activeTab === 'Pending tasks'
-              ? 'Event and trip completion confirmations will wait here.'
+              ? 'Trip completion confirmations will wait here.'
               : 'Regular trip activity will show here.'}
           </Text>
         </AppCard>
@@ -155,7 +159,7 @@ export default function NotificationsScreen() {
                 disabled={acceptingId === notification.id}
               >
                 <Text style={styles.acceptButtonText}>
-                  {acceptingId === notification.id ? 'Accepting...' : 'Accept completion'}
+                  {acceptingId === notification.id ? 'Accepting...' : notification.actionLabel || 'Accept'}
                 </Text>
               </Pressable>
             ) : (

@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
+import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
 import { apiRequest, fetchTripDetails, tripCoverFileUrl } from '../config/api';
@@ -31,6 +32,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
   const token = useAuthStore((state) => state.token);
 
   const [loading, setLoading] = useState(false);
+  const progressAnimation = useRef(new Animated.Value(0)).current;
 
   const hydrateTrip = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -69,6 +71,30 @@ export default function TripOverviewScreen({ navigation }: Props) {
     ],
     [currentTrip?.destination, currentTrip?.end_date, currentTrip?.start_date, itineraryDays.length, tripLead?.name]
   );
+
+  const totalEvents = useMemo(
+    () => itineraryDays.reduce((sum, day) => sum + day.events.length, 0),
+    [itineraryDays]
+  );
+  const completedEvents = useMemo(
+    () =>
+      itineraryDays.reduce(
+        (sum, day) => sum + day.events.filter((event) => event.status === 'completed').length,
+        0
+      ),
+    [itineraryDays]
+  );
+  const progressPercent = totalEvents > 0 ? Math.round((completedEvents / totalEvents) * 100) : 0;
+  const itineraryReady = milestones[milestones.length - 1]?.done;
+  const canFinishTrip = Boolean(currentTrip && !currentTrip.completed_at && progressPercent === 100 && totalEvents > 0);
+
+  useEffect(() => {
+    Animated.timing(progressAnimation, {
+      toValue: progressPercent,
+      duration: 420,
+      useNativeDriver: false,
+    }).start();
+  }, [progressAnimation, progressPercent]);
 
   const heroSource =
     currentTrip?.image_url && token
@@ -137,6 +163,35 @@ export default function TripOverviewScreen({ navigation }: Props) {
                 </View>
               ))}
             </View>
+
+            {itineraryReady ? (
+              <View style={styles.progressSection}>
+                <View style={styles.progressSummaryRow}>
+                  <Text style={styles.progressPercent}>{progressPercent}%</Text>
+                  <Text style={styles.progressSummaryText}>
+                    {totalEvents > 0 ? `${completedEvents} of ${totalEvents} events completed` : 'Add events to start trip progress'}
+                  </Text>
+                </View>
+                <View style={styles.progressTrack}>
+                  <Animated.View
+                    style={[
+                      styles.progressFill,
+                      {
+                        width: progressAnimation.interpolate({
+                          inputRange: [0, 100],
+                          outputRange: ['0%', '100%'],
+                        }),
+                      },
+                    ]}
+                  />
+                </View>
+                {canFinishTrip ? (
+                  <Pressable style={styles.finishTripButton} onPress={() => navigation.navigate('TripCompletion')}>
+                    <Text style={styles.finishTripButtonText}>Finish the Trip</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.actionGrid}>
@@ -167,6 +222,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
           </View>
         </View>
       </ScrollView>
+      <AppFooter />
     </View>
   );
 }
@@ -177,7 +233,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    paddingBottom: 40,
+    paddingBottom: 24,
   },
   heroWrap: {
     position: 'relative',
@@ -306,6 +362,53 @@ const styles = StyleSheet.create({
   milestoneLabelDone: {
     color: colors.accent,
     fontWeight: '700',
+  },
+  progressSection: {
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: '#EEF2F7',
+  },
+  progressSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  progressPercent: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: colors.textPrimary,
+  },
+  progressSummaryText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  progressTrack: {
+    marginTop: spacing.md,
+    height: 14,
+    borderRadius: 999,
+    backgroundColor: '#E7EEF9',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: colors.accent,
+  },
+  finishTripButton: {
+    marginTop: spacing.md,
+    borderRadius: 18,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  finishTripButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
   actionGrid: {
     flexDirection: 'row',

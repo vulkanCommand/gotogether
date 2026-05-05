@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -12,8 +20,9 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { useTripStore } from '../store/tripStore';
-import { API_BASE_URL, completeTrip, createTripPhoto, fetchTripPhotos } from '../config/api';
+import { API_BASE_URL, ApiExpenseGroup, completeTrip, createTripPhoto, fetchExpenseGroups, fetchTripDetails, fetchTripPhotos } from '../config/api';
 import { useAuthStore } from '../store/authStore';
+import { mapApiMembersToCrew } from '../utils/tripFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCompletion'>;
 
@@ -31,19 +40,38 @@ export default function TripCompletionScreen({ navigation }: Props) {
   const crew = useTripStore((state) => state.crew);
   const bestMatchRange = useTripStore((state) => state.bestMatchRange);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
-  const expenses = useTripStore((state) => state.expenses);
   const tripLead = useTripStore((state) => state.tripLead);
   const currentTrip = useTripStore((state) => state.currentTrip);
   const selectedDestination = useTripStore((state) => state.selectedDestination);
-  const totalPlans = useTripStore((state) => state.totalPlans);
-  const totalExpenseAmount = useTripStore((state) => state.totalExpenseAmount);
+  const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
+  const setCrew = useTripStore((state) => state.setCrew);
+  const setTripLead = useTripStore((state) => state.setTripLead);
   const resetTrip = useTripStore((state) => state.resetTrip);
 
   const [photos, setPhotos] = useState<TripPhoto[]>([]);
+  const [expenseGroups, setExpenseGroups] = useState<ApiExpenseGroup[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
   const destination = selectedDestination();
   const canCompleteTrip = currentTrip?.viewer_role === 'lead';
+  const isCompleted = Boolean(currentTrip?.completed_at);
+
+  const refreshTripState = useCallback(async () => {
+    if (!currentTrip?.id) {
+      return;
+    }
+
+    try {
+      const details = await fetchTripDetails(currentTrip.id);
+      const nextCrew = mapApiMembersToCrew(details.members);
+      setCurrentTrip(details.trip);
+      setCrew(nextCrew);
+      setTripLead(nextCrew.find((member) => member.role === 'lead') ?? nextCrew[0] ?? null);
+    } catch (error) {
+      console.log('Refresh trip completion state failed', error);
+    }
+  }, [currentTrip?.id, setCrew, setCurrentTrip, setTripLead]);
 
   const loadPhotos = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -60,9 +88,32 @@ export default function TripCompletionScreen({ navigation }: Props) {
     }
   }, [currentTrip?.id]);
 
+  const loadExpenseGroups = useCallback(async () => {
+    if (!currentTrip?.id) {
+      setExpenseGroups([]);
+      return;
+    }
+
+    try {
+      const response = await fetchExpenseGroups(currentTrip.id);
+      setExpenseGroups(Array.isArray(response.groups) ? response.groups : []);
+    } catch (error) {
+      console.log('Fetch expense groups failed', error);
+      setExpenseGroups([]);
+    }
+  }, [currentTrip?.id]);
+
   useEffect(() => {
     loadPhotos();
   }, [loadPhotos]);
+
+  useEffect(() => {
+    loadExpenseGroups();
+  }, [loadExpenseGroups]);
+
+  useEffect(() => {
+    refreshTripState();
+  }, [refreshTripState]);
 
   const members = useMemo(() => {
     if (crew.length === 0 && user) {
@@ -122,86 +173,113 @@ export default function TripCompletionScreen({ navigation }: Props) {
       (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
   ].join(' - ');
 
-  const handleFinish = () => {
+  const allExpenses = expenseGroups.flatMap((group) => group.expenses);
+  const tripSpendTotal = allExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalEventCount = itineraryDays.reduce((sum, day) => sum + day.events.length, 0);
+  const completedEventCount = itineraryDays.reduce(
+    (sum, day) => sum + day.events.filter((event) => event.status === 'completed').length,
+    0
+  );
+  const primaryPhoto = photos[0] ?? null;
+  const canFinalizeTrip = canCompleteTrip && !isCompleted && photos.length > 0;
+
+  const handleFinish = async () => {
     if (!canCompleteTrip) {
       Alert.alert('Trip lead only', 'Only the trip lead can start trip completion.');
       navigation.navigate('MainTabs', { screen: 'Trips' });
       return;
     }
 
-    Alert.alert('Are you sure?', 'Start trip completion and ask every crew member to confirm?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Complete',
-        onPress: async () => {
-          try {
-            if (currentTrip?.id) {
-              const response = await completeTrip(currentTrip.id);
-              if (response.pending_confirmations) {
-                Alert.alert(
-                  'Confirmation sent',
-                  'Crew members must accept the completion request in Notifications before this trip moves to Completed.'
-                );
-                navigation.navigate('MainTabs', { screen: 'Trips' });
-                return;
-              }
-            }
-            resetTrip();
-            navigation.navigate('MainTabs', { screen: 'Trips' });
-          } catch (error: any) {
-            Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
-          }
-        },
-      },
-    ]);
+    if (completing) {
+      return;
+    }
+
+    try {
+      setCompleting(true);
+      if (currentTrip?.id) {
+        await completeTrip(currentTrip.id);
+        await refreshTripState();
+      }
+      resetTrip();
+      navigation.navigate('MainTabs', { screen: 'Trips', params: { initialSection: 'Completed' } });
+    } catch (error: any) {
+      Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
+    } finally {
+      setCompleting(false);
+    }
   };
 
   return (
-    <Screen showFooter>
+    <Screen showFooter showBackButton>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <SectionTitle
           title="Trip Completion"
-          subtitle="Finish the trip with the final summary and a shared photo gallery."
+          subtitle={isCompleted ? 'A warm look back at the trip you wrapped up together.' : 'Build the final trip story, add a group photo, then finish the trip.'}
           action={<NotificationBell />}
         />
 
         <AppCard style={styles.heroCard}>
-          <Text style={styles.emoji}>Complete</Text>
-          <Text style={styles.heroTitle}>Trip Completed!</Text>
+          <Text style={styles.emoji}>{isCompleted ? 'Memories saved' : 'Final trip story'}</Text>
+          <Text style={styles.heroTitle}>{isCompleted ? 'Trip Completed!' : 'Finish the Trip'}</Text>
           <Text style={styles.tripName}>{currentTrip?.name ?? destination?.name ?? 'Your Trip'}</Text>
           <Text style={styles.tripMeta}>{tripMeta}</Text>
 
           <View style={styles.statsRow}>
             <StatCard value={String(members.length)} label="Crew" />
-            <StatCard value={String(totalPlans())} label="Plans" />
-            <StatCard value={`$${totalExpenseAmount().toFixed(0)}`} label="Spend" />
+            <StatCard value={String(totalEventCount)} label="Events" />
+            <StatCard value={`$${tripSpendTotal.toFixed(0)}`} label="Spend" />
           </View>
         </AppCard>
 
+        {primaryPhoto ? (
+          <AppCard>
+            <Text style={styles.sectionEyebrow}>{isCompleted ? 'Group photo' : 'Cover memory'}</Text>
+            <View style={styles.photoCard}>
+              <Image
+                source={{
+                  uri: `${API_BASE_URL}/api/trips/${currentTrip?.id}/photos/${primaryPhoto.id}/file`,
+                  headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                }}
+                style={styles.photoImage}
+              />
+              <Text style={styles.photoCaption}>{primaryPhoto.caption || `${currentTrip?.name ?? 'Trip'} memory`}</Text>
+              <Text style={styles.photoMeta}>
+                {primaryPhoto.uploaded_by || 'Crew'} - {primaryPhoto.uploaded_at}
+              </Text>
+            </View>
+          </AppCard>
+        ) : null}
+
         <AppCard>
-          <Text style={styles.sectionEyebrow}>Trip summary</Text>
+          <Text style={styles.sectionEyebrow}>{isCompleted ? 'What you lived' : 'Trip overview'}</Text>
           <SummaryRow label="Destination" value={currentTrip?.destination || destination?.name || 'Pending'} />
           <SummaryRow label="Dates" value={bestMatchRange || 'Pending'} />
           <SummaryRow label="Trip lead" value={tripLead?.name || members[0]?.name || 'Pending'} />
-          <SummaryRow label="Itinerary events" value={`${itineraryDays.reduce((sum, day) => sum + day.events.length, 0)}`} />
-          <SummaryRow label="Expenses logged" value={`${expenses.length}`} isLast />
+          <SummaryRow label="Events completed" value={`${completedEventCount} of ${totalEventCount}`} />
+          <SummaryRow label="Expenses logged" value={`${allExpenses.length}`} />
+          <SummaryRow label="Total spend" value={`$${tripSpendTotal.toFixed(2)}`} />
+          <SummaryRow label="Shared photos" value={`${photos.length}`} isLast />
         </AppCard>
 
         <AppCard>
-          <Text style={styles.sectionEyebrow}>Shared memories</Text>
+          <Text style={styles.sectionEyebrow}>{isCompleted ? 'Trip moments' : 'Add the group photo'}</Text>
 
-          <Pressable style={styles.photoUploadCard} onPress={handleUploadPhoto}>
-            <Text style={styles.photoTitle}>
-              {uploading ? 'Uploading photo...' : 'Upload a group photo'}
-            </Text>
-            <Text style={styles.photoSubtitle}>
-              Photos are saved to the Firebase storage bucket and linked back to this trip.
-            </Text>
-          </Pressable>
+          {!isCompleted ? (
+            <Pressable style={styles.photoUploadCard} onPress={handleUploadPhoto}>
+              <Text style={styles.photoTitle}>
+                {uploading ? 'Uploading photo...' : photos.length > 0 ? 'Change the group photo set' : 'Upload a group photo'}
+              </Text>
+              <Text style={styles.photoSubtitle}>
+                Add at least one group photo before finishing so the completed trip feels like a real memory.
+              </Text>
+            </Pressable>
+          ) : null}
 
           <View style={styles.gallery}>
             {photos.length === 0 ? (
-              <Text style={styles.emptyGalleryText}>No trip photos yet. Upload the first one.</Text>
+              <Text style={styles.emptyGalleryText}>
+                {isCompleted ? 'No photos were saved with this trip.' : 'No trip photos yet. Upload the first one to unlock finishing.'}
+              </Text>
             ) : (
               photos.map((photo) => (
                 <View key={photo.id} style={styles.photoCard}>
@@ -223,7 +301,13 @@ export default function TripCompletionScreen({ navigation }: Props) {
         </AppCard>
 
         <View style={styles.actions}>
-          {canCompleteTrip ? <PrimaryButton title="Finish Trip" onPress={handleFinish} /> : null}
+          {canCompleteTrip && !isCompleted ? (
+            <PrimaryButton
+              title={photos.length > 0 ? (completing ? 'Finishing trip...' : 'Finish the Trip') : 'Upload Group Photo to Finish'}
+              onPress={handleFinish}
+              disabled={!canFinalizeTrip || completing}
+            />
+          ) : null}
           <PrimaryButton title="Back to Trips" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Trips' })} />
         </View>
       </ScrollView>
@@ -401,3 +485,4 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
 });
+

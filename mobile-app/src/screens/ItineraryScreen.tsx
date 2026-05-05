@@ -17,6 +17,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
+import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -30,7 +31,6 @@ import {
   deleteItineraryEvent,
   reopenItineraryEvent,
   searchPlaces,
-  updateItineraryDay,
   updateItineraryEvent,
   apiRequest,
 } from '../config/api';
@@ -79,8 +79,21 @@ const formatTimeLabel = (date: Date) => {
   return `${hours12}:${minutes} ${meridiem}`;
 };
 
+const MINUTE_STEPS = Array.from({ length: 12 }, (_, index) => index * 5);
+
+const snapTimeToFiveMinutes = (date: Date) => {
+  const next = new Date(date);
+  const rawMinutes = next.getMinutes();
+  const snappedMinutes = MINUTE_STEPS.reduce(
+    (closest, option) => (Math.abs(option - rawMinutes) < Math.abs(closest - rawMinutes) ? option : closest),
+    MINUTE_STEPS[0]
+  );
+  next.setMinutes(snappedMinutes, 0, 0);
+  return next;
+};
+
 const parseTimeLabel = (value: string) => {
-  const base = new Date();
+  const base = snapTimeToFiveMinutes(new Date());
   const match = value.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
   if (!match) {
     return base;
@@ -97,7 +110,7 @@ const parseTimeLabel = (value: string) => {
   }
 
   base.setHours(hours, minutes, 0, 0);
-  return base;
+  return snapTimeToFiveMinutes(base);
 };
 
 const buildTimeValue = (hour12: number, minute: number, meridiem: 'AM' | 'PM') => {
@@ -110,6 +123,12 @@ const buildTimeValue = (hour12: number, minute: number, meridiem: 'AM' | 'PM') =
   return next;
 };
 
+const normalizeDayTitles = (days: ItineraryDay[]) =>
+  days.map((day, index) => ({
+    ...day,
+    title: `Day ${index + 1}`,
+  }));
+
 export default function ItineraryScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
@@ -118,7 +137,6 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const [selectedDayId, setSelectedDayId] = useState('');
   const [showEventModal, setShowEventModal] = useState(false);
-  const [showDayModal, setShowDayModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [eventTitle, setEventTitle] = useState('');
@@ -129,9 +147,6 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [locationIsMapped, setLocationIsMapped] = useState(false);
   const [notes, setNotes] = useState('');
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
-  const [editingDayId, setEditingDayId] = useState<string | null>(null);
-  const [dayTitle, setDayTitle] = useState('');
-  const [dayDateLabel, setDayDateLabel] = useState('');
   const [locationResults, setLocationResults] = useState<ApiPlaceResult[]>([]);
   const [searchingLocations, setSearchingLocations] = useState(false);
   const hasFetchedRef = useRef(false);
@@ -148,7 +163,7 @@ export default function ItineraryScreen({ navigation }: Props) {
       const data = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
       const days =
         Array.isArray(data.days) && data.days.length > 0
-          ? data.days
+          ? normalizeDayTitles(data.days)
           : buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
       setItineraryDays(days);
       hasFetchedRef.current = true;
@@ -169,7 +184,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   );
 
   useEffect(() => {
-    if (!selectedDayId && itineraryDays[0]) {
+    if ((!selectedDayId || !itineraryDays.some((day) => day.id === selectedDayId)) && itineraryDays[0]) {
       setSelectedDayId(itineraryDays[0].id);
     }
   }, [itineraryDays, selectedDayId]);
@@ -210,7 +225,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   );
 
   const resetEventForm = () => {
-    const now = new Date();
+    const now = snapTimeToFiveMinutes(new Date());
     setEditingEventId(null);
     setEventTitle('');
     setTime(formatTimeLabel(now));
@@ -239,13 +254,6 @@ export default function ItineraryScreen({ navigation }: Props) {
     setShowEventModal(true);
   };
 
-  const openEditDay = (day: ItineraryDay) => {
-    setEditingDayId(day.id);
-    setDayTitle(day.title);
-    setDayDateLabel(day.dateLabel);
-    setShowDayModal(true);
-  };
-
   const chooseLocation = async (result: ApiPlaceResult) => {
     setLocation(result.display_name);
     setLocationIsMapped(true);
@@ -254,8 +262,9 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const syncTimeValue = async (nextValue: Date) => {
-    setTimeValue(nextValue);
-    setTime(formatTimeLabel(nextValue));
+    const snappedValue = snapTimeToFiveMinutes(nextValue);
+    setTimeValue(snappedValue);
+    setTime(formatTimeLabel(snappedValue));
     await Haptics.selectionAsync().catch(() => undefined);
   };
 
@@ -268,16 +277,24 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const adjustMinute = async (delta: 5 | -5) => {
-    const totalMinutes = timeValue.getHours() * 60 + timeValue.getMinutes() + delta;
-    const wrapped = (totalMinutes + 24 * 60) % (24 * 60);
+    const snappedMinutes = snapTimeToFiveMinutes(timeValue).getMinutes();
+    const currentIndex = Math.max(0, MINUTE_STEPS.findIndex((option) => option === snappedMinutes));
+    const nextIndex = (currentIndex + (delta > 0 ? 1 : -1) + MINUTE_STEPS.length) % MINUTE_STEPS.length;
     const nextValue = new Date(timeValue);
-    nextValue.setHours(Math.floor(wrapped / 60), wrapped % 60, 0, 0);
+    let nextHours = nextValue.getHours();
+    if (delta > 0 && snappedMinutes === MINUTE_STEPS[MINUTE_STEPS.length - 1]) {
+      nextHours = (nextHours + 1) % 24;
+    }
+    if (delta < 0 && snappedMinutes === MINUTE_STEPS[0]) {
+      nextHours = (nextHours + 23) % 24;
+    }
+    nextValue.setHours(nextHours, MINUTE_STEPS[nextIndex], 0, 0);
     await syncTimeValue(nextValue);
   };
 
-  const toggleMeridiem = async () => {
-    const nextValue = new Date(timeValue);
-    nextValue.setHours((nextValue.getHours() + 12) % 24, nextValue.getMinutes(), 0, 0);
+  const setMeridiem = async (meridiem: 'AM' | 'PM') => {
+    const currentHour12 = timeValue.getHours() % 12 || 12;
+    const nextValue = buildTimeValue(currentHour12, snapTimeToFiveMinutes(timeValue).getMinutes(), meridiem);
     await syncTimeValue(nextValue);
   };
 
@@ -314,27 +331,6 @@ export default function ItineraryScreen({ navigation }: Props) {
       await fetchItinerary();
     } catch (error: any) {
       Alert.alert('Save failed', error?.message || 'Could not save the event right now.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveDay = async () => {
-    if (!currentTrip?.id || !editingDayId || !dayTitle.trim() || !dayDateLabel.trim()) {
-      Alert.alert('Missing details', 'Add a day title and date label.');
-      return;
-    }
-
-    try {
-      setSaving(true);
-      await updateItineraryDay(currentTrip.id, editingDayId, {
-        title: dayTitle.trim(),
-        dateLabel: dayDateLabel.trim(),
-      });
-      setShowDayModal(false);
-      await fetchItinerary();
-    } catch (error: any) {
-      Alert.alert('Update failed', error?.message || 'Could not update the day right now.');
     } finally {
       setSaving(false);
     }
@@ -397,7 +393,6 @@ export default function ItineraryScreen({ navigation }: Props) {
     }
 
     Alert.alert(day.title, 'Choose an action for this day.', [
-      { text: 'Edit day', onPress: () => openEditDay(day) },
       { text: 'Delete day', style: 'destructive', onPress: () => confirmDeleteDay(day) },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -653,21 +648,45 @@ export default function ItineraryScreen({ navigation }: Props) {
                         <Pressable style={styles.timeAdjustButton} onPress={() => void adjustMinute(5)}>
                           <Ionicons name="chevron-up" size={18} color={colors.accent} />
                         </Pressable>
-                        <Text style={styles.timeEditorValue}>{`${timeValue.getMinutes()}`.padStart(2, '0')}</Text>
+                        <Text style={styles.timeEditorValue}>
+                          {`${snapTimeToFiveMinutes(timeValue).getMinutes()}`.padStart(2, '0')}
+                        </Text>
                         <Pressable style={styles.timeAdjustButton} onPress={() => void adjustMinute(-5)}>
                           <Ionicons name="chevron-down" size={18} color={colors.accent} />
                         </Pressable>
                       </View>
-                      <View style={styles.timeEditorColumn}>
-                        <Pressable style={styles.timeAdjustButton} onPress={() => void toggleMeridiem()}>
-                          <Ionicons name="swap-vertical" size={18} color={colors.accent} />
+                      <View style={styles.meridiemColumn}>
+                        <Pressable
+                          style={[styles.meridiemButton, timeValue.getHours() < 12 && styles.meridiemButtonSelected]}
+                          onPress={() => void setMeridiem('AM')}
+                        >
+                          <Text
+                            style={[
+                              styles.meridiemButtonText,
+                              timeValue.getHours() < 12 && styles.meridiemButtonTextSelected,
+                            ]}
+                          >
+                            AM
+                          </Text>
                         </Pressable>
-                        <Text style={styles.timeEditorValue}>{timeValue.getHours() >= 12 ? 'PM' : 'AM'}</Text>
-                        <Pressable style={styles.timeAdjustButton} onPress={() => setShowTimePicker(false)}>
-                          <Ionicons name="checkmark" size={18} color={colors.accent} />
+                        <Pressable
+                          style={[styles.meridiemButton, timeValue.getHours() >= 12 && styles.meridiemButtonSelected]}
+                          onPress={() => void setMeridiem('PM')}
+                        >
+                          <Text
+                            style={[
+                              styles.meridiemButtonText,
+                              timeValue.getHours() >= 12 && styles.meridiemButtonTextSelected,
+                            ]}
+                          >
+                            PM
+                          </Text>
                         </Pressable>
                       </View>
                     </View>
+                    <Pressable style={styles.timeDoneButton} onPress={() => setShowTimePicker(false)}>
+                      <Text style={styles.timeDoneButtonText}>Done</Text>
+                    </Pressable>
                   </View>
                 ) : null}
 
@@ -720,33 +739,7 @@ export default function ItineraryScreen({ navigation }: Props) {
         </Pressable>
       </Modal>
 
-      <Modal transparent visible={showDayModal} animationType="slide" onRequestClose={() => setShowDayModal(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowDayModal(false)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardAvoider}>
-            <Pressable style={styles.modalCard} onPress={() => undefined}>
-              <View style={styles.modalHandle} />
-              <Text style={styles.modalTitle}>Edit Day</Text>
-              <TextInput
-                value={dayTitle}
-                onChangeText={setDayTitle}
-                placeholder="Day title"
-                placeholderTextColor={colors.textMuted}
-                style={styles.input}
-              />
-              <TextInput
-                value={dayDateLabel}
-                onChangeText={setDayDateLabel}
-                placeholder="Date label"
-                placeholderTextColor={colors.textMuted}
-                style={[styles.input, styles.inputTopSpacing]}
-              />
-              <Pressable onPress={saveDay} style={styles.saveButton} disabled={saving}>
-                <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Day'}</Text>
-              </Pressable>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
-      </Modal>
+      <AppFooter />
     </View>
   );
 }
@@ -759,7 +752,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 120,
+    paddingBottom: 36,
   },
   header: {
     flexDirection: 'row',
@@ -1101,6 +1094,11 @@ const styles = StyleSheet.create({
     gap: 10,
     minWidth: 56,
   },
+  meridiemColumn: {
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 82,
+  },
   timeAdjustButton: {
     width: 38,
     height: 38,
@@ -1121,6 +1119,41 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     marginTop: 6,
+  },
+  meridiemButton: {
+    minWidth: 72,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meridiemButtonSelected: {
+    backgroundColor: '#EEF4FF',
+    borderColor: '#C7DAFF',
+  },
+  meridiemButtonText: {
+    color: colors.textSecondary,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  meridiemButtonTextSelected: {
+    color: colors.accent,
+  },
+  timeDoneButton: {
+    marginBottom: 14,
+    borderRadius: 16,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  timeDoneButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
   locationStatusRow: {
     flexDirection: 'row',

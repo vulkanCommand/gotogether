@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
+import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -434,6 +435,7 @@ export default function TripCreateScreen({ navigation }: Props) {
           <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
         </Pressable>
       </View>
+      <AppFooter />
     </View>
   );
 }
@@ -446,7 +448,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 140,
+    paddingBottom: 220,
   },
   header: {
     flexDirection: 'row',
@@ -772,10 +774,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: 84,
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 28,
+    paddingBottom: 16,
     backgroundColor: colors.background,
   },
   ctaButton: {
