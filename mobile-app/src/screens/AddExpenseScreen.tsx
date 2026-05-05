@@ -221,7 +221,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
       >
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()} style={styles.headerAction}>
-            <Ionicons name="close" size={24} color="#FFFFFF" />
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
           </Pressable>
           <Text style={styles.headerTitle}>{editingExpenseId ? 'Edit expense' : 'Add expense'}</Text>
           <Pressable onPress={handleSave} disabled={!canSave || saving} style={styles.headerSaveWrap}>
@@ -231,10 +231,10 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
           </Pressable>
         </View>
 
-        <View style={styles.contextRow}>
-          <Text style={styles.contextLabel}>With you and:</Text>
+        <View style={styles.contextCard}>
+          <Text style={styles.contextLabel}>With you and</Text>
           <View style={styles.contextBadge}>
-            <Ionicons name="wallet-outline" size={16} color={colors.success} />
+            <Ionicons name="wallet-outline" size={16} color={colors.accentStrong} />
             <Text style={styles.contextBadgeText}>{selectedGroup?.name || currentTrip?.name || 'Trip expenses'}</Text>
           </View>
         </View>
@@ -245,7 +245,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             value={title}
             onChangeText={setTitle}
             placeholder="Dinner, cab, tickets..."
-            placeholderTextColor="#7E8694"
+            placeholderTextColor={colors.textMuted}
             style={styles.textInput}
           />
 
@@ -258,7 +258,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
               value={amount}
               onChangeText={setAmount}
               placeholder="0.00"
-              placeholderTextColor="#7E8694"
+              placeholderTextColor={colors.textMuted}
               keyboardType="numeric"
               style={styles.amountInput}
             />
@@ -281,7 +281,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             />
             <InfoButton
               label="Split"
-              value={splitMethod === 'Equal split' ? `Equal • ${splitPreview.length}` : `Custom • ${splitPreview.length}`}
+              value={splitMethod === 'Equal split' ? `Equal - ${splitPreview.length}` : `Custom - ${splitPreview.length}`}
               onPress={() => setShowSplitModal(true)}
             />
             <InfoButton label="Date" value={currentDateLabel} />
@@ -309,7 +309,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
                 {eventOptions.map((event) => (
                   <MiniChip
                     key={event.id}
-                    label={`${event.meta} • ${event.label}`}
+                    label={`${event.meta} - ${event.label}`}
                     selected={linkedEventId === event.id}
                     onPress={() => setLinkedEventId(event.id)}
                   />
@@ -323,7 +323,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             value={notes}
             onChangeText={setNotes}
             placeholder="Add context if it helps the group later"
-            placeholderTextColor="#7E8694"
+            placeholderTextColor={colors.textMuted}
             multiline
             style={styles.notesInput}
           />
@@ -334,7 +334,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             <View>
               <Text style={styles.previewLabel}>Split preview</Text>
               <Text style={styles.previewTitle}>
-                {splitMethod === 'Equal split' ? `${perPersonLabel}/person` : `${formatMoney(customTotal)} assigned`}
+                {splitMethod === 'Equal split' ? `${perPersonLabel} each` : `${formatMoney(customTotal)} assigned`}
               </Text>
             </View>
             <Text style={styles.previewMeta}>{splitPreview.length} people</Text>
@@ -420,7 +420,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
                             setCustomAmounts((current) => ({ ...current, [member.id]: value }));
                           }}
                           placeholder="0.00"
-                          placeholderTextColor="#7E8694"
+                          placeholderTextColor={colors.textMuted}
                           keyboardType="numeric"
                           style={[styles.customInput, !selected && styles.customInputMuted]}
                         />
@@ -441,12 +441,9 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             <View style={styles.modalFooter}>
               <View>
                 <Text style={styles.modalFooterValue}>
-                  {splitMethod === 'Equal split' ? `${perPersonLabel}/person` : formatMoney(customTotal)}
+                  {splitMethod === 'Equal split' ? `${perPersonLabel} each` : formatMoney(customTotal)}
                 </Text>
                 <Text style={styles.modalFooterMeta}>({splitPreview.length} people)</Text>
-              </View>
-              <View style={[styles.checkCircle, styles.checkCircleSelected]}>
-                <Text style={styles.modalFooterAll}>All</Text>
               </View>
             </View>
           </View>
@@ -469,7 +466,7 @@ function InfoButton({ label, value, onPress }: { label: string; value: string; o
       <Text style={styles.infoButtonValue} numberOfLines={1}>
         {value}
       </Text>
-      {onPress ? <Ionicons name="chevron-forward" size={14} color="#B7C0CC" /> : null}
+      {onPress ? <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} /> : null}
     </Pressable>
   );
 }
@@ -487,11 +484,11 @@ function MiniChip({ label, selected, onPress }: { label: string; selected: boole
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#171A1F',
+    backgroundColor: colors.background,
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 110,
+    paddingBottom: 118,
     gap: spacing.lg,
   },
   header: {
@@ -504,117 +501,127 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '800',
   },
   headerSaveWrap: {
-    minWidth: 56,
+    minWidth: 64,
     alignItems: 'flex-end',
   },
   headerSave: {
-    color: '#2AC8A0',
+    color: colors.accent,
     fontSize: 18,
     fontWeight: '700',
   },
   headerSaveDisabled: {
-    color: '#5B6472',
+    color: colors.textMuted,
   },
-  contextRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 12,
+  contextCard: {
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 10,
   },
   contextLabel: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '700',
   },
   contextBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    alignSelf: 'flex-start',
+    gap: 8,
     borderRadius: radius.pill,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
   contextBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    color: colors.accentStrong,
+    fontSize: 14,
+    fontWeight: '700',
   },
   formCard: {
-    backgroundColor: '#20242B',
-    borderRadius: 26,
-    padding: 20,
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 18,
     gap: 12,
   },
   fieldLabel: {
-    color: '#8D96A5',
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
     textTransform: 'uppercase',
     marginTop: 4,
   },
   textInput: {
     minHeight: 56,
-    borderBottomWidth: 1,
-    borderBottomColor: '#344052',
-    color: '#FFFFFF',
-    fontSize: 22,
-    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    color: colors.textPrimary,
+    fontSize: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   amountRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    marginTop: 2,
+    gap: 14,
   },
   amountIcon: {
-    width: 74,
-    height: 74,
-    borderRadius: 16,
+    width: 62,
+    height: 62,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: colors.border,
+    backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.03)',
   },
   amountCurrency: {
-    color: '#FFFFFF',
-    fontSize: 34,
+    color: colors.accentStrong,
+    fontSize: 28,
     fontWeight: '800',
   },
   amountInput: {
     flex: 1,
-    minHeight: 72,
-    borderBottomWidth: 1,
-    borderBottomColor: '#DDE3EC',
-    color: '#FFFFFF',
-    fontSize: 46,
-    fontWeight: '700',
+    minHeight: 62,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    color: colors.textPrimary,
+    fontSize: 34,
+    fontWeight: '800',
+    paddingHorizontal: 16,
   },
   metaGrid: {
     gap: spacing.sm,
     marginTop: spacing.sm,
   },
   infoButton: {
-    borderRadius: 18,
-    backgroundColor: '#262B33',
+    borderRadius: 16,
+    backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
-    borderColor: '#313844',
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 14,
     flexDirection: 'row',
@@ -622,17 +629,17 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   infoButtonStatic: {
-    opacity: 0.9,
+    opacity: 0.95,
   },
   infoButtonLabel: {
-    color: '#8D96A5',
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
-    width: 52,
+    width: 56,
   },
   infoButtonValue: {
     flex: 1,
-    color: '#FFFFFF',
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -641,42 +648,44 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   miniChip: {
-    maxWidth: 220,
+    maxWidth: 240,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: '#313844',
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: '#262B33',
+    backgroundColor: colors.surfaceMuted,
   },
   miniChipSelected: {
-    backgroundColor: 'rgba(42,200,160,0.16)',
-    borderColor: 'rgba(42,200,160,0.36)',
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
   },
   miniChipText: {
-    color: '#DDE3EC',
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '600',
   },
   miniChipTextSelected: {
-    color: '#2AC8A0',
+    color: colors.accentStrong,
   },
   notesInput: {
     minHeight: 88,
-    borderRadius: 18,
-    backgroundColor: '#262B33',
+    borderRadius: 16,
+    backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
-    borderColor: '#313844',
-    color: '#FFFFFF',
+    borderColor: colors.border,
+    color: colors.textPrimary,
     fontSize: 15,
     paddingHorizontal: 14,
     paddingVertical: 14,
     textAlignVertical: 'top',
   },
   previewCard: {
-    backgroundColor: '#20242B',
-    borderRadius: 26,
-    padding: 20,
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 18,
   },
   previewHeader: {
     flexDirection: 'row',
@@ -685,20 +694,20 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   previewLabel: {
-    color: '#8D96A5',
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
   },
   previewTitle: {
     marginTop: 6,
-    color: '#FFFFFF',
+    color: colors.textPrimary,
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   previewMeta: {
-    color: '#B7C0CC',
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -708,32 +717,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+    borderTopColor: colors.border,
   },
   previewName: {
-    color: '#FFFFFF',
+    color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
     flex: 1,
   },
   previewAmount: {
-    color: '#2AC8A0',
+    color: colors.accentStrong,
     fontSize: 15,
     fontWeight: '700',
   },
   previewWarning: {
     marginTop: spacing.sm,
-    color: '#FF8A3D',
+    color: colors.danger,
     fontSize: 13,
     fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.42)',
+    backgroundColor: 'rgba(15,23,42,0.24)',
     justifyContent: 'flex-end',
   },
   modalCard: {
-    backgroundColor: '#1D2026',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 20,
@@ -747,14 +756,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalAction: {
-    color: '#2AC8A0',
+    color: colors.accent,
     fontSize: 16,
     fontWeight: '700',
   },
   modalTitle: {
-    color: '#FFFFFF',
+    color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   modeToggle: {
     flexDirection: 'row',
@@ -764,28 +773,28 @@ const styles = StyleSheet.create({
   modeButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#3A414C',
+    borderColor: colors.border,
     borderRadius: 14,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#232730',
+    backgroundColor: colors.surfaceMuted,
   },
   modeButtonSelected: {
-    backgroundColor: 'rgba(42,200,160,0.16)',
-    borderColor: 'rgba(42,200,160,0.42)',
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
   },
   modeButtonText: {
-    color: '#DDE3EC',
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '700',
   },
   modeButtonTextSelected: {
-    color: '#2AC8A0',
+    color: colors.accentStrong,
   },
   modalSubtitle: {
     marginTop: 14,
-    color: '#B7C0CC',
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -798,8 +807,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    backgroundColor: '#232730',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
@@ -813,17 +824,17 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#324054',
+    backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   memberAvatarText: {
-    color: '#FFFFFF',
+    color: colors.accentStrong,
     fontSize: 15,
     fontWeight: '800',
   },
   memberName: {
-    color: '#FFFFFF',
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     flex: 1,
@@ -833,13 +844,13 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: 13,
     borderWidth: 2,
-    borderColor: '#465162',
+    borderColor: colors.borderStrong,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkCircleSelected: {
-    borderColor: '#2AC8A0',
-    backgroundColor: '#2AC8A0',
+    borderColor: colors.accent,
+    backgroundColor: colors.accent,
   },
   customEntryRow: {
     flexDirection: 'row',
@@ -849,12 +860,12 @@ const styles = StyleSheet.create({
   customInput: {
     minWidth: 88,
     borderRadius: 14,
-    backgroundColor: '#171A1F',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#3A414C',
+    borderColor: colors.border,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#FFFFFF',
+    color: colors.textPrimary,
     fontSize: 15,
     textAlign: 'right',
   },
@@ -865,24 +876,19 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     paddingTop: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderTopColor: colors.border,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   modalFooterValue: {
-    color: '#FFFFFF',
+    color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   modalFooterMeta: {
-    color: '#8D96A5',
+    color: colors.textSecondary,
     fontSize: 13,
     marginTop: 2,
-  },
-  modalFooterAll: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
   },
 });
