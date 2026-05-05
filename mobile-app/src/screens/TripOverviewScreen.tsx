@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import AppFooter from '../components/AppFooter';
@@ -61,6 +62,12 @@ export default function TripOverviewScreen({ navigation }: Props) {
   useEffect(() => {
     hydrateTrip();
   }, [hydrateTrip]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void hydrateTrip();
+    }, [hydrateTrip])
+  );
 
   const milestones = useMemo<Milestone[]>(
     () => [
