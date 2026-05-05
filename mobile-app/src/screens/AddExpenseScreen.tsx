@@ -20,7 +20,7 @@ import { radius, spacing } from '../theme/spacing';
 import { ExpenseSplit, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
 import { createTripExpense, updateTripExpense } from '../config/api';
-import { buildEqualSplitPreview, formatMoney } from '../utils/expenseCalculations';
+import { buildEqualSplitPreview, formatMoney, getExpenseGroupDisplayName } from '../utils/expenseCalculations';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddExpense'>;
 type SplitMode = 'Equal split' | 'Custom split';
@@ -86,6 +86,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   }, [crewList, defaultGroupId, editingExpense, user?.id]);
 
   const selectedGroup = expenseGroups.find((group) => group.id === expenseGroupId) ?? expenseGroups[0] ?? null;
+  const selectedGroupLabel = getExpenseGroupDisplayName(selectedGroup?.name || 'Trip expenses', currentTrip?.name);
   const amountValue = roundCurrency(Number(amount || 0));
 
   const memberOptions = useMemo(
@@ -225,7 +226,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
           <Text style={styles.contextLabel}>With you and</Text>
           <View style={styles.contextBadge}>
             <Ionicons name="wallet-outline" size={16} color={colors.accentStrong} />
-            <Text style={styles.contextBadgeText}>{selectedGroup?.name || currentTrip?.name || 'Trip expenses'}</Text>
+            <Text style={styles.contextBadgeText}>{selectedGroupLabel || currentTrip?.name || 'Trip expenses'}</Text>
           </View>
         </View>
 
@@ -276,13 +277,13 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             />
             <InfoButton
               label="Group"
-              value={selectedGroup?.name || 'Select'}
+              value={selectedGroup ? getExpenseGroupDisplayName(selectedGroup.name, currentTrip?.name) : 'Select'}
               onPress={() =>
                 Alert.alert(
                   'Expense group',
                   'Choose where this expense belongs.',
                   expenseGroups.map((group) => ({
-                    text: group.name,
+                    text: getExpenseGroupDisplayName(group.name, currentTrip?.name),
                     onPress: () => setExpenseGroupId(group.id),
                   })).concat([{ text: 'Cancel', style: 'cancel' } as any])
                 )

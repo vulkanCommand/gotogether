@@ -28,6 +28,7 @@ import {
   calculateExpenseGroupSummary,
   calculateOverallExpenseSummary,
   formatMoney,
+  getExpenseGroupDisplayName,
   getExpenseImpactLabel,
   groupExpensesByMonth,
 } from '../utils/expenseCalculations';
@@ -104,9 +105,11 @@ export default function ExpensesScreen({ navigation }: Props) {
 
   const allGroups = useMemo(() => tripSections.flatMap((section) => section.groups), [tripSections]);
   const overallSummary = useMemo(
-    () => calculateOverallExpenseSummary(allGroups, [], user?.id),
-    [allGroups, user?.id]
+    () => calculateOverallExpenseSummary(allGroups, crew, user?.id),
+    [allGroups, crew, user?.id]
   );
+
+  const groupLabel = (group: ExpenseGroup, trip: CurrentTrip) => getExpenseGroupDisplayName(group.name, trip.name);
 
   const selectedSection = useMemo(
     () => tripSections.find((section) => section.trip.id === selectedTripId) ?? null,
@@ -226,7 +229,7 @@ export default function ExpensesScreen({ navigation }: Props) {
                 <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
               </Pressable>
               <View style={styles.headerCenter}>
-                <Text style={styles.headerTitle}>{selectedGroup.name}</Text>
+                <Text style={styles.headerTitle}>{groupLabel(selectedGroup, selectedSection.trip)}</Text>
                 <Text style={styles.headerSubtitle}>{selectedSection.trip.name}</Text>
               </View>
               <NotificationBell />
@@ -426,7 +429,7 @@ export default function ExpensesScreen({ navigation }: Props) {
               <View style={styles.groupList}>
                 {tripSections.map((section) =>
                   section.groups.map((group) => {
-                    const summary = calculateExpenseGroupSummary(group, [], user?.id);
+                    const summary = calculateExpenseGroupSummary(group, crew, user?.id);
                     const previewLines = summary.currentUserBalanceLines.slice(0, 2);
                     const remainingCount = Math.max(summary.currentUserBalanceLines.length - previewLines.length, 0);
                     return (
@@ -441,9 +444,11 @@ export default function ExpensesScreen({ navigation }: Props) {
                         <View style={styles.groupCopy}>
                           <View style={styles.groupTopRow}>
                             <View style={styles.groupTextWrap}>
-                              <Text style={styles.groupName}>{group.name}</Text>
+                              <Text style={styles.groupName}>{groupLabel(group, section.trip)}</Text>
                               <Text style={styles.groupTripMeta}>
-                                {section.trip.name} - {section.trip.members_count ?? 1} members - {formatMoney(summary.totalSpent)}
+                                {groupLabel(group, section.trip) === section.trip.name
+                                  ? `${section.trip.members_count ?? 1} members - ${formatMoney(summary.totalSpent)}`
+                                  : `${section.trip.name} - ${section.trip.members_count ?? 1} members - ${formatMoney(summary.totalSpent)}`}
                               </Text>
                             </View>
                             <View style={styles.groupBalanceWrap}>

@@ -1,15 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
 import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
@@ -68,6 +65,7 @@ const shouldShowLocationIcon = (location?: string, locationIsMapped?: boolean) =
 };
 
 export default function LiveScreen() {
+  const insets = useSafeAreaInsets();
   const currentTrip = useTripStore((state) => state.currentTrip);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
   const setItineraryDays = useTripStore((state) => state.setItineraryDays);
@@ -211,16 +209,26 @@ export default function LiveScreen() {
   const selfDistance = selfLocation && destinationCoordinate ? distanceMiles(selfLocation, destinationCoordinate) : null;
 
   return (
-    <Screen>
-      <SectionTitle title="Live" subtitle="Track the trip crew on a real map with current locations." action={<NotificationBell />} />
+    <View style={styles.screen}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 22) + 12 }]}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.headerTitle}>Live</Text>
+            <Text style={styles.headerSubtitle}>See where the crew is and what stop is next.</Text>
+          </View>
+          <NotificationBell />
+        </View>
 
-      {!currentTrip ? (
-        <AppCard>
-          <Text style={styles.emptyTitle}>No active trip selected</Text>
-          <Text style={styles.emptyText}>Open a trip first to see live member locations.</Text>
-        </AppCard>
-      ) : (
-        <>
+        {!currentTrip ? (
+          <View style={styles.card}>
+            <Text style={styles.emptyTitle}>No active trip selected</Text>
+            <Text style={styles.emptyText}>Open a trip first to see live member locations.</Text>
+          </View>
+        ) : (
+          <>
           <View style={styles.mapWrap}>
             {loading ? <ActivityIndicator size="large" color={colors.accent} /> : null}
 
@@ -281,8 +289,8 @@ export default function LiveScreen() {
             ) : null}
           </View>
 
-          <AppCard>
-            <Text style={styles.sectionLabel}>Active destination</Text>
+          <View style={styles.card}>
+            <Text style={styles.sectionEyebrow}>Active destination</Text>
             {activeDestination ? (
               <>
                 <Text style={styles.destinationTitle}>{activeDestination.event.title}</Text>
@@ -290,13 +298,9 @@ export default function LiveScreen() {
                   {activeDestination.dayTitle} - {activeDestination.event.time}
                 </Text>
                 {shouldShowLocationIcon(activeDestination.event.location, activeDestination.event.locationIsMapped) ? (
-                  <Pressable
-                    style={styles.locationIcon}
-                    onPress={() => openMapsLocation(activeDestination.event.location)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open ${activeDestination.event.location} in Maps`}
-                  >
-                    <Ionicons name="location" size={22} color={colors.accent} />
+                  <Pressable style={styles.locationButton} onPress={() => openMapsLocation(activeDestination.event.location)}>
+                    <Ionicons name="location-outline" size={18} color={colors.accent} />
+                    <Text style={styles.locationButtonText}>Maps</Text>
                   </Pressable>
                 ) : (
                   <Text style={styles.destinationMeta}>{activeDestination.event.location}</Text>
@@ -308,10 +312,16 @@ export default function LiveScreen() {
             ) : (
               <Text style={styles.emptyText}>Add an itinerary event location to show the live destination.</Text>
             )}
-          </AppCard>
+          </View>
 
-          <AppCard>
-            <Text style={styles.sectionLabel}>Crew status</Text>
+          <View style={styles.card}>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionTitle}>Crew status</Text>
+              <Pressable style={styles.refreshButton} onPress={refreshLiveMap}>
+                <Ionicons name="refresh" size={16} color={colors.accent} />
+                <Text style={styles.refreshButtonText}>Refresh</Text>
+              </Pressable>
+            </View>
             {locations.length === 0 ? (
               <Text style={styles.emptyText}>No crew locations are available yet.</Text>
             ) : (
@@ -319,22 +329,25 @@ export default function LiveScreen() {
                 <View key={member.user_id} style={styles.memberRow}>
                   <View>
                     <Text style={styles.memberName}>{member.name || member.email}</Text>
-                  <Text style={styles.memberMeta}>
+                    <Text style={styles.memberMeta}>
                       {member.latitude !== null && member.longitude !== null
                         ? `Updated ${member.updated_at}${destinationCoordinate ? ` - ${formatMiles(distanceMiles(member, destinationCoordinate))} away` : ''}`
                         : 'Location pending'}
                     </Text>
                   </View>
-                  <Text style={styles.memberBadge}>{member.is_current_user ? 'You' : 'Crew'}</Text>
+                  <View style={[styles.memberBadge, member.is_current_user && styles.memberBadgeSelf]}>
+                    <Text style={[styles.memberBadgeText, member.is_current_user && styles.memberBadgeTextSelf]}>
+                      {member.is_current_user ? 'You' : 'Crew'}
+                    </Text>
+                  </View>
                 </View>
               ))
             )}
-          </AppCard>
-
-          <PrimaryButton title="Refresh live map" onPress={refreshLiveMap} />
-        </>
-      )}
-    </Screen>
+          </View>
+          </>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -378,9 +391,44 @@ function formatMiles(value: number) {
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingBottom: 120,
+    gap: spacing.lg,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  headerCopy: {
+    flex: 1,
+  },
+  headerTitle: {
+    color: colors.textPrimary,
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  headerSubtitle: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
+  card: {
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 20,
+  },
   mapWrap: {
     height: 470,
-    borderRadius: radius.lg,
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
@@ -423,11 +471,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  sectionLabel: {
-    color: colors.accent,
+  sectionEyebrow: {
+    color: colors.textSecondary,
     fontWeight: '700',
     fontSize: 13,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  sectionTitle: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '800',
   },
   memberRow: {
     flexDirection: 'row',
@@ -448,9 +508,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   memberBadge: {
-    color: colors.accent,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  memberBadgeSelf: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  memberBadgeText: {
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
+  },
+  memberBadgeTextSelf: {
+    color: colors.accentStrong,
   },
   destinationTitle: {
     fontSize: 18,
@@ -461,14 +536,40 @@ const styles = StyleSheet.create({
     marginTop: 5,
     color: colors.textSecondary,
   },
-  locationIcon: {
+  locationButton: {
     marginTop: spacing.sm,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#EEF4FF',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  locationButtonText: {
+    color: colors.accentStrong,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  refreshButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  refreshButtonText: {
+    color: colors.accentStrong,
+    fontSize: 13,
+    fontWeight: '700',
   },
   distanceText: {
     marginTop: spacing.sm,

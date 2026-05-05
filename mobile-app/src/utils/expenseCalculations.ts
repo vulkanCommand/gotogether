@@ -38,6 +38,14 @@ const toMoneyNumber = (value: number | undefined | null) => roundCurrency(Number
 
 export const formatMoney = (value: number) => `$${toMoneyNumber(value).toFixed(2)}`;
 
+export const getExpenseGroupDisplayName = (groupName: string, tripName?: string | null) => {
+  const normalized = groupName.trim().toLowerCase();
+  if (normalized === 'trip expenses' && tripName?.trim()) {
+    return tripName.trim();
+  }
+  return groupName;
+};
+
 const buildMemberNameMap = (group: ExpenseGroup, crew: CrewMember[]) => {
   const names = new Map<string, string>();
 
