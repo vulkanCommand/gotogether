@@ -21,7 +21,7 @@ import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { ItineraryDay, ItineraryEvent, useTripStore } from '../store/tripStore';
+import { ItineraryDay, ItineraryEvent, isCompletedEvent, useTripStore } from '../store/tripStore';
 import {
   ApiPlaceResult,
   completeItineraryEvent,
@@ -29,7 +29,6 @@ import {
   createItineraryEvent,
   deleteItineraryDay,
   deleteItineraryEvent,
-  reopenItineraryEvent,
   searchPlaces,
   updateItineraryEvent,
   apiRequest,
@@ -529,18 +528,15 @@ export default function ItineraryScreen({ navigation }: Props) {
     }
 
     const previousStatus = event.status;
-    const nextStatus = event.status === 'completed' ? 'active' : 'completed';
+    const previousIsCompleted = Boolean(event.isCompleted);
 
     try {
       setSaving(true);
-      updateEventInDay(owningDay.id, event.id, { status: nextStatus });
-      const response =
-        event.status === 'completed'
-          ? await reopenItineraryEvent(currentTrip.id, event.id)
-          : await completeItineraryEvent(currentTrip.id, event.id);
+      updateEventInDay(owningDay.id, event.id, { status: 'completed', isCompleted: true });
+      const response = await completeItineraryEvent(currentTrip.id, event.id);
       setItineraryDays(response.days);
     } catch (error: any) {
-      updateEventInDay(owningDay.id, event.id, { status: previousStatus });
+      updateEventInDay(owningDay.id, event.id, { status: previousStatus, isCompleted: previousIsCompleted });
       Alert.alert('Update failed', error?.message || 'Could not update the event right now.');
     } finally {
       setSaving(false);
@@ -548,7 +544,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const toggleEventCompletion = (event: ItineraryEvent) => {
-    if (event.status === 'completed') {
+    if (isCompletedEvent(event)) {
       return;
     }
 
@@ -618,7 +614,7 @@ export default function ItineraryScreen({ navigation }: Props) {
         <View style={styles.timeline}>
           {selectedDay?.events.length ? (
             selectedDay.events.map((event, index) => {
-              const done = event.status === 'completed';
+              const done = isCompletedEvent(event);
               return (
                 <View key={event.id} style={styles.timelineRow}>
                   <View style={styles.timelineRail}>

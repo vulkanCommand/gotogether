@@ -19,7 +19,7 @@ import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { useTripStore } from '../store/tripStore';
+import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import { API_BASE_URL, ApiExpenseGroup, completeTrip, createTripPhoto, fetchExpenseGroups, fetchTripDetails, fetchTripPhotos } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { mapApiMembersToCrew } from '../utils/tripFlow';
@@ -177,7 +177,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
   const tripSpendTotal = allExpenses.reduce((sum, expense) => sum + expense.amount, 0);
   const totalEventCount = itineraryDays.reduce((sum, day) => sum + day.events.length, 0);
   const completedEventCount = itineraryDays.reduce(
-    (sum, day) => sum + day.events.filter((event) => event.status === 'completed').length,
+    (sum, day) => sum + day.events.filter((event) => isCompletedEvent(event)).length,
     0
   );
   const primaryPhoto = photos[0] ?? null;

@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Location from 'expo-location';
-import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 
 import Screen from '../components/Screen';
@@ -16,7 +15,7 @@ import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { apiRequest, fetchTripLiveLocations, updateTripLocation, userProfileImageFileUrl } from '../config/api';
-import { useTripStore } from '../store/tripStore';
+import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
 
 type Props = CompositeScreenProps<
@@ -35,6 +34,11 @@ type LiveMember = {
   updated_at: string;
   is_current_user: boolean;
 };
+
+const nativeMaps = Platform.OS === 'web' ? null : require('react-native-maps');
+const MapView = nativeMaps?.default as any;
+const Marker = nativeMaps?.Marker as any;
+const Polyline = nativeMaps?.Polyline as any;
 
 const defaultRegion = {
   latitude: 37.78825,
@@ -128,11 +132,11 @@ export default function LiveScreen() {
 
   const activeDestination = useMemo(() => {
     for (const day of itineraryDays) {
-      const activeEvent = day.events.find((event) => event.status === 'active');
+      const activeEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'active');
       if (activeEvent?.location) {
         return { dayTitle: day.title, event: activeEvent };
       }
-      const upcomingEvent = day.events.find((event) => event.status === 'upcoming');
+      const upcomingEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'upcoming');
       if (upcomingEvent?.location) {
         return { dayTitle: day.title, event: upcomingEvent };
       }
@@ -220,7 +224,7 @@ export default function LiveScreen() {
           <View style={styles.mapWrap}>
             {loading ? <ActivityIndicator size="large" color={colors.accent} /> : null}
 
-            {!loading && hasMapPins ? (
+            {!loading && hasMapPins && Platform.OS !== 'web' ? (
               <MapView style={styles.map} initialRegion={region} region={region}>
                 {destinationCoordinate ? (
                   <Marker
@@ -267,7 +271,9 @@ export default function LiveScreen() {
             ) : !loading ? (
               <View style={styles.mapFallback}>
                 <Text style={styles.mapText}>
-                  {permissionGranted
+                  {Platform.OS === 'web'
+                    ? 'Live map preview is available on the mobile app.'
+                    : permissionGranted
                     ? 'No live locations shared yet.'
                     : 'Location permission is required for the live map.'}
                 </Text>

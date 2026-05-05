@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { useTripStore } from '../store/tripStore';
+import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import { apiRequest, fetchTripDetails, tripCoverFileUrl } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
@@ -110,7 +110,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
   const completedEvents = useMemo(
     () =>
       itineraryDays.reduce(
-        (sum, day) => sum + day.events.filter((event) => event.status === 'completed').length,
+        (sum, day) => sum + day.events.filter((event) => isCompletedEvent(event)).length,
         0
       ),
     [itineraryDays]

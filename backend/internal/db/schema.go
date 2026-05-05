@@ -84,12 +84,15 @@ var schemaStatements = []string{
 		location_is_mapped BOOLEAN NOT NULL DEFAULT FALSE,
 		notes TEXT,
 		status TEXT NOT NULL DEFAULT 'upcoming',
+		is_completed BOOLEAN NOT NULL DEFAULT FALSE,
 		attendee_summary TEXT,
 		event_order INTEGER NOT NULL,
 		completed_at TIMESTAMP,
 		completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS is_completed BOOLEAN NOT NULL DEFAULT FALSE`,
+	`UPDATE itinerary_events SET is_completed = TRUE WHERE completed_at IS NOT NULL`,
 	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`,
 	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
 	`ALTER TABLE itinerary_events ADD COLUMN IF NOT EXISTS location_is_mapped BOOLEAN NOT NULL DEFAULT FALSE`,
@@ -167,6 +170,17 @@ var schemaStatements = []string{
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`CREATE TABLE IF NOT EXISTS sms_invites (
+		id SERIAL PRIMARY KEY,
+		sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		recipient_phone TEXT NOT NULL,
+		recipient_name TEXT,
+		provider TEXT NOT NULL DEFAULT 'twilio',
+		provider_message_sid TEXT,
+		status TEXT NOT NULL DEFAULT 'queued',
+		invite_context TEXT,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
 	`CREATE TABLE IF NOT EXISTS notifications (
 		id SERIAL PRIMARY KEY,
 		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -210,6 +224,7 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_expense_splits_expense_id ON expense_splits (expense_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id, cleared_at, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_user_push_tokens_user_id ON user_push_tokens (user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_sms_invites_sender_phone_time ON sms_invites (sender_user_id, recipient_phone, created_at DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_event_completion_confirmations_event ON event_completion_confirmations (event_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_completion_confirmations_trip ON trip_completion_confirmations (trip_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_member_setup_trip_user ON trip_member_setup (trip_id, user_id)`,

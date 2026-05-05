@@ -75,6 +75,8 @@ func SaveTripItinerary(c *gin.Context) {
 		return
 	}
 
+	createUserNotification(userID, tripID, "Itinerary updated", "You updated the trip itinerary.", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Itinerary updated", "The trip itinerary was updated.", "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"message": "itinerary saved"})
 }
 
@@ -130,6 +132,8 @@ func CreateItineraryDay(c *gin.Context) {
 		Status:    "upcoming",
 		Events:    []models.ItineraryEventPayload{},
 	}})
+	createUserNotification(userID, tripID, "Itinerary day added", title+" was added to the trip plan.", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Itinerary day added", title+" was added to the trip plan.", "itinerary", false)
 }
 
 func UpdateItineraryDay(c *gin.Context) {
@@ -169,6 +173,8 @@ func UpdateItineraryDay(c *gin.Context) {
 		return
 	}
 
+	createUserNotification(userID, tripID, "Itinerary day updated", title+" was updated.", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Itinerary day updated", title+" was updated.", "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -217,6 +223,8 @@ func DeleteItineraryDay(c *gin.Context) {
 		return
 	}
 
+	createUserNotification(userID, tripID, "Itinerary day deleted", "You deleted a day from the itinerary.", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Itinerary day deleted", "The trip lead deleted a day from the itinerary.", "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
@@ -251,8 +259,124 @@ func CreateItineraryEvent(c *gin.Context) {
 		return
 	}
 
+	createUserNotification(userID, tripID, "New itinerary event", event.Title+" was added to the trip plan.", "itinerary", false, "", 0, userID)
 	createTripNotifications(tripID, userID, "New itinerary event", event.Title+" was added to the trip plan.", "itinerary", false)
 	c.JSON(http.StatusCreated, gin.H{"event": event})
+}
+
+func ReorderItineraryDayEvents(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+	if !ensureTripLeadAccess(c, tripID, userID) {
+		return
+	}
+
+	dayID := parseNumericID(c.Param("dayId"))
+	if dayID <= 0 || !dayBelongsToTrip(dayID, tripID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid day id"})
+		return
+	}
+
+	var req struct {
+		EventIDs []string `json:"eventIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	rows, err := db.DB.Query(`
+		SELECT id
+		FROM itinerary_events
+		WHERE itinerary_day_id = $1
+		ORDER BY event_order ASC, id ASC
+	`, dayID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load current event order", "details": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	currentIDs := make([]int, 0)
+	currentIDSet := map[int]struct{}{}
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read current event order", "details": err.Error()})
+			return
+		}
+		currentIDs = append(currentIDs, id)
+		currentIDSet[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read current event order", "details": err.Error()})
+		return
+	}
+
+	if len(currentIDs) == 0 || len(req.EventIDs) != len(currentIDs) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "event order payload is incomplete"})
+		return
+	}
+
+	orderedIDs := make([]int, 0, len(req.EventIDs))
+	seen := map[int]struct{}{}
+	for _, rawID := range req.EventIDs {
+		eventID := parseNumericID(rawID)
+		if eventID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id in reorder payload"})
+			return
+		}
+		if _, exists := currentIDSet[eventID]; !exists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "event does not belong to this itinerary day"})
+			return
+		}
+		if _, duplicate := seen[eventID]; duplicate {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "duplicate event id in reorder payload"})
+			return
+		}
+		seen[eventID] = struct{}{}
+		orderedIDs = append(orderedIDs, eventID)
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	for index, eventID := range orderedIDs {
+		if _, err := tx.Exec(`UPDATE itinerary_events SET event_order = $1 WHERE id = $2`, index, eventID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update event order", "details": err.Error()})
+			return
+		}
+	}
+
+	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
+		return
+	}
+
+	createUserNotification(userID, tripID, "Itinerary reordered", "You updated the order of events for the day.", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Itinerary reordered", "The order of itinerary events was updated.", "itinerary", false)
+
+	days, err := loadTripItinerary(tripID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reorder saved but itinerary reload failed", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"days": days})
 }
 
 func UpdateItineraryEvent(c *gin.Context) {
@@ -300,6 +424,7 @@ func UpdateItineraryEvent(c *gin.Context) {
 		return
 	}
 
+	createUserNotification(userID, tripID, "Itinerary event updated", title+" was updated.", "itinerary", false, "", 0, userID)
 	createTripNotifications(tripID, userID, "Itinerary event updated", title+" was updated.", "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
@@ -349,6 +474,7 @@ func DeleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
+	createUserNotification(userID, tripID, "Itinerary event deleted", "You deleted an itinerary event.", "itinerary", false, "", 0, userID)
 	createTripNotifications(tripID, userID, "Itinerary event deleted", "The trip lead deleted an itinerary event.", "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
@@ -372,11 +498,41 @@ func CompleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	if accepted, err := insertEventCompletionConfirmation(tripID, eventID, userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start event completion", "details": err.Error()})
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
 		return
-	} else if !accepted {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event id"})
+	}
+	defer rollbackQuietly(tx)
+
+	if _, err := tx.Exec(`
+		DELETE FROM event_completion_confirmations
+		WHERE trip_id = $1 AND event_id = $2
+	`, tripID, eventID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear prior confirmations", "details": err.Error()})
+		return
+	}
+
+	if err := neutralizePendingEventCompletionNotificationsForEventTx(tx, tripID, eventID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear event notifications", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE itinerary_events
+		SET status = 'completed', is_completed = TRUE, completed_at = CURRENT_TIMESTAMP, completed_by_user_id = $2
+		WHERE id = $1
+	`, eventID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to complete event", "details": err.Error()})
+		return
+	}
+
+	if err := normalizeTripActiveEventTx(tx, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to normalize active event", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
 		return
 	}
 
@@ -385,7 +541,9 @@ func CompleteItineraryEvent(c *gin.Context) {
 	if strings.TrimSpace(eventTitle) == "" {
 		eventTitle = "an itinerary event"
 	}
-	createTripActionNotifications(tripID, userID, "Confirm event completion", "Trip lead marked "+strings.TrimSpace(eventTitle)+" complete. Accept to confirm.", "task", true, "event_complete", eventID)
+	createUserNotification(userID, tripID, "Event completed", "You marked "+strings.TrimSpace(eventTitle)+" complete.", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Event completed", strings.TrimSpace(eventTitle)+" was marked complete.", "alert", false)
+
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "event completed but itinerary reload failed", "details": err.Error()})
@@ -496,7 +654,7 @@ func finalizeEventIfConfirmed(tripID int, eventID int, actorUserID int) error {
 
 	if _, err := tx.Exec(`
 		UPDATE itinerary_events
-		SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+		SET status = 'completed', is_completed = TRUE, completed_at = CURRENT_TIMESTAMP
 		WHERE id = $1
 	`, eventID); err != nil {
 		return err
@@ -572,7 +730,7 @@ func UndoCompleteItineraryEvent(c *gin.Context) {
 
 	if _, err := tx.Exec(`
 		UPDATE itinerary_events
-		SET status = 'active', completed_at = NULL, completed_by_user_id = NULL
+		SET status = 'active', is_completed = FALSE, completed_at = NULL, completed_by_user_id = NULL
 		WHERE id = $1
 	`, eventID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to undo event completion", "details": err.Error()})
@@ -588,6 +746,7 @@ func UndoCompleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
+	createUserNotification(userID, tripID, "Event reopened", "You reopened an itinerary event.", "itinerary", false, "", 0, userID)
 	createTripNotifications(tripID, userID, "Event reopened", "The trip lead reopened an itinerary event.", "itinerary", false)
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
@@ -637,6 +796,7 @@ func loadTripItinerary(tripID int) ([]models.ItineraryDayPayload, error) {
 			COALESCE(location_is_mapped, FALSE),
 			COALESCE(notes, ''),
 			status,
+			COALESCE(is_completed, FALSE),
 			COALESCE(attendee_summary, ''),
 			COALESCE(completed_at::text, ''),
 			event_order
@@ -655,12 +815,13 @@ func loadTripItinerary(tripID int) ([]models.ItineraryDayPayload, error) {
 		var eventID, itineraryDayID, eventOrder int
 		var attendeeSummary string
 		var event models.ItineraryEventPayload
-		if err := eventRows.Scan(&eventID, &itineraryDayID, &event.Title, &event.Time, &event.Location, &event.LocationIsMapped, &event.Notes, &event.Status, &attendeeSummary, &event.CompletedAt, &eventOrder); err != nil {
+		if err := eventRows.Scan(&eventID, &itineraryDayID, &event.Title, &event.Time, &event.Location, &event.LocationIsMapped, &event.Notes, &event.Status, &event.IsCompleted, &attendeeSummary, &event.CompletedAt, &eventOrder); err != nil {
 			return nil, err
 		}
 		event.ID = fmt.Sprintf("event-%d", eventID)
 		event.DayID = fmt.Sprintf("day-%d", itineraryDayID)
-		event.Status = normalizeEventStatus(event.Status)
+		event.Status = normalizeEventStatusWithCompletion(event.Status, event.IsCompleted)
+		event.IsCompleted = event.IsCompleted || event.Status == "completed"
 		if strings.TrimSpace(attendeeSummary) == "" {
 			event.Attendees = []string{}
 		} else {
@@ -698,6 +859,10 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 	}
 
 	status := normalizeEventStatus(req.Status)
+	isCompleted := req.IsCompleted || status == "completed"
+	if isCompleted {
+		status = "completed"
+	}
 	var hasActive bool
 	if err := db.DB.QueryRow(`
 		SELECT EXISTS (
@@ -706,15 +871,15 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 			INNER JOIN itinerary_days d ON d.id = e.itinerary_day_id
 			WHERE d.trip_id = $1 AND e.status = 'active'
 		)
-	`, tripID).Scan(&hasActive); err == nil && !hasActive && status == "upcoming" {
+	`, tripID).Scan(&hasActive); err == nil && !hasActive && status == "upcoming" && !isCompleted {
 		status = "active"
 	}
-	if status == "active" {
+	if status == "active" && !isCompleted {
 		if _, err := db.DB.Exec(`
 			UPDATE itinerary_events e
 			SET status = 'upcoming'
 			FROM itinerary_days d
-			WHERE e.itinerary_day_id = d.id AND d.trip_id = $1 AND e.status = 'active'
+			WHERE e.itinerary_day_id = d.id AND d.trip_id = $1 AND e.status = 'active' AND COALESCE(e.is_completed, FALSE) = FALSE
 		`, tripID); err != nil {
 			return models.ItineraryEventPayload{}, err
 		}
@@ -722,10 +887,10 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 
 	var eventID int
 	err := db.DB.QueryRow(`
-		INSERT INTO itinerary_events (itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, attendee_summary, event_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO itinerary_events (itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, is_completed, attendee_summary, event_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id
-	`, dayID, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), status, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
+	`, dayID, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), status, isCompleted, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
 	if err != nil {
 		return models.ItineraryEventPayload{}, err
 	}
@@ -740,6 +905,7 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 		Notes:            strings.TrimSpace(req.Notes),
 		Attendees:        req.Attendees,
 		Status:           status,
+		IsCompleted:      isCompleted,
 	}, nil
 }
 
@@ -787,10 +953,10 @@ func replaceTripItineraryTx(tx *sql.Tx, tripID int, days []models.ItineraryDayPa
 
 			if _, err := tx.Exec(`
 				INSERT INTO itinerary_events (
-					itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, attendee_summary, event_order
+					itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, is_completed, attendee_summary, event_order
 				)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			`, itineraryDayID, title, timeLabel, location, event.LocationIsMapped, notes, normalizeEventStatus(event.Status), strings.Join(event.Attendees, "||"), eventIndex); err != nil {
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			`, itineraryDayID, title, timeLabel, location, event.LocationIsMapped, notes, normalizeEventStatusWithCompletion(event.Status, event.IsCompleted), event.IsCompleted, strings.Join(event.Attendees, "||"), eventIndex); err != nil {
 				return err
 			}
 		}
@@ -813,7 +979,7 @@ func normalizeTripActiveEventTx(tx *sql.Tx, tripID int) error {
 				) AS rn
 			FROM itinerary_events e
 			INNER JOIN itinerary_days d ON d.id = e.itinerary_day_id
-			WHERE d.trip_id = $1 AND e.status <> 'completed'
+			WHERE d.trip_id = $1 AND COALESCE(e.is_completed, FALSE) = FALSE
 		)
 		UPDATE itinerary_events e
 		SET status = CASE WHEN ranked.rn = 1 THEN 'active' ELSE 'upcoming' END
@@ -833,12 +999,19 @@ func normalizeEventStatus(value string) string {
 	}
 }
 
+func normalizeEventStatusWithCompletion(value string, isCompleted bool) string {
+	if isCompleted {
+		return "completed"
+	}
+	return normalizeEventStatus(value)
+}
+
 func dayCompletionStatus(day models.ItineraryDayPayload) string {
 	if len(day.Events) == 0 {
 		return "upcoming"
 	}
 	for _, event := range day.Events {
-		if normalizeEventStatus(event.Status) != "completed" {
+		if !(event.IsCompleted || normalizeEventStatus(event.Status) == "completed") {
 			return "active"
 		}
 	}

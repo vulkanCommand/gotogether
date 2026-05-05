@@ -32,6 +32,7 @@ export type ItineraryEvent = {
   attendees: string[];
   notes: string;
   status: ItineraryEventStatus;
+  isCompleted?: boolean;
 };
 
 export type ItineraryDay = {
@@ -87,6 +88,9 @@ export type CurrentTrip = {
   setup_pending_count?: number;
   setup_required?: boolean;
   readiness_status?: 'completed' | 'needs_your_response' | 'waiting_on_crew' | 'ready' | string;
+  completion_confirmed_count?: number;
+  completion_pending_count?: number;
+  completion_requested?: boolean;
 };
 
 type TripStore = {
@@ -174,6 +178,9 @@ const buildDefaultNextUp = () => ({
   title: 'Add your first itinerary event',
   meta: 'Your next plan will appear here',
 });
+
+export const isCompletedEvent = (event: Pick<ItineraryEvent, 'status' | 'isCompleted'>) =>
+  Boolean(event.isCompleted || event.status === 'completed');
 
 export const useTripStore = create<TripStore>((set, get) => ({
   currentTrip: null,
@@ -323,7 +330,7 @@ export const useTripStore = create<TripStore>((set, get) => ({
   nextUp: () => {
     const { itineraryDays } = get();
     for (const day of itineraryDays) {
-      const activeEvent = day.events.find((item) => item.status === 'active');
+      const activeEvent = day.events.find((item) => !isCompletedEvent(item) && item.status === 'active');
       if (activeEvent) {
         return {
           day: day.title,

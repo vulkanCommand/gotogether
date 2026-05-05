@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS itinerary_events (
     location_is_mapped BOOLEAN NOT NULL DEFAULT FALSE,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'upcoming',
+    is_completed BOOLEAN NOT NULL DEFAULT FALSE,
     attendee_summary TEXT,
     event_order INTEGER NOT NULL,
     completed_at TIMESTAMP,
@@ -158,6 +159,18 @@ CREATE TABLE IF NOT EXISTS user_push_tokens (
     platform TEXT NOT NULL DEFAULT 'expo',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sms_invites (
+    id SERIAL PRIMARY KEY,
+    sender_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_phone TEXT NOT NULL,
+    recipient_name TEXT,
+    provider TEXT NOT NULL DEFAULT 'twilio',
+    provider_message_sid TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    invite_context TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
