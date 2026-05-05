@@ -25,14 +25,6 @@ import { buildEqualSplitPreview, formatMoney } from '../utils/expenseCalculation
 type Props = NativeStackScreenProps<RootStackParamList, 'AddExpense'>;
 type SplitMode = 'Equal split' | 'Custom split';
 
-const formatDateLabel = (value: string) => {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return 'Today';
-  }
-  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-};
-
 const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 export default function AddExpenseScreen({ navigation, route }: Props) {
@@ -142,8 +134,6 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   const customValid = splitMethod === 'Equal split' || Math.abs(customTotal - amountValue) <= 0.01;
   const canSave = title.trim().length > 0 && amountValue > 0 && splitPreview.length > 0 && customValid && expenseGroupId > 0;
   const perPersonLabel = splitPreview.length > 0 ? formatMoney(amountValue / splitPreview.length) : '$0.00';
-  const currentDateLabel = formatDateLabel(editingExpense?.createdAt || new Date().toISOString());
-
   const toggleParticipant = (memberId: string) => {
     setSelectedParticipantIds((current) => {
       if (current.includes(memberId)) {
@@ -284,7 +274,6 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
               value={splitMethod === 'Equal split' ? `Equal - ${splitPreview.length}` : `Custom - ${splitPreview.length}`}
               onPress={() => setShowSplitModal(true)}
             />
-            <InfoButton label="Date" value={currentDateLabel} />
             <InfoButton
               label="Group"
               value={selectedGroup?.name || 'Select'}

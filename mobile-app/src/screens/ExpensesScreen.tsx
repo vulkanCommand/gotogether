@@ -48,6 +48,7 @@ export default function ExpensesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const currentTrip = useTripStore((state) => state.currentTrip);
+  const crew = useTripStore((state) => state.crew);
   const setExpenseGroups = useTripStore((state) => state.setExpenseGroups);
   const setExpenses = useTripStore((state) => state.setExpenses);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
@@ -116,8 +117,8 @@ export default function ExpensesScreen({ navigation }: Props) {
     [selectedGroupId, selectedSection]
   );
   const selectedGroupSummary = useMemo(
-    () => (selectedGroup ? calculateExpenseGroupSummary(selectedGroup, [], user?.id) : null),
-    [selectedGroup, user?.id]
+    () => (selectedGroup ? calculateExpenseGroupSummary(selectedGroup, crew, user?.id) : null),
+    [crew, selectedGroup, user?.id]
   );
   const activityGroups = useMemo(
     () => (selectedGroup ? groupExpensesByMonth(selectedGroup.expenses ?? []) : []),
@@ -125,8 +126,11 @@ export default function ExpensesScreen({ navigation }: Props) {
   );
 
   const openGroup = async (trip: CurrentTrip, group: ExpenseGroup) => {
+    let latestGroups = tripSections.find((section) => section.trip.id === trip.id)?.groups ?? [group];
     try {
       const details = await fetchTripDetails(trip.id);
+      const groupData = await fetchExpenseGroups(trip.id);
+      latestGroups = (groupData.groups ?? []) as ExpenseGroup[];
       setCurrentTrip(details.trip);
       setCrew(
         details.members.map((member) => ({
@@ -141,6 +145,9 @@ export default function ExpensesScreen({ navigation }: Props) {
         }))
       );
       setSelectedTripId(details.trip.id);
+      setTripSections((current) =>
+        current.map((section) => (section.trip.id === trip.id ? { ...section, groups: latestGroups } : section))
+      );
     } catch (error) {
       console.log('Open expense group trip details failed', error);
       setCurrentTrip(trip);
@@ -149,8 +156,8 @@ export default function ExpensesScreen({ navigation }: Props) {
 
     setSelectedGroupId(group.id);
     setDetailTab('Activity');
-    setExpenseGroups(tripSections.find((section) => section.trip.id === trip.id)?.groups ?? [group]);
-    setExpenses(group.expenses ?? []);
+    setExpenseGroups(latestGroups);
+    setExpenses((latestGroups.find((item) => item.id === group.id)?.expenses ?? group.expenses) ?? []);
   };
 
   const openAddExpense = () => {
@@ -187,8 +194,12 @@ export default function ExpensesScreen({ navigation }: Props) {
   };
 
   const createGroup = async () => {
-    const tripForGroup = selectedSection?.trip ?? currentTrip ?? tripSections[0]?.trip;
+    const tripForGroup =
+      selectedSection?.trip ??
+      (tripSections.length === 1 ? tripSections[0]?.trip : null) ??
+      (currentTrip && tripSections.some((section) => section.trip.id === currentTrip.id) ? currentTrip : null);
     if (!tripForGroup?.id || !newGroupName.trim()) {
+      Alert.alert('Choose a trip first', 'Open a trip expense group first, then create another group inside that trip.');
       return;
     }
 
@@ -235,7 +246,10 @@ export default function ExpensesScreen({ navigation }: Props) {
               </Text>
               <View style={styles.summaryGrid}>
                 <SummaryMetric label="Total spent" value={formatMoney(selectedGroupSummary.totalSpent)} />
-                <SummaryMetric label="People" value={`${selectedGroupSummary.memberTotals.length}`} />
+                <SummaryMetric
+                  label="People"
+                  value={`${Math.max(selectedSection.trip.members_count ?? 0, selectedGroupSummary.memberTotals.length)}`}
+                />
               </View>
 
               <View style={styles.tabRow}>
