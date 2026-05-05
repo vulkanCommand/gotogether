@@ -135,10 +135,23 @@ func tripRole(userID int, tripID int) (string, error) {
 		FROM trip_members tm
 		WHERE tm.trip_id = $1 AND tm.user_id = $2
 	`, tripID, userID).Scan(&role)
-	if err != nil {
+	if err == nil {
+		return strings.ToLower(strings.TrimSpace(role)), nil
+	}
+
+	if !sqlErrNoRows(err) {
 		return "", err
 	}
-	return strings.ToLower(strings.TrimSpace(role)), nil
+
+	var createdBy int
+	if creatorErr := db.DB.QueryRow(`SELECT created_by FROM trips WHERE id = $1`, tripID).Scan(&createdBy); creatorErr != nil {
+		return "", creatorErr
+	}
+	if createdBy == userID {
+		return "lead", nil
+	}
+
+	return "", sql.ErrNoRows
 }
 
 func ensureTripLeadAccess(c *gin.Context, tripID int, userID int) bool {

@@ -258,6 +258,22 @@ const mergeCompletedEventIntoDays = (
   }));
 };
 
+const resolveMatchingDay = (
+  days: ItineraryDay[],
+  selectedDay: ItineraryDay,
+  tripStart?: string
+) => {
+  const selectedDateKey = getDayDateKey(selectedDay, tripStart);
+  if (selectedDateKey) {
+    const matchingByDate = days.find((day) => getDayDateKey(day, tripStart) === selectedDateKey);
+    if (matchingByDate) {
+      return matchingByDate;
+    }
+  }
+
+  return days.find((day) => day.id === selectedDay.id) ?? days[0] ?? null;
+};
+
 export default function ItineraryScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
@@ -442,6 +458,19 @@ export default function ItineraryScreen({ navigation }: Props) {
 
     try {
       setSaving(true);
+      let targetDay = selectedDay;
+      if (!editingEventId && selectedDay.id.startsWith('day-fallback-')) {
+        const itinerary = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
+        const refreshedDays = Array.isArray(itinerary.days) ? sortDaysByDate(itinerary.days, currentTrip.start_date) : [];
+        const resolvedDay = resolveMatchingDay(refreshedDays, selectedDay, currentTrip.start_date);
+        if (!resolvedDay) {
+          throw new Error('Could not prepare the trip dates for this event yet.');
+        }
+        targetDay = resolvedDay;
+        setItineraryDays(refreshedDays);
+        setSelectedDayId(resolvedDay.id);
+      }
+
       if (editingEventId) {
         await updateItineraryEvent(currentTrip.id, editingEventId, {
           title: eventTitle.trim(),
@@ -452,7 +481,7 @@ export default function ItineraryScreen({ navigation }: Props) {
           attendees: [],
         });
       } else {
-        await createItineraryEvent(currentTrip.id, selectedDay.id, {
+        await createItineraryEvent(currentTrip.id, targetDay.id, {
           title: eventTitle.trim(),
           time: time.trim(),
           location: location.trim() || 'Location TBD',

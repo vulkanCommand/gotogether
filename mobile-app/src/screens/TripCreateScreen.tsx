@@ -207,16 +207,6 @@ export default function TripCreateScreen({ navigation }: Props) {
         }),
       });
 
-      let createdTrip = created.trip;
-      try {
-        const cover = await ensureTripCoverFromDestination(created.trip.id);
-        if (cover.image_url) {
-          createdTrip = { ...createdTrip, image_url: cover.image_url };
-        }
-      } catch (coverError) {
-        console.log('Destination cover generation failed', coverError);
-      }
-
       const destinationOption: DestinationOption = {
         id: selectedDestination.id,
         name: selectedDestination.name,
@@ -228,9 +218,19 @@ export default function TripCreateScreen({ navigation }: Props) {
       setBestMatchRange(travelRange);
       setDestinationOptions([destinationOption]);
       setSelectedDestinationId(destinationOption.id);
-      setCurrentTrip(createdTrip);
+      setCurrentTrip(created.trip);
       setTripLead(crew[0] ?? null);
       navigation.navigate('TripOverview');
+
+      ensureTripCoverFromDestination(created.trip.id)
+        .then((cover) => {
+          if (cover.image_url) {
+            setCurrentTrip({ ...created.trip, image_url: cover.image_url });
+          }
+        })
+        .catch((coverError) => {
+          console.log('Destination cover generation failed', coverError);
+        });
     } catch (error: any) {
       console.log('Create trip failed', error);
       Alert.alert('Trip creation failed', error?.message || 'Could not create the trip right now.');
