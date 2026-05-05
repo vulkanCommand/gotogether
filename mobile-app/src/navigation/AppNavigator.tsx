@@ -2,8 +2,10 @@ import React from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { NavigatorScreenParams } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
+import AppFooter from '../components/AppFooter';
 
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -30,9 +32,7 @@ export type RootStackParamList = {
   Login: undefined;
   CompleteProfile: undefined;
   PermissionsSetup: undefined;
-  MainTabs: {
-    screen?: keyof MainTabParamList;
-  } | undefined;
+  MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
   CreateGroup: undefined;
   TripCreate: undefined;
   TripOverview: undefined;
@@ -46,7 +46,7 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   Home: undefined;
-  Trips: undefined;
+  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed' } | undefined;
   Live: undefined;
   Expenses: undefined;
   Profile: undefined;
@@ -58,6 +58,7 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 function MainTabs() {
   return (
     <Tab.Navigator
+      tabBar={() => <AppFooter />}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: colors.accent,

@@ -51,13 +51,14 @@ export default function TripOverviewScreen({ navigation }: Props) {
       setCurrentTrip(details.trip);
       setCrew(nextCrew);
       setTripLead(nextCrew.find((member) => member.role === 'lead') ?? nextCrew[0] ?? null);
-      setItineraryDays(Array.isArray(itinerary.days) ? itinerary.days : []);
+      const nextDays = Array.isArray(itinerary.days) ? itinerary.days : [];
+      setItineraryDays(nextDays.length > 0 || itineraryDays.length === 0 ? nextDays : itineraryDays);
     } catch (error) {
       console.log('Fetch trip overview failed', error);
     } finally {
       setLoading(false);
     }
-  }, [currentTrip?.id, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
+  }, [currentTrip?.id, itineraryDays, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
 
   useEffect(() => {
     hydrateTrip();
