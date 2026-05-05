@@ -13,7 +13,7 @@ import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { fetchFriends, sendSMSInvite, syncDeviceContacts } from '../config/api';
-import { collectDeviceContactLookupPayload } from '../utils/contacts';
+import { collectDeviceContactLookupPayload, DeviceInviteContact } from '../utils/contacts';
 import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
@@ -29,11 +29,13 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [inviting, setInviting] = useState(false);
   const [syncingFriends, setSyncingFriends] = useState(false);
+  const [deviceContacts, setDeviceContacts] = useState<DeviceInviteContact[]>([]);
 
   const refreshFriends = useCallback(async () => {
     try {
       setSyncingFriends(true);
       const contacts = await collectDeviceContactLookupPayload();
+      setDeviceContacts(contacts.contacts);
       if (contacts.granted) {
         await syncDeviceContacts({
           emails: contacts.emails,
@@ -71,6 +73,34 @@ export default function CreateGroupScreen({ navigation }: Props) {
     () => friends.filter((friend) => selectedIds.includes(friend.id)),
     [friends, selectedIds]
   );
+
+  const inviteCandidates = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const friendEmailSet = new Set(friends.map((friend) => friend.email?.trim().toLowerCase()).filter(Boolean));
+    const friendPhoneSet = new Set(friends.map((friend) => formatPhoneForFirebase(friend.phone)).filter(Boolean));
+
+    return deviceContacts
+      .filter((contact) => {
+        const hasUnsyncedChannel =
+          contact.emails.some((email) => !friendEmailSet.has(email)) ||
+          contact.phones.some((phone) => !friendPhoneSet.has(phone));
+        if (!hasUnsyncedChannel) {
+          return false;
+        }
+        if (!normalizedSearch) {
+          return false;
+        }
+
+        return `${contact.name} ${contact.emails.join(' ')} ${contact.phones.join(' ')}`
+          .toLowerCase()
+          .includes(normalizedSearch);
+      })
+      .map((contact) => ({
+        ...contact,
+        invitePhone: contact.phones.find((phone) => !friendPhoneSet.has(phone)) || '',
+      }))
+      .filter((contact) => Boolean(contact.invitePhone));
+  }, [deviceContacts, friends, search]);
 
   const toggle = (id: number) => {
     setSelectedIds((current) =>
@@ -205,11 +235,49 @@ export default function CreateGroupScreen({ navigation }: Props) {
             );
           })}
 
+          {inviteCandidates.length > 0 ? (
+            <View style={styles.inviteSection}>
+              <Text style={styles.inviteSectionTitle}>Invite contacts to the app</Text>
+              {inviteCandidates.map((contact) => (
+                <View key={contact.id} style={styles.inviteRow}>
+                  <View style={styles.friendAvatar}>
+                    <Text style={styles.friendAvatarText}>
+                      {contact.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.inviteCopy}>
+                    <Text style={styles.friendName}>{contact.name}</Text>
+                    <Text style={styles.inviteMeta}>{formatPhoneForDisplay(contact.invitePhone)}</Text>
+                  </View>
+                  <Pressable
+                    onPress={async () => {
+                      try {
+                        setInviting(true);
+                        await sendSMSInvite({
+                          phone: contact.invitePhone,
+                          name: contact.name,
+                        });
+                        Alert.alert('Invite sent', `We sent an SMS invite to ${formatPhoneForDisplay(contact.invitePhone)}.`);
+                      } catch (error: any) {
+                        Alert.alert('Invite failed', error?.message || 'Could not send the SMS invite right now.');
+                      } finally {
+                        setInviting(false);
+                      }
+                    }}
+                    style={styles.inlineInviteButton}
+                  >
+                    <Text style={styles.inlineInviteButtonText}>{inviting ? 'Sending...' : 'Invite'}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           {filteredFriends.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No friends found</Text>
               <Text style={styles.emptyCopy}>
-                Search for a connected friend, or continue with just your own trip crew for now.
+                Search for a connected friend, or invite one of your contacts if they have not joined yet.
               </Text>
               {search.trim().includes('@') ? (
                 <Pressable onPress={connectByEmail} style={styles.connectButton}>
@@ -335,6 +403,16 @@ const styles = StyleSheet.create({
   list: {
     gap: 8,
   },
+  inviteSection: {
+    gap: 8,
+    marginTop: spacing.sm,
+  },
+  inviteSectionTitle: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
   syncingText: {
     marginBottom: spacing.sm,
     color: colors.textSecondary,
@@ -373,6 +451,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.textPrimary,
+  },
+  inviteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  inviteCopy: {
+    flex: 1,
+  },
+  inviteMeta: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  inlineInviteButton: {
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  inlineInviteButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
   checkCircle: {
     width: 20,

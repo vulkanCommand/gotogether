@@ -146,11 +146,13 @@ export default function TripOverviewScreen({ navigation }: Props) {
           <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={18} color="#FFFFFF" />
           </Pressable>
+
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroTitle}>{title}</Text>
+          </View>
         </View>
 
         <View style={styles.body}>
-          <Text style={styles.title}>{title}</Text>
-
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>
               <Ionicons name="calendar-outline" size={12} color={colors.textSecondary} /> {travelRange}
@@ -275,7 +277,7 @@ const styles = StyleSheet.create({
   },
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15,23,42,0.22)',
+    backgroundColor: 'rgba(15,23,42,0.34)',
   },
   backButton: {
     position: 'absolute',
@@ -288,18 +290,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  heroCopy: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 18,
+  },
+  heroTitle: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: -0.9,
+    textShadowColor: 'rgba(15,23,42,0.38)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 10,
+  },
   body: {
     marginTop: -36,
     paddingHorizontal: 20,
   },
-  title: {
-    fontSize: 30,
-    fontWeight: '900',
-    color: colors.textPrimary,
-    letterSpacing: -0.9,
-  },
   metaRow: {
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
     gap: 8,
   },
   metaText: {

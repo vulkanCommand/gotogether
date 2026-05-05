@@ -22,7 +22,7 @@ import { radius, spacing } from '../theme/spacing';
 import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import { API_BASE_URL, ApiExpenseGroup, completeTrip, createTripPhoto, fetchExpenseGroups, fetchTripDetails, fetchTripPhotos } from '../config/api';
 import { useAuthStore } from '../store/authStore';
-import { mapApiMembersToCrew } from '../utils/tripFlow';
+import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCompletion'>;
 
@@ -38,7 +38,6 @@ export default function TripCompletionScreen({ navigation }: Props) {
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
   const crew = useTripStore((state) => state.crew);
-  const bestMatchRange = useTripStore((state) => state.bestMatchRange);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
   const tripLead = useTripStore((state) => state.tripLead);
   const currentTrip = useTripStore((state) => state.currentTrip);
@@ -167,8 +166,9 @@ export default function TripCompletionScreen({ navigation }: Props) {
     }
   };
 
+  const tripDates = formatTripRange(currentTrip?.start_date, currentTrip?.end_date);
   const tripMeta = [
-    bestMatchRange || 'Dates pending',
+    tripDates,
     currentTrip?.destination ||
       (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
   ].join(' - ');
@@ -213,13 +213,13 @@ export default function TripCompletionScreen({ navigation }: Props) {
     <Screen showFooter showBackButton>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <SectionTitle
-          title="Trip Completion"
-          subtitle={isCompleted ? 'A warm look back at the trip you wrapped up together.' : 'Build the final trip story, add a group photo, then finish the trip.'}
+          title={isCompleted ? 'Completed Trip' : 'Finish Trip'}
+          subtitle={isCompleted ? 'A simple look back at the trip you wrapped up together.' : 'Add the final photo, review the trip, and finish it when you are ready.'}
           action={<NotificationBell />}
         />
 
         <AppCard style={styles.heroCard}>
-          <Text style={styles.emoji}>{isCompleted ? 'Memories saved' : 'Final trip story'}</Text>
+          <Text style={styles.emoji}>{isCompleted ? 'Trip memories' : 'Final trip story'}</Text>
           <Text style={styles.heroTitle}>{isCompleted ? 'Trip Completed!' : 'Finish the Trip'}</Text>
           <Text style={styles.tripName}>{currentTrip?.name ?? destination?.name ?? 'Your Trip'}</Text>
           <Text style={styles.tripMeta}>{tripMeta}</Text>
@@ -253,7 +253,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
         <AppCard>
           <Text style={styles.sectionEyebrow}>{isCompleted ? 'What you lived' : 'Trip overview'}</Text>
           <SummaryRow label="Destination" value={currentTrip?.destination || destination?.name || 'Pending'} />
-          <SummaryRow label="Dates" value={bestMatchRange || 'Pending'} />
+          <SummaryRow label="Dates" value={tripDates} />
           <SummaryRow label="Trip lead" value={tripLead?.name || members[0]?.name || 'Pending'} />
           <SummaryRow label="Events completed" value={`${completedEventCount} of ${totalEventCount}`} />
           <SummaryRow label="Expenses logged" value={`${allExpenses.length}`} />
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   heroCard: {
-    alignItems: 'center',
+    paddingVertical: spacing.xl,
   },
   emoji: {
     fontSize: 13,
@@ -355,23 +355,20 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   heroTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     color: colors.textPrimary,
-    textAlign: 'center',
   },
   tripName: {
     marginTop: spacing.sm,
     fontSize: 18,
     fontWeight: '700',
     color: colors.textPrimary,
-    textAlign: 'center',
   },
   tripMeta: {
     marginTop: 4,
     fontSize: 14,
     color: colors.textSecondary,
-    textAlign: 'center',
   },
   statsRow: {
     flexDirection: 'row',
