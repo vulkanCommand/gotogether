@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -10,7 +11,8 @@ import { useFriendStore } from '../store/friendStore';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { sendSMSInvite, syncDeviceContacts } from '../config/api';
+import { fetchFriends, sendSMSInvite, syncDeviceContacts } from '../config/api';
+import { collectDeviceContactLookupPayload } from '../utils/contacts';
 import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
@@ -24,6 +26,35 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [inviting, setInviting] = useState(false);
+  const [syncingFriends, setSyncingFriends] = useState(false);
+
+  const refreshFriends = useCallback(async () => {
+    try {
+      setSyncingFriends(true);
+      const contacts = await collectDeviceContactLookupPayload();
+      if (contacts.granted) {
+        const response = await syncDeviceContacts({
+          emails: contacts.emails,
+          phones: contacts.phones,
+        });
+        setFriends(response.friends);
+        return;
+      }
+
+      const response = await fetchFriends();
+      setFriends(response.friends);
+    } catch (error) {
+      console.log('Auto friend sync failed', error);
+    } finally {
+      setSyncingFriends(false);
+    }
+  }, [setFriends]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshFriends();
+    }, [refreshFriends])
+  );
 
   const filteredFriends = useMemo(() => {
     const value = search.trim().toLowerCase();
@@ -145,6 +176,8 @@ export default function CreateGroupScreen({ navigation }: Props) {
             style={styles.searchInput}
           />
         </View>
+
+        {syncingFriends ? <Text style={styles.syncingText}>Syncing contacts and friends...</Text> : null}
 
         <View style={styles.list}>
           {filteredFriends.map((friend) => {
@@ -301,6 +334,11 @@ const styles = StyleSheet.create({
   list: {
     gap: 8,
   },
+  syncingText: {
+    marginBottom: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
   friendRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -383,7 +421,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 84,
+    bottom: 68,
     paddingHorizontal: 20,
     paddingBottom: 16,
     paddingTop: 12,

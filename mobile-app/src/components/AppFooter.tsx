@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme/colors';
 
 const tabs = [
@@ -15,6 +16,7 @@ const tabs = [
 export default function AppFooter() {
   const navigation = useNavigation<any>();
   const navigationState = useNavigationState((state) => state);
+  const insets = useSafeAreaInsets();
 
   const activeTab = React.useMemo(() => {
     const currentRoute = navigationState?.routes?.[navigationState.index ?? 0];
@@ -30,7 +32,15 @@ export default function AppFooter() {
   }, [navigationState]);
 
   return (
-    <View style={styles.footer}>
+    <View
+      style={[
+        styles.footer,
+        {
+          height: 68 + Math.max(insets.bottom, 12),
+          paddingBottom: Math.max(insets.bottom, 12),
+        },
+      ]}
+    >
       {tabs.map((tab) => {
         const selected = activeTab === tab.name;
         return (
@@ -51,10 +61,8 @@ export default function AppFooter() {
 const styles = StyleSheet.create({
   footer: {
     flexDirection: 'row',
-    height: 84,
     paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 16,
+    paddingTop: 8,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
