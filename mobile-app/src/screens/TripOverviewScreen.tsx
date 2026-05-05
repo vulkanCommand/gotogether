@@ -35,17 +35,19 @@ export default function TripOverviewScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const itineraryDaysRef = useRef(itineraryDays);
+  const hydratingRef = useRef(false);
 
   useEffect(() => {
     itineraryDaysRef.current = itineraryDays;
   }, [itineraryDays]);
 
   const hydrateTrip = useCallback(async () => {
-    if (!currentTrip?.id) {
+    if (!currentTrip?.id || hydratingRef.current) {
       return;
     }
 
     try {
+      hydratingRef.current = true;
       setLoading(true);
       const [details, itinerary] = await Promise.all([
         fetchTripDetails(currentTrip.id),
@@ -61,13 +63,10 @@ export default function TripOverviewScreen({ navigation }: Props) {
     } catch (error) {
       console.log('Fetch trip overview failed', error);
     } finally {
+      hydratingRef.current = false;
       setLoading(false);
     }
   }, [currentTrip?.id, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
-
-  useEffect(() => {
-    hydrateTrip();
-  }, [hydrateTrip]);
 
   useFocusEffect(
     useCallback(() => {

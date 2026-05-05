@@ -13,22 +13,42 @@ const tabs = [
   { name: 'Profile', icon: 'person-outline' },
 ] as const;
 
+const findActiveTab = (state: any): string => {
+  if (!state?.routes?.length) {
+    return '';
+  }
+
+  const currentRoute = state.routes[state.index ?? 0];
+  if (!currentRoute) {
+    return '';
+  }
+
+  if (tabs.some((tab) => tab.name === currentRoute.name)) {
+    return currentRoute.name;
+  }
+
+  if (currentRoute.state) {
+    const nested = findActiveTab(currentRoute.state);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  const mainTabsRoute = state.routes.find((route: any) => route.name === 'MainTabs');
+  if (mainTabsRoute?.state) {
+    return findActiveTab(mainTabsRoute.state);
+  }
+
+  return '';
+};
+
 export default function AppFooter() {
   const navigation = useNavigation<any>();
   const navigationState = useNavigationState((state) => state);
   const insets = useSafeAreaInsets();
 
   const activeTab = React.useMemo(() => {
-    const currentRoute = navigationState?.routes?.[navigationState.index ?? 0];
-    if (!currentRoute) {
-      return '';
-    }
-    if (currentRoute.name === 'MainTabs' && currentRoute.state) {
-      const nestedState = currentRoute.state as any;
-      const nestedRoute = nestedState.routes?.[nestedState.index ?? 0];
-      return nestedRoute?.name || '';
-    }
-    return tabs.some((tab) => tab.name === currentRoute.name) ? currentRoute.name : '';
+    return findActiveTab(navigationState);
   }, [navigationState]);
 
   return (

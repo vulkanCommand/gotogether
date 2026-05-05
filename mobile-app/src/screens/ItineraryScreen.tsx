@@ -129,6 +129,11 @@ const normalizeDayTitles = (days: ItineraryDay[]) =>
     title: `Day ${index + 1}`,
   }));
 
+const parseFallbackDayIndex = (dayId: string) => {
+  const match = dayId.match(/^day-fallback-(\d+)$/);
+  return match ? Number(match[1]) : -1;
+};
+
 export default function ItineraryScreen({ navigation }: Props) {
   const currentTrip = useTripStore((state) => state.currentTrip);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
@@ -254,6 +259,36 @@ export default function ItineraryScreen({ navigation }: Props) {
     [itineraryDays, selectedDayId]
   );
 
+  const ensureBackendDay = useCallback(
+    async (day: ItineraryDay | null) => {
+      if (!day) {
+        return null;
+      }
+
+      if (!day.id.startsWith('day-fallback-')) {
+        return day;
+      }
+
+      if (!canManageItinerary) {
+        return null;
+      }
+
+      const nextDays = await hydrateBackendDays();
+      if (nextDays.length === 0) {
+        return null;
+      }
+
+      setItineraryDays(nextDays);
+      const fallbackIndex = parseFallbackDayIndex(day.id);
+      const resolvedDay = nextDays[fallbackIndex] ?? nextDays[0] ?? null;
+      if (resolvedDay) {
+        setSelectedDayId(resolvedDay.id);
+      }
+      return resolvedDay;
+    },
+    [canManageItinerary, hydrateBackendDays, setItineraryDays]
+  );
+
   const resetEventForm = () => {
     const now = snapTimeToFiveMinutes(new Date());
     setEditingEventId(null);
@@ -336,6 +371,10 @@ export default function ItineraryScreen({ navigation }: Props) {
 
     try {
       setSaving(true);
+      const targetDay = await ensureBackendDay(selectedDay);
+      if (!targetDay) {
+        throw new Error('Could not prepare this itinerary day yet.');
+      }
       if (editingEventId) {
         await updateItineraryEvent(currentTrip.id, editingEventId, {
           title: eventTitle.trim(),
@@ -346,7 +385,7 @@ export default function ItineraryScreen({ navigation }: Props) {
           attendees: [],
         });
       } else {
-        await createItineraryEvent(currentTrip.id, selectedDay.id, {
+        await createItineraryEvent(currentTrip.id, targetDay.id, {
           title: eventTitle.trim(),
           time: time.trim(),
           location: location.trim() || 'Location TBD',
@@ -405,7 +444,11 @@ export default function ItineraryScreen({ navigation }: Props) {
         onPress: async () => {
           try {
             setSaving(true);
-            await deleteItineraryDay(currentTrip.id, day.id);
+            const targetDay = await ensureBackendDay(day);
+            if (!targetDay) {
+              throw new Error('Could not prepare this itinerary day yet.');
+            }
+            await deleteItineraryDay(currentTrip.id, targetDay.id);
             await fetchItinerary();
           } catch (error: any) {
             Alert.alert('Delete failed', error?.message || 'Could not delete the day right now.');

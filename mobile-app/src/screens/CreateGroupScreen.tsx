@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -18,6 +19,7 @@ import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
 
 export default function CreateGroupScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const setCrew = useTripStore((state) => state.setCrew);
   const friends = useFriendStore((state) => state.friends);
   const setFriends = useFriendStore((state) => state.setFriends);
@@ -33,12 +35,10 @@ export default function CreateGroupScreen({ navigation }: Props) {
       setSyncingFriends(true);
       const contacts = await collectDeviceContactLookupPayload();
       if (contacts.granted) {
-        const response = await syncDeviceContacts({
+        await syncDeviceContacts({
           emails: contacts.emails,
           phones: contacts.phones,
         });
-        setFriends(response.friends);
-        return;
       }
 
       const response = await fetchFriends();
@@ -84,7 +84,8 @@ export default function CreateGroupScreen({ navigation }: Props) {
       return;
     }
     try {
-      const response = await syncDeviceContacts({ emails: [email], phones: [] });
+      await syncDeviceContacts({ emails: [email], phones: [] });
+      const response = await fetchFriends();
       setFriends(response.friends);
     } catch (error) {
       console.log('Manual friend connect failed', error);
@@ -228,7 +229,7 @@ export default function CreateGroupScreen({ navigation }: Props) {
       </ScrollView>
 
       {selectedIds.length > 0 ? (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { bottom: 68 + Math.max(insets.bottom, 12) - 12 }]}>
           <Pressable onPress={handleContinue} style={styles.ctaButton}>
             <Text style={styles.ctaText}>Create Group ({selectedIds.length + 1} members)</Text>
           </Pressable>
@@ -421,7 +422,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 68,
     paddingHorizontal: 20,
     paddingBottom: 16,
     paddingTop: 12,
