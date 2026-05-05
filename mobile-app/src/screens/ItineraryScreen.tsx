@@ -153,6 +153,27 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const canManageItinerary = currentTrip?.viewer_role === 'lead';
 
+  const hydrateBackendDays = useCallback(async () => {
+    if (!currentTrip?.id) {
+      return [] as ItineraryDay[];
+    }
+
+    const fallbackDays = buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
+    if (fallbackDays.length === 0) {
+      return [];
+    }
+
+    for (const [index, day] of fallbackDays.entries()) {
+      await createItineraryDay(currentTrip.id, {
+        title: `Day ${index + 1}`,
+        dateLabel: day.dateLabel,
+      });
+    }
+
+    const seeded = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
+    return Array.isArray(seeded.days) ? normalizeDayTitles(seeded.days) : [];
+  }, [currentTrip?.end_date, currentTrip?.id, currentTrip?.start_date]);
+
   const fetchItinerary = useCallback(async () => {
     if (!currentTrip?.id) {
       return;
@@ -161,10 +182,19 @@ export default function ItineraryScreen({ navigation }: Props) {
     try {
       setLoading(true);
       const data = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
-      const days =
+      let days =
         Array.isArray(data.days) && data.days.length > 0
           ? normalizeDayTitles(data.days)
-          : buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
+          : [];
+
+      if (days.length === 0 && canManageItinerary) {
+        days = await hydrateBackendDays();
+      }
+
+      if (days.length === 0) {
+        days = buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
+      }
+
       setItineraryDays(days);
       hasFetchedRef.current = true;
     } catch (error) {
@@ -175,7 +205,7 @@ export default function ItineraryScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [currentTrip?.end_date, currentTrip?.id, currentTrip?.start_date, setItineraryDays]);
+  }, [canManageItinerary, currentTrip?.end_date, currentTrip?.id, currentTrip?.start_date, hydrateBackendDays, setItineraryDays]);
 
   useFocusEffect(
     useCallback(() => {
