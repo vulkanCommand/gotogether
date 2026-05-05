@@ -25,9 +25,7 @@ import { ItineraryDay, ItineraryEvent, isCompletedEvent, useTripStore } from '..
 import {
   ApiPlaceResult,
   completeItineraryEvent,
-  createItineraryDay,
   createItineraryEvent,
-  deleteItineraryDay,
   deleteItineraryEvent,
   searchPlaces,
   updateItineraryEvent,
@@ -45,6 +43,77 @@ const parseTripDate = (value?: string) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const MONTH_LOOKUP: Record<string, number> = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11,
+};
+
+const addCalendarDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const parseDayDateLabel = (dateLabel?: string, tripStart?: string) => {
+  const label = dateLabel?.trim();
+  const tripStartDate = parseTripDate(tripStart);
+  if (!label || !tripStartDate) {
+    return null;
+  }
+
+  const monthDayMatch = label.match(/^([A-Za-z]+)\s+(\d{1,2})$/);
+  if (monthDayMatch) {
+    const month = MONTH_LOOKUP[monthDayMatch[1].toLowerCase()];
+    const day = Number(monthDayMatch[2]);
+    if (month !== undefined && day > 0) {
+      let parsed = new Date(tripStartDate.getFullYear(), month, day);
+      if (parsed.getTime() < tripStartDate.getTime() - 1000 * 60 * 60 * 24 * 180) {
+        parsed = new Date(tripStartDate.getFullYear() + 1, month, day);
+      }
+      return parsed;
+    }
+  }
+
+  const parsed = new Date(label);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const deriveNextDayDate = (days: ItineraryDay[], tripStart?: string) => {
+  const lastDatedDay = [...days]
+    .reverse()
+    .map((day) => parseDayDateLabel(day.dateLabel, tripStart))
+    .find((date): date is Date => Boolean(date));
+
+  if (lastDatedDay) {
+    return addCalendarDays(lastDatedDay, 1);
+  }
+
+  const startDate = parseTripDate(tripStart);
+  return startDate ? addCalendarDays(startDate, days.length) : null;
+};
+
 const buildFallbackDays = (start?: string, end?: string) => {
   const startDate = parseTripDate(start);
   const endDate = parseTripDate(end);
@@ -57,10 +126,11 @@ const buildFallbackDays = (start?: string, end?: string) => {
   let index = 0;
 
   while (cursor <= endDate && index < 14) {
+    const displayDate = formatTripDate(cursor.toISOString().slice(0, 10));
     days.push({
       id: `day-fallback-${index}`,
-      title: `Day ${index + 1}`,
-      dateLabel: formatTripDate(cursor.toISOString().slice(0, 10)),
+      title: displayDate,
+      dateLabel: displayDate,
       events: [],
     });
     cursor.setDate(cursor.getDate() + 1);
@@ -122,15 +192,70 @@ const buildTimeValue = (hour12: number, minute: number, meridiem: 'AM' | 'PM') =
   return next;
 };
 
-const normalizeDayTitles = (days: ItineraryDay[]) =>
-  days.map((day, index) => ({
-    ...day,
-    title: `Day ${index + 1}`,
-  }));
+const formatLocalDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
-const parseFallbackDayIndex = (dayId: string) => {
-  const match = dayId.match(/^day-fallback-(\d+)$/);
-  return match ? Number(match[1]) : -1;
+const getDayDateKey = (day: ItineraryDay, tripStart?: string) => {
+  const parsed = parseDayDateLabel(day.dateLabel, tripStart);
+  return parsed ? formatLocalDateKey(parsed) : null;
+};
+
+const sortDaysByDate = (days: ItineraryDay[] = [], tripStart?: string) => {
+  const sortedDays = [...days].sort((first, second) => {
+    const firstDate = parseDayDateLabel(first.dateLabel, tripStart);
+    const secondDate = parseDayDateLabel(second.dateLabel, tripStart);
+
+    if (firstDate && secondDate) {
+      return firstDate.getTime() - secondDate.getTime();
+    }
+    if (firstDate) {
+      return -1;
+    }
+    if (secondDate) {
+      return 1;
+    }
+    return 0;
+  });
+
+  return sortedDays.map((day) => ({
+    ...day,
+    events: Array.isArray(day.events) ? day.events : [],
+  }));
+};
+
+const mergeCompletedEventIntoDays = (
+  days: ItineraryDay[],
+  responseDays: ItineraryDay[],
+  completedEventId: string
+): ItineraryDay[] => {
+  const eventStateById = new Map(
+    responseDays.flatMap((day) =>
+      day.events.map((event) => [event.id, { status: event.status, isCompleted: Boolean(event.isCompleted) }] as const)
+    )
+  );
+
+  return days.map((day): ItineraryDay => ({
+    ...day,
+    events: day.events.map((item): ItineraryEvent =>
+      item.id === completedEventId
+        ? {
+            ...item,
+            status: (eventStateById.get(item.id)?.status as ItineraryEvent['status']) ?? 'completed',
+            isCompleted: eventStateById.get(item.id)?.isCompleted ?? true,
+          }
+        : eventStateById.has(item.id)
+          ? {
+              ...item,
+              status: (eventStateById.get(item.id)?.status as ItineraryEvent['status']) ?? item.status,
+              isCompleted: eventStateById.get(item.id)?.isCompleted ?? item.isCompleted,
+            }
+        : item
+    ),
+  }));
 };
 
 export default function ItineraryScreen({ navigation }: Props) {
@@ -157,27 +282,6 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   const canManageItinerary = currentTrip?.viewer_role === 'lead';
 
-  const hydrateBackendDays = useCallback(async () => {
-    if (!currentTrip?.id) {
-      return [] as ItineraryDay[];
-    }
-
-    const fallbackDays = buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
-    if (fallbackDays.length === 0) {
-      return [];
-    }
-
-    for (const [index, day] of fallbackDays.entries()) {
-      await createItineraryDay(currentTrip.id, {
-        title: `Day ${index + 1}`,
-        dateLabel: day.dateLabel,
-      });
-    }
-
-    const seeded = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
-    return Array.isArray(seeded.days) ? normalizeDayTitles(seeded.days) : [];
-  }, [currentTrip?.end_date, currentTrip?.id, currentTrip?.start_date]);
-
   const fetchItinerary = useCallback(async () => {
     if (!currentTrip?.id) {
       return;
@@ -186,14 +290,7 @@ export default function ItineraryScreen({ navigation }: Props) {
     try {
       setLoading(true);
       const data = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
-      let days =
-        Array.isArray(data.days) && data.days.length > 0
-          ? normalizeDayTitles(data.days)
-          : [];
-
-      if (days.length === 0 && canManageItinerary) {
-        days = await hydrateBackendDays();
-      }
+      let days = Array.isArray(data.days) && data.days.length > 0 ? sortDaysByDate(data.days, currentTrip.start_date) : [];
 
       if (days.length === 0) {
         days = buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
@@ -209,7 +306,12 @@ export default function ItineraryScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [canManageItinerary, currentTrip?.end_date, currentTrip?.id, currentTrip?.start_date, hydrateBackendDays, setItineraryDays]);
+  }, [
+    currentTrip?.end_date,
+    currentTrip?.id,
+    currentTrip?.start_date,
+    setItineraryDays,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -256,36 +358,6 @@ export default function ItineraryScreen({ navigation }: Props) {
   const selectedDay = useMemo(
     () => itineraryDays.find((day) => day.id === selectedDayId) ?? itineraryDays[0] ?? null,
     [itineraryDays, selectedDayId]
-  );
-
-  const ensureBackendDay = useCallback(
-    async (day: ItineraryDay | null) => {
-      if (!day) {
-        return null;
-      }
-
-      if (!day.id.startsWith('day-fallback-')) {
-        return day;
-      }
-
-      if (!canManageItinerary) {
-        return null;
-      }
-
-      const nextDays = await hydrateBackendDays();
-      if (nextDays.length === 0) {
-        return null;
-      }
-
-      setItineraryDays(nextDays);
-      const fallbackIndex = parseFallbackDayIndex(day.id);
-      const resolvedDay = nextDays[fallbackIndex] ?? nextDays[0] ?? null;
-      if (resolvedDay) {
-        setSelectedDayId(resolvedDay.id);
-      }
-      return resolvedDay;
-    },
-    [canManageItinerary, hydrateBackendDays, setItineraryDays]
   );
 
   const resetEventForm = () => {
@@ -370,10 +442,6 @@ export default function ItineraryScreen({ navigation }: Props) {
 
     try {
       setSaving(true);
-      const targetDay = await ensureBackendDay(selectedDay);
-      if (!targetDay) {
-        throw new Error('Could not prepare this itinerary day yet.');
-      }
       if (editingEventId) {
         await updateItineraryEvent(currentTrip.id, editingEventId, {
           title: eventTitle.trim(),
@@ -384,7 +452,7 @@ export default function ItineraryScreen({ navigation }: Props) {
           attendees: [],
         });
       } else {
-        await createItineraryEvent(currentTrip.id, targetDay.id, {
+        await createItineraryEvent(currentTrip.id, selectedDay.id, {
           title: eventTitle.trim(),
           time: time.trim(),
           location: location.trim() || 'Location TBD',
@@ -402,72 +470,6 @@ export default function ItineraryScreen({ navigation }: Props) {
     } finally {
       setSaving(false);
     }
-  };
-
-  const addDay = async () => {
-    if (!currentTrip?.id) {
-      return;
-    }
-
-    const dayNumber = itineraryDays.length + 1;
-    const nextDate = parseTripDate(currentTrip.start_date);
-    if (nextDate) {
-      nextDate.setDate(nextDate.getDate() + itineraryDays.length);
-    }
-
-    try {
-      setSaving(true);
-      const response = await createItineraryDay(currentTrip.id, {
-        title: `Day ${dayNumber}`,
-        dateLabel: nextDate ? formatTripDate(nextDate.toISOString().slice(0, 10)) : `Extra day ${dayNumber}`,
-      });
-      await fetchItinerary();
-      setSelectedDayId(response.day.id);
-    } catch (error: any) {
-      Alert.alert('Add day failed', error?.message || 'Could not add a new day right now.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmDeleteDay = (day: ItineraryDay) => {
-    if (!currentTrip?.id) {
-      return;
-    }
-
-    Alert.alert('Delete day', `Remove ${day.title} and all of its events?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            setSaving(true);
-            const targetDay = await ensureBackendDay(day);
-            if (!targetDay) {
-              throw new Error('Could not prepare this itinerary day yet.');
-            }
-            await deleteItineraryDay(currentTrip.id, targetDay.id);
-            await fetchItinerary();
-          } catch (error: any) {
-            Alert.alert('Delete failed', error?.message || 'Could not delete the day right now.');
-          } finally {
-            setSaving(false);
-          }
-        },
-      },
-    ]);
-  };
-
-  const openDayActions = (day: ItineraryDay) => {
-    if (!canManageItinerary) {
-      return;
-    }
-
-    Alert.alert(day.title, 'Choose an action for this day.', [
-      { text: 'Delete day', style: 'destructive', onPress: () => confirmDeleteDay(day) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
   };
 
   const deleteEventAction = (event: ItineraryEvent) => {
@@ -500,7 +502,7 @@ export default function ItineraryScreen({ navigation }: Props) {
       return;
     }
 
-    if (event.status === 'completed') {
+    if (isCompletedEvent(event)) {
       Alert.alert('Event completed', 'Completed events are locked and can no longer be edited or deleted.');
       return;
     }
@@ -534,7 +536,10 @@ export default function ItineraryScreen({ navigation }: Props) {
       setSaving(true);
       updateEventInDay(owningDay.id, event.id, { status: 'completed', isCompleted: true });
       const response = await completeItineraryEvent(currentTrip.id, event.id);
-      setItineraryDays(response.days);
+      const completedDays = Array.isArray(response.days)
+        ? mergeCompletedEventIntoDays(itineraryDays, response.days, event.id)
+        : mergeCompletedEventIntoDays(itineraryDays, itineraryDays, event.id);
+      setItineraryDays(completedDays);
     } catch (error: any) {
       updateEventInDay(owningDay.id, event.id, { status: previousStatus, isCompleted: previousIsCompleted });
       Alert.alert('Update failed', error?.message || 'Could not update the event right now.');
@@ -578,31 +583,25 @@ export default function ItineraryScreen({ navigation }: Props) {
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayTabs}>
-          {itineraryDays.map((day) => {
+          {itineraryDays.map((day, index) => {
             const selected = day.id === selectedDay?.id;
+            const parsedDate = parseDayDateLabel(day.dateLabel, currentTrip?.start_date);
+            const fallbackDate = currentTrip?.start_date ? addCalendarDays(parseTripDate(currentTrip.start_date) ?? new Date(), index) : null;
+            const displayTitle = parsedDate
+              ? formatTripDate(formatLocalDateKey(parsedDate))
+              : fallbackDate
+                ? formatTripDate(formatLocalDateKey(fallbackDate))
+                : day.dateLabel;
             return (
               <Pressable
                 key={day.id}
                 onPress={() => setSelectedDayId(day.id)}
-                onLongPress={() => openDayActions(day)}
                 style={[styles.dayTab, selected && styles.dayTabSelected]}
               >
-                <Text style={[styles.dayTabTitle, selected && styles.dayTabTitleSelected]}>{day.title}</Text>
-                <Text style={[styles.dayTabMeta, selected && styles.dayTabTitleSelected]}>{day.dateLabel}</Text>
-                {selected && canManageItinerary ? (
-                  <View style={styles.dayTabHint}>
-                    <Ionicons name="ellipsis-horizontal" size={12} color="#FFFFFF" />
-                  </View>
-                ) : null}
+                <Text style={[styles.dayTabTitle, selected && styles.dayTabTitleSelected]}>{displayTitle}</Text>
               </Pressable>
             );
           })}
-          {canManageItinerary ? (
-            <Pressable onPress={addDay} style={styles.addDayTab} disabled={saving}>
-              <Ionicons name="add" size={16} color={colors.accent} />
-              <Text style={styles.addDayText}>Add day</Text>
-            </Pressable>
-          ) : null}
         </ScrollView>
 
         {loading ? (

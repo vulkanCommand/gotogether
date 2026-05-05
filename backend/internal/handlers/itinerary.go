@@ -26,6 +26,11 @@ func GetTripItinerary(c *gin.Context) {
 		return
 	}
 
+	if err := syncTripItineraryDaysForTrip(tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync itinerary days", "details": err.Error()})
+		return
+	}
+
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch itinerary", "details": err.Error()})
@@ -33,6 +38,30 @@ func GetTripItinerary(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"days": days})
+}
+
+func syncTripItineraryDaysForTrip(tripID int) error {
+	var startDate string
+	var endDate string
+	if err := db.DB.QueryRow(`
+		SELECT start_date::text, end_date::text
+		FROM trips
+		WHERE id = $1
+	`, tripID).Scan(&startDate, &endDate); err != nil {
+		return err
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer rollbackQuietly(tx)
+
+	if err := syncTripItineraryDaysTx(tx, tripID, startDate, endDate); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func SaveTripItinerary(c *gin.Context) {
