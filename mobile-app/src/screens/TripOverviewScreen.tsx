@@ -34,6 +34,11 @@ export default function TripOverviewScreen({ navigation }: Props) {
 
   const [loading, setLoading] = useState(false);
   const progressAnimation = useRef(new Animated.Value(0)).current;
+  const itineraryDaysRef = useRef(itineraryDays);
+
+  useEffect(() => {
+    itineraryDaysRef.current = itineraryDays;
+  }, [itineraryDays]);
 
   const hydrateTrip = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -52,13 +57,13 @@ export default function TripOverviewScreen({ navigation }: Props) {
       setCrew(nextCrew);
       setTripLead(nextCrew.find((member) => member.role === 'lead') ?? nextCrew[0] ?? null);
       const nextDays = Array.isArray(itinerary.days) ? itinerary.days : [];
-      setItineraryDays(nextDays.length > 0 || itineraryDays.length === 0 ? nextDays : itineraryDays);
+      setItineraryDays(nextDays.length > 0 || itineraryDaysRef.current.length === 0 ? nextDays : itineraryDaysRef.current);
     } catch (error) {
       console.log('Fetch trip overview failed', error);
     } finally {
       setLoading(false);
     }
-  }, [currentTrip?.id, itineraryDays, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
+  }, [currentTrip?.id, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
 
   useEffect(() => {
     hydrateTrip();
