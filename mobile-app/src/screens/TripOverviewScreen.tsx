@@ -36,6 +36,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const itineraryDaysRef = useRef(itineraryDays);
   const hydratingRef = useRef(false);
+  const hydrationRequestRef = useRef(0);
 
   useEffect(() => {
     itineraryDaysRef.current = itineraryDays;
@@ -46,6 +47,9 @@ export default function TripOverviewScreen({ navigation }: Props) {
       return;
     }
 
+    const requestId = hydrationRequestRef.current + 1;
+    hydrationRequestRef.current = requestId;
+
     try {
       hydratingRef.current = true;
       setLoading(true);
@@ -54,23 +58,38 @@ export default function TripOverviewScreen({ navigation }: Props) {
         apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`),
       ]);
 
+      if (hydrationRequestRef.current != requestId) {
+        return;
+      }
+
       const nextCrew = mapApiMembersToCrew(details.members);
       setCurrentTrip(details.trip);
       setCrew(nextCrew);
       setTripLead(nextCrew.find((member) => member.role === 'lead') ?? nextCrew[0] ?? null);
       const nextDays = Array.isArray(itinerary.days) ? itinerary.days : [];
-      setItineraryDays(nextDays.length > 0 || itineraryDaysRef.current.length === 0 ? nextDays : itineraryDaysRef.current);
+      if (nextDays.length > 0) {
+        setItineraryDays(nextDays);
+      } else if (itineraryDaysRef.current.length === 0) {
+        setItineraryDays([]);
+      }
     } catch (error) {
       console.log('Fetch trip overview failed', error);
     } finally {
-      hydratingRef.current = false;
-      setLoading(false);
+      if (hydrationRequestRef.current === requestId) {
+        hydratingRef.current = false;
+        setLoading(false);
+      }
     }
   }, [currentTrip?.id, setCrew, setCurrentTrip, setItineraryDays, setTripLead]);
 
   useFocusEffect(
     useCallback(() => {
       void hydrateTrip();
+
+      return () => {
+        hydrationRequestRef.current += 1;
+        hydratingRef.current = false;
+      };
     }, [hydrateTrip])
   );
 
