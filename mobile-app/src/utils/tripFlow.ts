@@ -27,10 +27,11 @@ export const tripTimelineStatus = (trip: ApiTrip) => {
   if (trip.completed_at) {
     return 'Completed';
   }
+  if (trip.completion_requested) {
+    return 'Pending';
+  }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayTime = today.getTime();
+  const todayTime = currentDayValue();
   const start = dateValue(trip.start_date);
   const end = dateValue(trip.end_date);
 
@@ -43,19 +44,54 @@ export const tripTimelineStatus = (trip: ApiTrip) => {
   return 'Planning';
 };
 
+export const currentDayValue = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today.getTime();
+};
+
+export const isTripActive = (trip: ApiTrip) => {
+  if (trip.completed_at) {
+    return false;
+  }
+  const todayTime = currentDayValue();
+  const start = dateValue(trip.start_date);
+  const end = dateValue(trip.end_date);
+  return Boolean(start && start <= todayTime && (!end || end >= todayTime));
+};
+
+export const isTripUpcoming = (trip: ApiTrip) => {
+  if (trip.completed_at) {
+    return false;
+  }
+  const start = dateValue(trip.start_date);
+  return Boolean(start && start > currentDayValue());
+};
+
+export const isTripCurrentSection = (trip: ApiTrip) => {
+  if (trip.completed_at) {
+    return false;
+  }
+  if (isTripActive(trip)) {
+    return true;
+  }
+  const end = dateValue(trip.end_date);
+  return Boolean(end && end < currentDayValue());
+};
+
 export const pickPrimaryTrip = (trips: ApiTrip[]) => {
   const active = trips
-    .filter((trip) => tripTimelineStatus(trip) === 'Active')
+    .filter((trip) => isTripActive(trip))
     .sort((a, b) => dateValue(a.start_date) - dateValue(b.start_date));
   if (active[0]) {
     return active[0];
   }
 
-  const planning = trips
-    .filter((trip) => !trip.completed_at)
+  const upcoming = trips
+    .filter((trip) => isTripUpcoming(trip))
     .sort((a, b) => dateValue(a.start_date) - dateValue(b.start_date));
-  if (planning[0]) {
-    return planning[0];
+  if (upcoming[0]) {
+    return upcoming[0];
   }
 
   return trips

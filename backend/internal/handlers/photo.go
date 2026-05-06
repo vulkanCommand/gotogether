@@ -163,6 +163,48 @@ func GetTripPhotoFile(c *gin.Context) {
 	}
 }
 
+
+func DeleteTripPhoto(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+	if !ensureTripAccess(c, tripID, userID) {
+		return
+	}
+
+	photoID, err := strconv.Atoi(c.Param("photoId"))
+	if err != nil || photoID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid photo id"})
+		return
+	}
+
+	result, err := db.DB.Exec(`
+		DELETE FROM trip_photos
+		WHERE id = $1 AND trip_id = $2
+	`, photoID, tripID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete trip photo", "details": err.Error()})
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm trip photo delete", "details": err.Error()})
+		return
+	}
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "photo not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
 func UpdateTripCover(c *gin.Context) {
 	userID, ok := getOrCreateAuthenticatedUserID(c)
 	if !ok {

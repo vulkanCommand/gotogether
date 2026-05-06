@@ -22,6 +22,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { ItineraryDay, ItineraryEvent, isCompletedEvent, useTripStore } from '../store/tripStore';
+import { useAuthStore } from '../store/authStore';
 import {
   ApiPlaceResult,
   completeItineraryEvent,
@@ -279,6 +280,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   const itineraryDays = useTripStore((state) => state.itineraryDays);
   const setItineraryDays = useTripStore((state) => state.setItineraryDays);
   const updateEventInDay = useTripStore((state) => state.updateEventInDay);
+  const user = useAuthStore((state) => state.user);
 
   const [selectedDayId, setSelectedDayId] = useState('');
   const [showEventModal, setShowEventModal] = useState(false);
@@ -296,7 +298,13 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [searchingLocations, setSearchingLocations] = useState(false);
   const hasFetchedRef = useRef(false);
 
-  const canManageItinerary = currentTrip?.viewer_role === 'lead';
+  const canManageItinerary = Boolean(
+    currentTrip &&
+      !currentTrip.completed_at &&
+      (currentTrip.viewer_role === 'lead' ||
+        currentTrip.lead_user_id === Number(user?.id) ||
+        currentTrip.created_by === Number(user?.id))
+  );
 
   const fetchItinerary = useCallback(async () => {
     if (!currentTrip?.id) {
@@ -697,7 +705,13 @@ export default function ItineraryScreen({ navigation }: Props) {
           ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No events for this day yet</Text>
-              <Text style={styles.emptyCopy}>Add the first stop to start shaping the trip.</Text>
+              <Text style={styles.emptyCopy}>Add the first stop to start shaping this trip date.</Text>
+              {canManageItinerary ? (
+                <Pressable onPress={openCreateEvent} style={styles.emptyAddButton}>
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                  <Text style={styles.emptyAddButtonText}>Add event</Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
         </View>
@@ -1105,6 +1119,22 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  emptyAddButton: {
+    marginTop: spacing.md,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  emptyAddButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
   modalBackdrop: {
     flex: 1,

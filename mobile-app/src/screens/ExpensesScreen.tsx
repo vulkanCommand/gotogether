@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -15,15 +16,10 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import NotificationBell from '../components/NotificationBell';
-import PrimaryButton from '../components/PrimaryButton';
-import TextField from '../components/TextField';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { CurrentTrip, ExpenseGroup, ExpenseItem, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
-import { createExpenseGroup, deleteTripExpense, fetchExpenseGroups, fetchTripDetails, fetchTrips } from '../config/api';
-import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { createExpenseGroup, createTripExpense, deleteTripExpense, fetchExpenseGroups, fetchTripDetails, fetchTrips } from '../config/api';
 import {
   calculateExpenseGroupSummary,
   calculateOverallExpenseSummary,
@@ -43,7 +39,25 @@ type TripSection = {
   groups: ExpenseGroup[];
 };
 
-type DetailTab = 'Activity' | 'Balances' | 'Totals';
+const palette = {
+  screen: '#F3F6FB',
+  panel: '#FFFFFF',
+  panelSoft: '#F8FAFD',
+  blueHero: '#2563EB',
+  blueHeroDark: '#1D4ED8',
+  text: '#0F172A',
+  textMuted: '#667085',
+  line: '#DEE7F2',
+  teal: '#2563EB',
+  tealSoft: '#E7F0FF',
+  orange: '#EA580C',
+  border: '#DEE7F2',
+  modalOverlay: 'rgba(15, 23, 42, 0.25)',
+  white: '#FFFFFF',
+};
+
+const groupIcons = ['document-text-outline', 'home-outline', 'airplane-outline', 'wallet-outline'];
+const groupIconColors = ['#134E7A', '#145C43', '#A44B12', '#7A1748'];
 
 export default function ExpensesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -54,13 +68,14 @@ export default function ExpensesScreen({ navigation }: Props) {
   const setExpenses = useTripStore((state) => state.setExpenses);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
   const setCrew = useTripStore((state) => state.setCrew);
+
   const [tripSections, setTripSections] = useState<TripSection[]>([]);
   const [selectedTripId, setSelectedTripId] = useState<number | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-  const [detailTab, setDetailTab] = useState<DetailTab>('Activity');
   const [loading, setLoading] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+  const [settling, setSettling] = useState(false);
 
   const refreshGroups = useCallback(async () => {
     try {
@@ -109,8 +124,6 @@ export default function ExpensesScreen({ navigation }: Props) {
     [allGroups, crew, user?.id]
   );
 
-  const groupLabel = (group: ExpenseGroup, trip: CurrentTrip) => getExpenseGroupDisplayName(group.name, trip.name);
-
   const selectedSection = useMemo(
     () => tripSections.find((section) => section.trip.id === selectedTripId) ?? null,
     [selectedTripId, tripSections]
@@ -158,7 +171,6 @@ export default function ExpensesScreen({ navigation }: Props) {
     }
 
     setSelectedGroupId(group.id);
-    setDetailTab('Activity');
     setExpenseGroups(latestGroups);
     setExpenses((latestGroups.find((item) => item.id === group.id)?.expenses ?? group.expenses) ?? []);
   };
@@ -179,6 +191,7 @@ export default function ExpensesScreen({ navigation }: Props) {
     if (!selectedSection?.trip.id) {
       return;
     }
+
     Alert.alert('Delete expense?', `Remove ${expense.title}?`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -201,6 +214,7 @@ export default function ExpensesScreen({ navigation }: Props) {
       selectedSection?.trip ??
       (tripSections.length === 1 ? tripSections[0]?.trip : null) ??
       (currentTrip && tripSections.some((section) => section.trip.id === currentTrip.id) ? currentTrip : null);
+
     if (!tripForGroup?.id || !newGroupName.trim()) {
       Alert.alert('Choose a trip first', 'Open a trip expense group first, then create another group inside that trip.');
       return;
@@ -216,316 +230,275 @@ export default function ExpensesScreen({ navigation }: Props) {
     }
   };
 
-  return (
-    <View style={styles.screen}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 22) + 12 }]}
-      >
-        {selectedGroup && selectedSection && selectedGroupSummary ? (
-          <>
-            <View style={styles.detailHeader}>
-              <Pressable style={styles.iconButton} onPress={() => setSelectedGroupId(null)}>
-                <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
-              </Pressable>
-              <View style={styles.headerCenter}>
-                <Text style={styles.headerTitle}>{groupLabel(selectedGroup, selectedSection.trip)}</Text>
-                <Text style={styles.headerSubtitle}>{selectedSection.trip.name}</Text>
-              </View>
-              <NotificationBell />
-            </View>
+  const createSettlement = async (method: 'Cash' | 'Card') => {
+    if (!selectedSection?.trip.id || !selectedGroup || !selectedGroupSummary || settling) {
+      return;
+    }
 
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>Group summary</Text>
-              <Text
-                style={[
-                  styles.summaryHeadline,
-                  selectedGroupSummary.netBalance >= 0 ? styles.balancePositive : styles.balanceNegative,
-                ]}
-              >
-                {selectedGroupSummary.netBalance >= 0
-                  ? `You are owed ${formatMoney(selectedGroupSummary.currentUserIsOwed)}`
-                  : `You owe ${formatMoney(selectedGroupSummary.currentUserOwes)}`}
-              </Text>
-              <View style={styles.summaryGrid}>
-                <SummaryMetric label="Total spent" value={formatMoney(selectedGroupSummary.totalSpent)} />
-                <SummaryMetric
-                  label="People"
-                  value={`${Math.max(selectedSection.trip.members_count ?? 0, selectedGroupSummary.memberTotals.length)}`}
-                />
-              </View>
+    const lines = selectedGroupSummary.currentUserBalanceLines;
+    if (lines.length === 0) {
+      Alert.alert('Nothing to settle', 'You are already settled in this group.');
+      return;
+    }
 
-              <View style={styles.tabRow}>
-                {(['Activity', 'Balances', 'Totals'] as DetailTab[]).map((tab) => {
-                  const selected = detailTab === tab;
+    try {
+      setSettling(true);
+      const userKey = String(user?.id ?? '');
+
+      for (const line of lines) {
+        const userOwes = line.fromMemberId === userKey;
+        const payerId = Number(userOwes ? line.fromMemberId : line.toMemberId);
+        const receiverId = userOwes ? line.toMemberId : line.fromMemberId;
+        const receiverName = userOwes ? line.toMemberName : line.fromMemberName;
+        const payerName = userOwes ? line.fromMemberName : line.toMemberName;
+
+        await createTripExpense(selectedSection.trip.id, {
+          title: userOwes ? `Settlement to ${receiverName}` : `Settlement from ${payerName}`,
+          amount: line.amount,
+          paidByUserId: payerId,
+          expenseGroupId: selectedGroup.id,
+          linkedEventId: '',
+          splitMethod: `Settlement - ${method}`,
+          notes: `Settled by ${method.toLowerCase()}`,
+          splitPreview: [
+            {
+              memberId: String(receiverId),
+              memberName: receiverName,
+              amount: line.amount,
+            },
+          ],
+        });
+      }
+
+      await refreshGroups();
+      Alert.alert('Settled', `Balance cleared using ${method}.`);
+    } catch (error: any) {
+      Alert.alert('Settle up failed', error?.message || 'Could not settle this balance.');
+    } finally {
+      setSettling(false);
+    }
+  };
+
+  const handleSettleUp = () => {
+    if (!selectedGroupSummary || selectedGroupSummary.currentUserBalanceLines.length === 0) {
+      Alert.alert('Nothing to settle', 'You are already settled in this group.');
+      return;
+    }
+
+    Alert.alert('Settle up', 'How was this paid?', [
+      { text: 'Cash', onPress: () => void createSettlement('Cash') },
+      { text: 'Card', onPress: () => void createSettlement('Card') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const renderOverview = () => (
+    <>
+      <View style={styles.topRow}>
+        <Pressable style={styles.circleButton} onPress={() => void refreshGroups()}>
+          <Ionicons name="search-outline" size={24} color={palette.text} />
+        </Pressable>
+        <Pressable onPress={() => setShowGroupModal(true)}>
+          <Text style={styles.createGroupText}>Create group</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.overallHeaderRow}>
+        <Text style={styles.overallHeaderText}>
+          {overallSummary.netBalance >= 0 ? 'Overall, you are owed ' : 'Overall, you owe '}
+          <Text style={overallSummary.netBalance >= 0 ? styles.positiveText : styles.negativeText}>
+            {formatMoney(Math.abs(overallSummary.netBalance))}
+          </Text>
+        </Text>
+        <Pressable style={styles.circleButton} onPress={() => void refreshGroups()}>
+          {loading ? <ActivityIndicator color={palette.text} /> : <Ionicons name="options-outline" size={22} color={palette.text} />}
+        </Pressable>
+      </View>
+
+      <View style={styles.groupList}>
+        {allGroups.map((group, index) => {
+          const section = tripSections.find((item) => item.groups.some((candidate) => candidate.id === group.id));
+          if (!section) {
+            return null;
+          }
+
+          const groupSummary = calculateExpenseGroupSummary(group, crew, user?.id);
+          const previewLines = buildPreviewLines(groupSummary, user?.id);
+          const isPositive = groupSummary.netBalance >= 0;
+
+          return (
+            <Pressable key={group.id} style={styles.groupRow} onPress={() => openGroup(section.trip, group)}>
+              <GroupAvatar index={index} />
+              <View style={styles.groupCenter}>
+                <Text style={styles.groupName}>{getExpenseGroupDisplayName(group.name, section.trip.name)}</Text>
+                {previewLines.length > 0 ? (
+                  previewLines.map((line) => (
+                    <Text key={line} style={styles.groupSubline} numberOfLines={1}>
+                      {line}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.groupSubline}>No balances yet</Text>
+                )}
+              </View>
+              <View style={styles.groupRight}>
+                <Text style={[styles.groupBalanceLabel, isPositive ? styles.positiveText : styles.negativeText]}>
+                  {isPositive ? 'you are owed' : 'you owe'}
+                </Text>
+                <Text style={[styles.groupBalanceAmount, isPositive ? styles.positiveText : styles.negativeText]}>
+                  {formatMoney(isPositive ? groupSummary.currentUserIsOwed : groupSummary.currentUserOwes)}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
+
+        {!loading && allGroups.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No expense groups yet</Text>
+            <Text style={styles.emptyText}>Create a group and start adding trip expenses.</Text>
+          </View>
+        ) : null}
+      </View>
+    </>
+  );
+
+  const renderDetail = () => {
+    if (!selectedGroup || !selectedSection || !selectedGroupSummary) {
+      return null;
+    }
+
+    const balancePositive = selectedGroupSummary.netBalance >= 0;
+    const memberCount = Math.max(selectedSection.trip.members_count ?? 0, selectedGroupSummary.memberTotals.length);
+
+    return (
+      <>
+        <View style={[styles.hero, { paddingTop: Math.max(insets.top, 14) + 8 }]}> 
+          <View style={styles.heroActionsRow}>
+            <Pressable style={styles.heroIconButton} onPress={() => setSelectedGroupId(null)}>
+              <Ionicons name="chevron-back" size={24} color={palette.white} />
+            </Pressable>
+          </View>
+
+          <Text style={styles.heroTitle}>{getExpenseGroupDisplayName(selectedGroup.name, selectedSection.trip.name)}</Text>
+          <View style={styles.heroMemberPill}>
+            <Ionicons name="people-outline" size={16} color={palette.white} />
+            <Text style={styles.heroMemberText}>{memberCount} people</Text>
+          </View>
+        </View>
+
+        <View style={styles.detailBody}>
+          <Text style={styles.detailHeadline}>
+            {balancePositive ? 'You are owed ' : 'You owe '}
+            <Text style={balancePositive ? styles.positiveText : styles.negativeText}>
+              {formatMoney(balancePositive ? selectedGroupSummary.currentUserIsOwed : selectedGroupSummary.currentUserOwes)}
+            </Text>
+          </Text>
+
+          <View style={styles.detailSummaryRow}>
+            <MetricPill label="Total spent" value={formatMoney(selectedGroupSummary.totalSpent)} />
+            <MetricPill label="Balances" value={`${selectedGroupSummary.currentUserBalanceLines.length}`} />
+          </View>
+
+          <Pressable style={[styles.settleButton, settling && styles.settleButtonDisabled]} onPress={handleSettleUp} disabled={settling}>
+            <Text style={styles.settleButtonText}>{settling ? 'Settling...' : 'Settle up'}</Text>
+          </Pressable>
+
+          <View style={styles.activitySection}>
+            {activityGroups.map((monthGroup) => (
+              <View key={monthGroup.key} style={styles.monthBlock}>
+                <Text style={styles.monthLabel}>{monthGroup.label}</Text>
+                {monthGroup.expenses.map((expense, index) => {
+                  const impact = getExpenseImpactLabel(expense, user?.id);
+                  const tonePositive = impact.toLowerCase().includes('paid');
                   return (
                     <Pressable
-                      key={tab}
-                      onPress={() => setDetailTab(tab)}
-                      style={[styles.tabButton, selected && styles.tabButtonSelected]}
+                      key={expense.id}
+                      style={[styles.activityRow, index === monthGroup.expenses.length - 1 && styles.activityRowLast]}
+                      onLongPress={() =>
+                        Alert.alert(expense.title, 'Choose an action', [
+                          { text: 'Edit', onPress: () => editExpense(expense) },
+                          { text: 'Delete', style: 'destructive', onPress: () => deleteExpense(expense) },
+                          { text: 'Cancel', style: 'cancel' },
+                        ])
+                      }
                     >
-                      <Text style={[styles.tabButtonText, selected && styles.tabButtonTextSelected]}>{tab}</Text>
+                      <View style={styles.activityDateWrap}>
+                        <Text style={styles.activityDateMonth}>{formatActivityMonth(expense.createdAt)}</Text>
+                        <Text style={styles.activityDateDay}>{formatActivityDay(expense.createdAt)}</Text>
+                      </View>
+
+                      <View style={styles.activityIconWrap}>
+                        <Ionicons name="cash-outline" size={19} color={palette.teal} />
+                      </View>
+
+                      <View style={styles.activityContent}>
+                        <Text style={styles.activityTitle}>{expense.title}</Text>
+                        <Text style={styles.activitySubtitle} numberOfLines={2}>
+                          {impact || `${expense.paidBy} paid ${formatMoney(expense.amount)}`}
+                        </Text>
+                      </View>
+
+                      <View style={styles.activityAmountWrap}>
+                        <Text style={[styles.activityAmount, tonePositive ? styles.positiveText : styles.negativeText]}>
+                          {formatMoney(expense.amount)}
+                        </Text>
+                      </View>
                     </Pressable>
                   );
                 })}
               </View>
-            </View>
+            ))}
 
-            {detailTab === 'Activity' ? (
-              activityGroups.length === 0 ? (
-                <EmptyCard
-                  title="No expenses yet"
-                  body="Add the first expense for this trip group to start tracking who owes what."
-                />
-              ) : (
-                activityGroups.map((month) => (
-                  <View key={month.key} style={styles.sectionBlock}>
-                    <Text style={styles.sectionTitle}>{month.label}</Text>
-                    {month.expenses.map((expense) => {
-                      const date = new Date(expense.createdAt);
-                      const dayNumber = Number.isNaN(date.getTime()) ? '--' : `${date.getDate()}`;
-                      const dayLabel = Number.isNaN(date.getTime())
-                        ? ''
-                        : date.toLocaleDateString(undefined, { month: 'short' });
-                      const impact = getExpenseImpactLabel(expense, user?.id);
-                      return (
-                        <Pressable
-                          key={expense.id}
-                          onLongPress={() =>
-                            Alert.alert(expense.title, 'Choose an action.', [
-                              { text: 'Edit', onPress: () => editExpense(expense) },
-                              { text: 'Delete', style: 'destructive', onPress: () => deleteExpense(expense) },
-                              { text: 'Cancel', style: 'cancel' },
-                            ])
-                          }
-                          style={styles.expenseRow}
-                        >
-                          <View style={styles.expenseDate}>
-                            <Text style={styles.expenseDateMonth}>{dayLabel}</Text>
-                            <Text style={styles.expenseDateDay}>{dayNumber}</Text>
-                          </View>
-                          <View style={styles.expenseCopy}>
-                            <Text style={styles.expenseTitle}>{expense.title}</Text>
-                            <Text style={styles.expenseMeta}>Paid by {expense.paidBy || 'Trip member'}</Text>
-                            {impact ? <Text style={styles.expenseImpact}>{impact}</Text> : null}
-                            {expense.linkedEventTitle || expense.linkedDayTitle ? (
-                              <Text style={styles.expenseLinked}>
-                                {[expense.linkedDayTitle, expense.linkedEventTitle].filter(Boolean).join(' - ')}
-                              </Text>
-                            ) : null}
-                          </View>
-                          <View style={styles.expenseRight}>
-                            <Text style={styles.expenseAmount}>{formatMoney(expense.amount)}</Text>
-                            <Pressable onPress={() => editExpense(expense)} style={styles.rowActionButton}>
-                              <Ionicons name="ellipsis-horizontal" size={16} color={colors.textSecondary} />
-                            </Pressable>
-                          </View>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ))
-              )
-            ) : null}
-
-            {detailTab === 'Balances' ? (
-              <View style={styles.sectionBlock}>
-                {selectedGroupSummary.currentUserBalanceLines.length === 0 ? (
-                  <EmptyCard title="No balances yet" body="Once expenses are split, who owes whom will show up here." />
-                ) : (
-                  selectedGroupSummary.currentUserBalanceLines.map((line, index) => {
-                    const youOwe = line.fromMemberId === String(user?.id);
-                    const counterpart = youOwe ? line.toMemberName : line.fromMemberName;
-                    return (
-                      <View key={`${line.fromMemberId}-${line.toMemberId}-${index}`} style={styles.infoRow}>
-                        <View style={styles.infoCopy}>
-                          <Text style={styles.infoTitle}>
-                            {youOwe ? `You owe ${counterpart}` : `${counterpart} owes you`}
-                          </Text>
-                          <Text style={styles.infoMeta}>
-                            {youOwe ? 'Settle this with the payer' : 'You paid more than your share'}
-                          </Text>
-                        </View>
-                        <Text style={[styles.infoAmount, youOwe ? styles.balanceNegative : styles.balancePositive]}>
-                          {formatMoney(line.amount)}
-                        </Text>
-                      </View>
-                    );
-                  })
-                )}
+            {activityGroups.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>No activity yet</Text>
+                <Text style={styles.emptyText}>Add your first expense for this group.</Text>
               </View>
             ) : null}
+          </View>
+        </View>
+      </>
+    );
+  };
 
-            {detailTab === 'Totals' ? (
-              <View style={styles.sectionBlock}>
-                {selectedGroupSummary.memberTotals.map((member) => (
-                  <View key={member.memberId} style={styles.infoRow}>
-                    <View style={styles.infoCopy}>
-                      <Text style={styles.infoTitle}>{member.memberName}</Text>
-                      <Text style={styles.infoMeta}>
-                        Paid {formatMoney(member.paid)} - Share {formatMoney(member.owed)}
-                      </Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.infoAmount,
-                        member.net >= 0 ? styles.balancePositive : styles.balanceNegative,
-                      ]}
-                    >
-                      {member.net >= 0 ? '+' : '-'}
-                      {formatMoney(Math.abs(member.net))}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <View style={styles.overviewHeader}>
-              <View style={styles.headerCenter}>
-                <Text style={styles.headerTitle}>Expenses</Text>
-                <Text style={styles.headerSubtitle}>Trip expense groups and balances</Text>
-              </View>
-              <View style={styles.headerActions}>
-                <Pressable style={styles.iconButton} onPress={() => setShowGroupModal(true)}>
-                  <Ionicons name="add" size={20} color={colors.accent} />
-                </Pressable>
-                <NotificationBell />
-              </View>
-            </View>
-
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLabel}>Overall summary</Text>
-              <Text
-                style={[
-                  styles.summaryHeadline,
-                  overallSummary.netBalance >= 0 ? styles.balancePositive : styles.balanceNegative,
-                ]}
-              >
-                {overallSummary.netBalance >= 0
-                  ? `You are owed ${formatMoney(overallSummary.currentUserIsOwed)}`
-                  : `You owe ${formatMoney(overallSummary.currentUserOwes)}`}
-              </Text>
-              <View style={styles.summaryGrid}>
-                <SummaryMetric label="You owe" value={formatMoney(overallSummary.currentUserOwes)} />
-                <SummaryMetric label="You're owed" value={formatMoney(overallSummary.currentUserIsOwed)} />
-                <SummaryMetric label="Net" value={formatMoney(Math.abs(overallSummary.netBalance))} />
-              </View>
-            </View>
-
-            {loading ? (
-              <View style={styles.loaderWrap}>
-                <ActivityIndicator color={colors.accent} />
-              </View>
-            ) : null}
-
-            {tripSections.length === 0 && !loading ? (
-              <EmptyCard
-                title="No expenses yet"
-                body="Create a trip first. Its default expense group will show up here automatically."
-              />
-            ) : (
-              <View style={styles.groupList}>
-                {tripSections.map((section) =>
-                  section.groups.map((group) => {
-                    const summary = calculateExpenseGroupSummary(group, crew, user?.id);
-                    const previewLines = summary.currentUserBalanceLines.slice(0, 2);
-                    const remainingCount = Math.max(summary.currentUserBalanceLines.length - previewLines.length, 0);
-                    return (
-                      <Pressable
-                        key={`${section.trip.id}-${group.id}`}
-                        onPress={() => openGroup(section.trip, group)}
-                        style={styles.groupRow}
-                      >
-                        <View style={styles.groupIcon}>
-                          <Ionicons name="wallet-outline" size={18} color={colors.accentStrong} />
-                        </View>
-                        <View style={styles.groupCopy}>
-                          <View style={styles.groupTopRow}>
-                            <View style={styles.groupTextWrap}>
-                              <Text style={styles.groupName}>{groupLabel(group, section.trip)}</Text>
-                              <Text style={styles.groupTripMeta}>
-                                {groupLabel(group, section.trip) === section.trip.name
-                                  ? `${section.trip.members_count ?? 1} members - ${formatMoney(summary.totalSpent)}`
-                                  : `${section.trip.name} - ${section.trip.members_count ?? 1} members - ${formatMoney(summary.totalSpent)}`}
-                              </Text>
-                            </View>
-                            <View style={styles.groupBalanceWrap}>
-                              <Text
-                                style={[
-                                  styles.groupBalanceLabel,
-                                  summary.netBalance >= 0 ? styles.balancePositive : styles.balanceNegative,
-                                ]}
-                              >
-                                {summary.netBalance >= 0 ? 'You are owed' : 'You owe'}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.groupBalanceAmount,
-                                  summary.netBalance >= 0 ? styles.balancePositive : styles.balanceNegative,
-                                ]}
-                              >
-                                {formatMoney(Math.abs(summary.netBalance))}
-                              </Text>
-                            </View>
-                          </View>
-
-                          {previewLines.length > 0 ? (
-                            previewLines.map((line, index) => {
-                              const youOwe = line.fromMemberId === String(user?.id);
-                              return (
-                                <Text key={`${group.id}-line-${index}`} style={styles.groupPreviewText}>
-                                  {youOwe ? `You owe ${line.toMemberName}` : `${line.fromMemberName} owes you`}{' '}
-                                  <Text style={youOwe ? styles.balanceNegative : styles.balancePositive}>
-                                    {formatMoney(line.amount)}
-                                  </Text>
-                                </Text>
-                              );
-                            })
-                          ) : (
-                            <Text style={styles.groupPreviewTextMuted}>No balances yet</Text>
-                          )}
-
-                          {remainingCount > 0 ? (
-                            <Text style={styles.groupPreviewTextMuted}>
-                              Plus {remainingCount} more balance{remainingCount === 1 ? '' : 's'}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                    );
-                  })
-                )}
-              </View>
-            )}
-          </>
-        )}
+  return (
+    <View style={styles.screen}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 96 }}
+      >
+        {selectedGroup ? renderDetail() : <View style={[styles.content, { paddingTop: Math.max(insets.top, 22) + 8 }]}>{renderOverview()}</View>}
       </ScrollView>
 
-      {allGroups.length > 0 ? (
-        <View style={[styles.floatingButtonWrap, { bottom: 76 + Math.max(insets.bottom, 12) }]}>
-          <Pressable style={styles.floatingButton} onPress={openAddExpense}>
-            <Ionicons name="add" size={18} color="#FFFFFF" />
-            <Text style={styles.floatingButtonText}>Add expense</Text>
+      {(!selectedGroup || selectedSection) && (
+        <View pointerEvents="box-none" style={styles.floatingActionWrap}>
+          <Pressable style={[styles.floatingAction, { bottom: Math.max(insets.bottom, 18) + 8 }]} onPress={openAddExpense}>
+            <Ionicons name="receipt-outline" size={22} color={palette.white} />
+            <Text style={styles.floatingActionText}>Add expense</Text>
           </Pressable>
         </View>
-      ) : null}
+      )}
 
-      <Modal visible={showGroupModal} transparent animationType="slide" onRequestClose={() => setShowGroupModal(false)}>
+      <Modal visible={showGroupModal} transparent animationType="fade" onRequestClose={() => setShowGroupModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Create expense group</Text>
-            <Text style={styles.modalSubtitle}>Keep it simple: hotel, food, transport, or anything else.</Text>
-            <TextField
-              label="Group name"
+            <Text style={styles.modalTitle}>Create group</Text>
+            <Text style={styles.modalSubtitle}>Add another expense group inside the selected trip.</Text>
+            <TextInput
               value={newGroupName}
               onChangeText={setNewGroupName}
-              placeholder="Hotel, Food, Transport..."
+              placeholder="Weekend food"
+              placeholderTextColor={palette.textMuted}
+              style={styles.modalInput}
             />
-            <View style={styles.modalActions}>
-              <PrimaryButton title="Create group" onPress={createGroup} />
-              <PrimaryButton title="Cancel" variant="secondary" onPress={() => setShowGroupModal(false)} />
+            <View style={styles.modalButtonsRow}>
+              <Pressable style={styles.modalSecondaryButton} onPress={() => setShowGroupModal(false)}>
+                <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.modalPrimaryButton} onPress={() => void createGroup()}>
+                <Text style={styles.modalPrimaryButtonText}>Create</Text>
+              </Pressable>
             </View>
           </View>
         </View>
@@ -534,373 +507,404 @@ export default function ExpensesScreen({ navigation }: Props) {
   );
 }
 
-function SummaryMetric({ label, value }: { label: string; value: string }) {
+function GroupAvatar({ index }: { index: number }) {
+  const icon = groupIcons[index % groupIcons.length] as keyof typeof Ionicons.glyphMap;
+  const color = groupIconColors[index % groupIconColors.length];
   return (
-    <View style={styles.metricCard}>
+    <View style={[styles.groupAvatar, { backgroundColor: color }]}> 
+      <Ionicons name={icon} size={22} color={palette.white} />
+    </View>
+  );
+}
+
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metricPill}>
       <Text style={styles.metricLabel}>{label}</Text>
       <Text style={styles.metricValue}>{value}</Text>
     </View>
   );
 }
 
-function EmptyCard({ title, body }: { title: string; body: string }) {
-  return (
-    <View style={styles.emptyCard}>
-      <Text style={styles.emptyTitle}>{title}</Text>
-      <Text style={styles.emptyBody}>{body}</Text>
-    </View>
-  );
+function buildPreviewLines(summary: ReturnType<typeof calculateExpenseGroupSummary>, userId?: number | string | null) {
+  const userKey = userId != null ? String(userId) : '';
+  return summary.currentUserBalanceLines.slice(0, 3).map((line) => {
+    if (line.toMemberId === userKey) {
+      return `${line.fromMemberName} owes you ${formatMoney(line.amount)}`;
+    }
+    return `You owe ${line.toMemberName} ${formatMoney(line.amount)}`;
+  });
+}
+
+function formatActivityMonth(dateValue: string) {
+  const parsedDate = new Date(dateValue);
+  const safeDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  return safeDate.toLocaleDateString(undefined, { month: 'short' });
+}
+
+function formatActivityDay(dateValue: string) {
+  const parsedDate = new Date(dateValue);
+  const safeDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  return String(safeDate.getDate()).padStart(2, '0');
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: palette.screen,
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 132,
-    gap: spacing.lg,
+    gap: 20,
   },
-  overviewHeader: {
+  topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: spacing.md,
   },
-  detailHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  headerCenter: {
-    flex: 1,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  headerTitle: {
-    color: colors.textPrimary,
-    fontSize: 30,
-    fontWeight: '900',
-    letterSpacing: -0.8,
-  },
-  headerSubtitle: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    marginTop: 4,
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+  circleButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  summaryCard: {
-    borderRadius: 24,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 20,
-    gap: spacing.md,
-  },
-  summaryLabel: {
-    color: colors.textSecondary,
-    fontSize: 13,
+  createGroupText: {
+    color: palette.teal,
+    fontSize: 18,
     fontWeight: '700',
   },
-  summaryHeadline: {
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  summaryGrid: {
+  overallHeaderRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  metricCard: {
+  overallHeaderText: {
     flex: 1,
-    borderRadius: 16,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
-  },
-  metricLabel: {
-    color: colors.textSecondary,
-    fontSize: 12,
+    color: palette.text,
+    fontSize: 18,
     fontWeight: '700',
+    lineHeight: 28,
   },
-  metricValue: {
-    marginTop: 8,
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.textPrimary,
+  positiveText: {
+    color: palette.teal,
+  },
+  negativeText: {
+    color: palette.orange,
   },
   groupList: {
-    gap: spacing.md,
+    gap: 8,
   },
   groupRow: {
     flexDirection: 'row',
     gap: 14,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.line,
   },
-  groupIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
-    backgroundColor: colors.accentSoft,
+  groupAvatar: {
+    width: 54,
+    height: 54,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 2,
   },
-  groupCopy: {
+  groupCenter: {
     flex: 1,
-    gap: 6,
-  },
-  groupTopRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  groupTextWrap: {
-    flex: 1,
-  },
-  groupBalanceWrap: {
-    alignItems: 'flex-end',
-    minWidth: 92,
+    gap: 4,
   },
   groupName: {
-    color: colors.textPrimary,
+    color: palette.text,
     fontSize: 17,
     fontWeight: '700',
   },
-  groupTripMeta: {
-    marginTop: 4,
-    color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  groupPreviewText: {
-    color: colors.textPrimary,
-    fontSize: 13,
+  groupSubline: {
+    color: palette.textMuted,
+    fontSize: 14,
     lineHeight: 20,
   },
-  groupPreviewTextMuted: {
-    color: colors.textSecondary,
-    fontSize: 13,
+  groupRight: {
+    width: 106,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 4,
   },
   groupBalanceLabel: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'lowercase',
   },
   groupBalanceAmount: {
-    marginTop: 4,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  balancePositive: {
-    color: colors.success,
-  },
-  balanceNegative: {
-    color: colors.danger,
-  },
-  loaderWrap: {
-    paddingVertical: spacing.sm,
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   emptyCard: {
-    borderRadius: 20,
-    backgroundColor: colors.surface,
+    marginTop: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: 20,
+    borderColor: palette.border,
+    backgroundColor: palette.panel,
+    padding: 18,
+    gap: 6,
   },
   emptyTitle: {
-    color: colors.textPrimary,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  emptyBody: {
-    marginTop: 8,
-    color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    flexWrap: 'wrap',
-  },
-  tabButton: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-  },
-  tabButtonSelected: {
-    backgroundColor: colors.accentSoft,
-    borderColor: colors.accent,
-  },
-  tabButtonText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  tabButtonTextSelected: {
-    color: colors.accentStrong,
-  },
-  sectionBlock: {
-    gap: spacing.md,
-  },
-  sectionTitle: {
-    color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  expenseRow: {
-    flexDirection: 'row',
-    gap: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  expenseDate: {
-    width: 44,
-    alignItems: 'center',
-  },
-  expenseDateMonth: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  expenseDateDay: {
-    marginTop: 2,
-    color: colors.textPrimary,
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  expenseCopy: {
-    flex: 1,
-  },
-  expenseTitle: {
-    color: colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  expenseMeta: {
-    marginTop: 4,
-    color: colors.textSecondary,
-    fontSize: 13,
-  },
-  expenseImpact: {
-    marginTop: 6,
-    color: colors.textPrimary,
-    fontSize: 13,
-  },
-  expenseLinked: {
-    marginTop: 6,
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  expenseRight: {
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-  },
-  expenseAmount: {
-    color: colors.textPrimary,
+    color: palette.text,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  rowActionButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+  emptyText: {
+    color: palette.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  hero: {
+    backgroundColor: palette.blueHero,
+    paddingHorizontal: 20,
+    paddingBottom: 26,
+  },
+  heroActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  heroIconButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  infoCopy: {
-    flex: 1,
-    paddingRight: spacing.sm,
-  },
-  infoTitle: {
-    color: colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  infoMeta: {
-    marginTop: 4,
-    color: colors.textSecondary,
-    fontSize: 12,
-  },
-  infoAmount: {
-    fontSize: 18,
+  heroTitle: {
+    color: palette.white,
+    fontSize: 32,
     fontWeight: '800',
+    lineHeight: 38,
   },
-  floatingButtonWrap: {
-    position: 'absolute',
-    right: 20,
-  },
-  floatingButton: {
+  heroMemberPill: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: colors.accent,
-    borderRadius: radius.pill,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    boxShadow: `0px 14px 28px ${colors.shadowStrong}`,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.20)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.30)',
   },
-  floatingButtonText: {
-    color: '#FFFFFF',
+  heroMemberText: {
+    color: palette.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  detailBody: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+  },
+  detailHeadline: {
+    color: palette.text,
+    fontSize: 19,
+    fontWeight: '700',
+    lineHeight: 30,
+  },
+  detailSummaryRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  metricPill: {
+    flex: 1,
+    borderRadius: 16,
+    backgroundColor: palette.panel,
+    borderWidth: 1,
+    borderColor: palette.border,
+    padding: 14,
+    gap: 4,
+  },
+  metricLabel: {
+    color: palette.textMuted,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  metricValue: {
+    color: palette.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  settleButton: {
+    marginTop: 16,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: palette.orange,
+  },
+  settleButtonDisabled: {
+    opacity: 0.7,
+  },
+  settleButtonText: {
+    color: palette.white,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  activitySection: {
+    marginTop: 26,
+    gap: 18,
+  },
+  monthBlock: {
+    gap: 10,
+  },
+  monthLabel: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  activityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.line,
+  },
+  activityRowLast: {
+    borderBottomWidth: 0,
+  },
+  activityDateWrap: {
+    width: 44,
+    alignItems: 'flex-start',
+  },
+  activityDateMonth: {
+    color: palette.textMuted,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  activityDateDay: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  activityIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.panel,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  activityContent: {
+    flex: 1,
+    gap: 4,
+  },
+  activityTitle: {
+    color: palette.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  activitySubtitle: {
+    color: palette.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  activityAmountWrap: {
+    alignItems: 'flex-end',
+  },
+  activityAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  floatingActionWrap: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  floatingAction: {
+    position: 'absolute',
+    right: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderRadius: 999,
+    backgroundColor: palette.teal,
+  },
+  floatingActionText: {
+    color: palette.white,
     fontSize: 16,
     fontWeight: '800',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.22)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: palette.modalOverlay,
+    paddingHorizontal: 20,
   },
   modalCard: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: spacing.lg,
-    gap: spacing.sm,
+    width: '100%',
+    borderRadius: 22,
+    backgroundColor: palette.panel,
+    borderWidth: 1,
+    borderColor: palette.border,
+    padding: 20,
+    gap: 14,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.textPrimary,
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: '700',
   },
   modalSubtitle: {
-    color: colors.textSecondary,
+    color: palette.textMuted,
+    fontSize: 14,
     lineHeight: 20,
   },
-  modalActions: {
-    gap: spacing.sm,
+  modalInput: {
+    minHeight: 52,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.panelSoft,
+    color: palette.text,
+    paddingHorizontal: 14,
+    fontSize: 15,
+  },
+  modalButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalSecondaryButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  modalSecondaryButtonText: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalPrimaryButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: palette.teal,
+  },
+  modalPrimaryButtonText: {
+    color: palette.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

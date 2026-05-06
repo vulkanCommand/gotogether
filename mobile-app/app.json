@@ -62,7 +62,8 @@
         }
       ],
       "./plugins/with-rnfb-fix",
-      "expo-font"
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {

@@ -14,6 +14,11 @@ SERVICE_URL="https://gotogether-backend-501556960072.us-central1.run.app"
 : "${DB_NAME:?Set DB_NAME before running deploy.sh}"
 : "${FIREBASE_ADMIN_JSON:?Set FIREBASE_ADMIN_JSON before running deploy.sh}"
 
+TWILIO_ACCOUNT_SID="${TWILIO_ACCOUNT_SID:-}"
+TWILIO_AUTH_TOKEN="${TWILIO_AUTH_TOKEN:-}"
+TWILIO_FROM_NUMBER="${TWILIO_FROM_NUMBER:-}"
+APP_INVITE_URL="${APP_INVITE_URL:-https://gotogether.app}"
+
 echo "==> Setting gcloud project"
 gcloud config set project "${PROJECT}" >/dev/null
 
@@ -41,7 +46,7 @@ gcloud run services update "${SERVICE}" \
   --region "${REGION}" \
   --project "${PROJECT}" \
   --remove-env-vars "DATABASE_URL" \
-  --update-env-vars "INSTANCE_CONNECTION_NAME=${INSTANCE_CONNECTION_NAME},DB_USER=${DB_USER},DB_PASSWORD=${DB_PASSWORD},DB_NAME=${DB_NAME},DB_SSLMODE=disable,FIREBASE_ADMIN_JSON=${FIREBASE_ADMIN_JSON}"
+  --update-env-vars "INSTANCE_CONNECTION_NAME=${INSTANCE_CONNECTION_NAME},DB_USER=${DB_USER},DB_PASSWORD=${DB_PASSWORD},DB_NAME=${DB_NAME},DB_SSLMODE=disable,FIREBASE_ADMIN_JSON=${FIREBASE_ADMIN_JSON},TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID},TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN},TWILIO_FROM_NUMBER=${TWILIO_FROM_NUMBER},APP_INVITE_URL=${APP_INVITE_URL}"
 
 echo "==> Health check"
 curl -sS "${SERVICE_URL}/health"

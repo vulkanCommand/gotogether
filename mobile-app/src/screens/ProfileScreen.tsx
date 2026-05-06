@@ -115,7 +115,7 @@ export default function ProfileScreen({ navigation }: Props) {
         <View style={styles.topRow}>
           <View style={styles.headerCopy}>
             <Text style={styles.headerTitle}>Profile</Text>
-            <Text style={styles.headerSubtitle}>Your travel identity and connected friends.</Text>
+            <Text style={styles.headerSubtitle}>Travel profile and friends.</Text>
           </View>
           <View style={styles.headerActions}>
             <NotificationBell />
@@ -233,11 +233,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   card: {
-    borderRadius: 24,
+    borderRadius: 20,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 20,
+    padding: 16,
   },
   iconButton: {
     width: 42,
@@ -259,9 +259,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarWrap: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: '#EEF4FF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -272,16 +272,16 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   avatarText: {
-    fontSize: 30,
-    fontWeight: '800',
+    fontSize: 24,
+    fontWeight: '700',
     color: colors.accent,
   },
   identity: {
     flex: 1,
   },
   name: {
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   email: {
@@ -330,13 +330,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   cardTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   editLink: {
     color: colors.accent,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   primaryButton: {
     marginTop: spacing.sm,
@@ -352,7 +352,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   detailRow: {
     paddingVertical: 12,

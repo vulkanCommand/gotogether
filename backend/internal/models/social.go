@@ -30,3 +30,15 @@ type TripPhoto struct {
 	UploadedBy string `json:"uploaded_by"`
 	UploadedAt string `json:"uploaded_at"`
 }
+
+type SMSInviteRequest struct {
+	Phone string `json:"phone"`
+	Name  string `json:"name"`
+}
+
+type SMSInviteResponse struct {
+	Sent           bool   `json:"sent"`
+	RecipientPhone string `json:"recipient_phone"`
+	Provider       string `json:"provider"`
+	MessageSID     string `json:"message_sid"`
+}

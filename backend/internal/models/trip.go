@@ -10,6 +10,13 @@ type CreateTripRequest struct {
 	LeadUserID     int      `json:"lead_user_id"`
 }
 
+type UpdateTripRequest struct {
+	Name        string `json:"name"`
+	Destination string `json:"destination"`
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+}
+
 type Trip struct {
 	ID                  int    `json:"id"`
 	Name                string `json:"name"`
@@ -25,6 +32,9 @@ type Trip struct {
 	SetupPendingCount   int    `json:"setup_pending_count"`
 	SetupRequired       bool   `json:"setup_required"`
 	ReadinessStatus     string `json:"readiness_status"`
+	CompletionConfirmedCount int  `json:"completion_confirmed_count"`
+	CompletionPendingCount   int  `json:"completion_pending_count"`
+	CompletionRequested      bool `json:"completion_requested"`
 }
 
 type TripListItem struct {
@@ -43,4 +53,17 @@ type TripListItem struct {
 	SetupPendingCount   int    `json:"setup_pending_count"`
 	SetupRequired       bool   `json:"setup_required"`
 	ReadinessStatus     string `json:"readiness_status"`
+	CompletionConfirmedCount int  `json:"completion_confirmed_count"`
+	CompletionPendingCount   int  `json:"completion_pending_count"`
+	CompletionRequested      bool `json:"completion_requested"`
+}
+
+type PlaceSearchResult struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Subtitle    string  `json:"subtitle"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
+	Provider    string  `json:"provider"`
+	DisplayName string  `json:"display_name"`
 }

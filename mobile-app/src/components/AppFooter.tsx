@@ -23,6 +23,10 @@ const findActiveTab = (state: any): string => {
     return '';
   }
 
+  if (currentRoute.name === 'TripCompletion') {
+    return 'Trips';
+  }
+
   if (tabs.some((tab) => tab.name === currentRoute.name)) {
     return currentRoute.name;
   }

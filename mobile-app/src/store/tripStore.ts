@@ -80,6 +80,7 @@ export type CurrentTrip = {
   start_date: string;
   end_date: string;
   members_count?: number;
+  created_by?: number;
   image_url?: string;
   completed_at?: string;
   viewer_role?: string;

@@ -33,6 +33,9 @@ export type ApiTrip = {
   setup_pending_count?: number;
   setup_required?: boolean;
   readiness_status?: 'completed' | 'needs_your_response' | 'waiting_on_crew' | 'ready' | string;
+  completion_confirmed_count?: number;
+  completion_pending_count?: number;
+  completion_requested?: boolean;
 };
 
 export type ApiTripDetails = {
@@ -119,6 +122,30 @@ export type ApiNotification = {
   targetTitle?: string;
   actionCompletedAt: string;
   createdAt: string;
+};
+
+export type ApiPlaceResult = {
+  id: string;
+  title: string;
+  subtitle: string;
+  latitude: number;
+  longitude: number;
+  provider: string;
+  display_name: string;
+};
+
+type NominatimPlaceResult = {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+};
+
+export type ApiSMSInviteResult = {
+  sent: boolean;
+  recipient_phone: string;
+  provider: string;
+  message_sid: string;
 };
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -290,12 +317,42 @@ export async function fetchFriends() {
   return apiRequest<{ friends: Friend[] }>('/api/friends');
 }
 
+export async function sendSMSInvite(payload: { phone: string; name?: string }) {
+  return apiRequest<ApiSMSInviteResult>('/api/friends/invite-sms', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchTripDetails(tripId: number) {
   return apiRequest<ApiTripDetails>(`/api/trips/${tripId}`);
 }
 
 export async function fetchTrips() {
   return apiRequest<{ trips: ApiTrip[] }>('/api/trips');
+}
+
+export async function saveTripItinerary(tripId: number, days: import('../store/tripStore').ItineraryDay[]) {
+  return apiRequest<{ message: string }>(`/api/trips/${tripId}/itinerary`, {
+    method: 'PUT',
+    body: JSON.stringify({ days }),
+  });
+}
+
+export async function updateTrip(
+  tripId: number,
+  payload: { name: string; destination: string; start_date: string; end_date: string }
+) {
+  return apiRequest<{ updated: boolean }>(`/api/trips/${tripId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteTrip(tripId: number) {
+  return apiRequest<{ deleted: boolean }>(`/api/trips/${tripId}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function fetchTripSetupStatus(tripId: number) {
@@ -400,6 +457,42 @@ export async function fetchTripLiveLocations(tripId: number) {
   return apiRequest<{ locations: ApiTripLocation[] }>(`/api/trips/${tripId}/live`);
 }
 
+export async function searchPlaces(query: string) {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return { results: [] as ApiPlaceResult[] };
+  }
+
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&q=${encodeURIComponent(trimmedQuery)}`,
+    {
+      headers: {
+        Accept: 'application/json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Place search failed with status ${response.status}`);
+  }
+
+  const payload = (await response.json()) as NominatimPlaceResult[];
+  const results: ApiPlaceResult[] = payload.map((item) => {
+    const [title, ...rest] = item.display_name.split(',');
+    return {
+      id: `osm-${item.place_id}`,
+      title: title?.trim() || item.display_name,
+      subtitle: rest.join(',').trim(),
+      latitude: Number(item.lat),
+      longitude: Number(item.lon),
+      provider: 'openstreetmap',
+      display_name: item.display_name,
+    };
+  });
+
+  return { results };
+}
+
 export async function fetchTripPhotos(tripId: number) {
   return apiRequest<{ photos: ApiTripPhoto[] }>(`/api/trips/${tripId}/photos`);
 }
@@ -415,6 +508,12 @@ export async function createTripPhoto(
   return apiRequest<{ photo: ApiTripPhoto }>(`/api/trips/${tripId}/photos`, {
     method: 'POST',
     body: formData,
+  });
+}
+
+export async function deleteTripPhoto(tripId: number, photoId: number) {
+  return apiRequest<{ deleted: boolean }>(`/api/trips/${tripId}/photos/${photoId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -446,6 +545,115 @@ export async function generateItineraryDraft(tripId: number, payload: { notes?: 
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export async function createItineraryDay(
+  tripId: number,
+  payload: { title: string; dateLabel: string }
+) {
+  return apiRequest<{ day: import('../store/tripStore').ItineraryDay }>(`/api/trips/${tripId}/itinerary/days`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateItineraryDay(
+  tripId: number,
+  dayId: string,
+  payload: { title: string; dateLabel: string }
+) {
+  const numericDayId = dayId.replace('day-', '');
+  return apiRequest<{ updated: boolean }>(`/api/trips/${tripId}/itinerary/days/${numericDayId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteItineraryDay(tripId: number, dayId: string) {
+  const numericDayId = dayId.replace('day-', '');
+  return apiRequest<{ deleted: boolean }>(`/api/trips/${tripId}/itinerary/days/${numericDayId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function createItineraryEvent(
+  tripId: number,
+  dayId: string,
+  payload: {
+    title: string;
+    time: string;
+    location: string;
+    locationIsMapped?: boolean;
+    notes?: string;
+    attendees?: string[];
+    status?: string;
+  }
+) {
+  const numericDayId = dayId.replace('day-', '');
+  return apiRequest<{ event: import('../store/tripStore').ItineraryEvent }>(
+    `/api/trips/${tripId}/itinerary/days/${numericDayId}/events`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function reorderItineraryDayEvents(tripId: number, dayId: string, eventIds: string[]) {
+  const numericDayId = dayId.replace('day-', '');
+  return apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(
+    `/api/trips/${tripId}/itinerary/days/${numericDayId}/events/reorder`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ eventIds }),
+    }
+  );
+}
+
+export async function updateItineraryEvent(
+  tripId: number,
+  eventId: string,
+  payload: {
+    title: string;
+    time: string;
+    location: string;
+    locationIsMapped?: boolean;
+    notes?: string;
+    attendees?: string[];
+  }
+) {
+  const numericEventId = eventId.replace('event-', '');
+  return apiRequest<{ updated: boolean }>(`/api/trips/${tripId}/itinerary/events/${numericEventId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteItineraryEvent(tripId: number, eventId: string) {
+  const numericEventId = eventId.replace('event-', '');
+  return apiRequest<{ deleted: boolean }>(`/api/trips/${tripId}/itinerary/events/${numericEventId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function completeItineraryEvent(tripId: number, eventId: string) {
+  const numericEventId = eventId.replace('event-', '');
+  return apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(
+    `/api/trips/${tripId}/itinerary/events/${numericEventId}/complete`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function reopenItineraryEvent(tripId: number, eventId: string) {
+  const numericEventId = eventId.replace('event-', '');
+  return apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(
+    `/api/trips/${tripId}/itinerary/events/${numericEventId}/undo-complete`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 export async function deleteTripCover(tripId: number) {

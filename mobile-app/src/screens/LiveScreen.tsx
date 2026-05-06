@@ -420,15 +420,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   card: {
-    borderRadius: 24,
+    borderRadius: 20,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 20,
+    padding: 16,
   },
   mapWrap: {
-    height: 470,
-    borderRadius: 24,
+    height: 300,
+    borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
@@ -473,8 +473,8 @@ const styles = StyleSheet.create({
   },
   sectionEyebrow: {
     color: colors.textSecondary,
-    fontWeight: '700',
-    fontSize: 13,
+    fontWeight: '600',
+    fontSize: 12,
     marginBottom: spacing.sm,
   },
   sectionRow: {
@@ -486,8 +486,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
   },
   memberRow: {
     flexDirection: 'row',
@@ -528,8 +528,8 @@ const styles = StyleSheet.create({
     color: colors.accentStrong,
   },
   destinationTitle: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '800',
     color: colors.textPrimary,
   },
   destinationMeta: {
@@ -574,11 +574,11 @@ const styles = StyleSheet.create({
   distanceText: {
     marginTop: spacing.sm,
     color: colors.accent,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 17,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   emptyText: {
