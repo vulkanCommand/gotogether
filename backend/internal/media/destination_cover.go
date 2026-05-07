@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"gotogether-backend/internal/places"
 )
 
 const (
@@ -24,8 +26,8 @@ const (
 type wikipediaSearchResponse struct {
 	Query struct {
 		Pages []struct {
-			Title     string `json:"title"`
-			Original  *struct {
+			Title    string `json:"title"`
+			Original *struct {
 				Source string `json:"source"`
 			} `json:"original"`
 			Thumbnail *struct {
@@ -73,21 +75,34 @@ func ResolveDestinationCover(ctx context.Context, destination string) ([]byte, s
 		return nil, "", "", errors.New("destination is required")
 	}
 
-	if imageBytes, contentType, source, err := fetchStockDestinationImage(ctx, trimmedDestination); err == nil {
+	cover, err := places.ResolveDestinationCover(ctx, trimmedDestination)
+	if err == nil {
+		return cover.ImageBytes, cover.ContentType, cover.Source, nil
+	}
+
+	if !places.LegacyCoverFallbacksEnabled() {
+		return nil, "", "", err
+	}
+
+	if imageBytes, contentType, source, stockErr := fetchStockDestinationImage(ctx, trimmedDestination); stockErr == nil {
 		return imageBytes, contentType, source, nil
 	}
 
-	if imageBytes, contentType, err := fetchWikipediaDestinationImage(ctx, trimmedDestination); err == nil {
+	if imageBytes, contentType, wikiErr := fetchWikipediaDestinationImage(ctx, trimmedDestination); wikiErr == nil {
 		return imageBytes, contentType, "wikipedia", nil
+	}
+
+	if !places.OpenAICoverFallbackEnabled() {
+		return nil, "", "", err
 	}
 
 	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if openAIKey == "" {
-		return nil, "", "", errors.New("no destination image found and OPENAI_API_KEY is not configured")
+		return nil, "", "", err
 	}
 
-	imageBytes, contentType, err := generateDestinationImageWithOpenAI(ctx, openAIKey, trimmedDestination)
-	if err != nil {
+	imageBytes, contentType, openAIErr := generateDestinationImageWithOpenAI(ctx, openAIKey, trimmedDestination)
+	if openAIErr != nil {
 		return nil, "", "", err
 	}
 

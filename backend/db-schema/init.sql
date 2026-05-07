@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS trips (
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     image_url TEXT,
+    cover_photo_source TEXT,
+    google_place_id TEXT,
+    google_photo_name TEXT,
+    cover_updated_at TIMESTAMP,
     completed_at TIMESTAMP,
     completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -31,6 +35,8 @@ CREATE TABLE IF NOT EXISTS destination_cover_cache (
     destination_label TEXT NOT NULL,
     image_url TEXT NOT NULL,
     source TEXT NOT NULL,
+    google_place_id TEXT,
+    google_photo_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

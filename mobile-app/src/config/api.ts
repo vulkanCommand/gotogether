@@ -50,7 +50,7 @@ export type ApiTripDetails = {
 
 export type ApiTripCoverResult = {
   image_url: string;
-  source: 'existing' | 'wikipedia' | 'openai';
+  source: string;
 };
 
 export type ApiDestinationBrief = {

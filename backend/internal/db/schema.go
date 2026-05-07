@@ -38,6 +38,10 @@ var schemaStatements = []string{
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`,
 	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS image_url TEXT`,
+	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS cover_photo_source TEXT`,
+	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS google_place_id TEXT`,
+	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS google_photo_name TEXT`,
+	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS cover_updated_at TIMESTAMP`,
 	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP`,
 	`ALTER TABLE trips ADD COLUMN IF NOT EXISTS completed_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
 	`CREATE TABLE IF NOT EXISTS destination_cover_cache (
@@ -46,9 +50,13 @@ var schemaStatements = []string{
 		destination_label TEXT NOT NULL,
 		image_url TEXT NOT NULL,
 		source TEXT NOT NULL,
+		google_place_id TEXT,
+		google_photo_name TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`,
+	`ALTER TABLE destination_cover_cache ADD COLUMN IF NOT EXISTS google_place_id TEXT`,
+	`ALTER TABLE destination_cover_cache ADD COLUMN IF NOT EXISTS google_photo_name TEXT`,
 	`CREATE TABLE IF NOT EXISTS trip_members (
 		id SERIAL PRIMARY KEY,
 		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
