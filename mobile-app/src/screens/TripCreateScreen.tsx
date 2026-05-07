@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { CommonActions } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -36,6 +37,7 @@ const parseTripDate = (value?: string) => {
   if (!value) {
     return null;
   }
+
   const parsed = new Date(`${value}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
@@ -43,6 +45,7 @@ const parseTripDate = (value?: string) => {
 const buildDateCells = (visibleMonth: Date): DateCell[] => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
   const firstOfMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1);
   const gridStart = new Date(firstOfMonth);
   gridStart.setDate(firstOfMonth.getDate() - firstOfMonth.getDay());
@@ -68,6 +71,7 @@ const monthLabel = (date: Date) =>
 const buildContinuousRange = (start: string, end: string) => {
   const firstDate = parseTripDate(start);
   const secondDate = parseTripDate(end);
+
   if (!firstDate || !secondDate) {
     return [];
   }
@@ -104,12 +108,15 @@ export default function TripCreateScreen({ navigation }: Props) {
   const [customName, setCustomName] = useState('');
   const [customRegion, setCustomRegion] = useState('');
   const [saving, setSaving] = useState(false);
+  const [creatingStage, setCreatingStage] = useState('');
 
   const dateCells = useMemo(() => buildDateCells(visibleMonth), [visibleMonth]);
+
   const firstAllowedMonth = useMemo(() => {
     const current = new Date();
     return new Date(current.getFullYear(), current.getMonth(), 1);
   }, []);
+
   const selectedDestination = useMemo(
     () => ({
       id: 'custom',
@@ -118,16 +125,20 @@ export default function TripCreateScreen({ navigation }: Props) {
     }),
     [customName, customRegion]
   );
+
   const canGoToPreviousMonth = visibleMonth > firstAllowedMonth;
 
   const travelRange = useMemo(() => {
     const active = [...selectedDates].sort((a, b) => a.localeCompare(b));
+
     if (active.length === 0) {
       return 'Select the trip dates';
     }
+
     if (active.length === 1) {
       return formatTripDate(active[0]);
     }
+
     return `${formatTripDate(active[0])} - ${formatTripDate(active[active.length - 1])}`;
   }, [selectedDates]);
 
@@ -135,6 +146,7 @@ export default function TripCreateScreen({ navigation }: Props) {
     const picked = parseTripDate(value);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
     if (!picked || picked < today) {
       return;
     }
@@ -151,6 +163,7 @@ export default function TripCreateScreen({ navigation }: Props) {
         updateSelectedDates([]);
         return;
       }
+
       updateSelectedDates(buildContinuousRange(active[0], value));
       return;
     }
@@ -165,7 +178,30 @@ export default function TripCreateScreen({ navigation }: Props) {
     });
   };
 
+  const goToTripOverviewAfterCreate = () => {
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 1,
+        routes: [
+          {
+            name: 'MainTabs',
+            params: {
+              screen: 'Home',
+            },
+          },
+          {
+            name: 'TripOverview',
+          },
+        ],
+      })
+    );
+  };
+
   const next = async () => {
+    if (saving) {
+      return;
+    }
+
     if (step === 0 && selectedDates.length === 0) {
       Alert.alert('Select dates', 'Choose a start day and an end day for the whole trip.');
       return;
@@ -184,6 +220,7 @@ export default function TripCreateScreen({ navigation }: Props) {
     const sortedDates = [...selectedDates].sort((a, b) => a.localeCompare(b));
     const startDate = sortedDates[0];
     const endDate = sortedDates[sortedDates.length - 1];
+
     if (!startDate || !endDate) {
       Alert.alert('Trip incomplete', 'Add the trip dates before creating the trip.');
       return;
@@ -191,6 +228,7 @@ export default function TripCreateScreen({ navigation }: Props) {
 
     try {
       setSaving(true);
+      setCreatingStage('Creating trip...');
 
       const created = await apiRequest<{ trip: ApiTrip }>('/api/trips', {
         method: 'POST',
@@ -214,44 +252,60 @@ export default function TripCreateScreen({ navigation }: Props) {
         votes: [],
       };
 
+      setCreatingStage('Fetching destination cover...');
+
+      let createdTripWithCover: ApiTrip = created.trip;
+
+      try {
+        const cover = await ensureTripCoverFromDestination(created.trip.id);
+
+        if (cover.image_url) {
+          createdTripWithCover = {
+            ...created.trip,
+            image_url: cover.image_url,
+          };
+        }
+      } catch (coverError) {
+        console.log('Destination cover generation failed', coverError);
+      }
+
       setSelectedDates(sortedDates);
       setBestMatchRange(travelRange);
       setDestinationOptions([destinationOption]);
       setSelectedDestinationId(destinationOption.id);
-      setCurrentTrip(created.trip);
+      setCurrentTrip(createdTripWithCover);
       setTripLead(crew[0] ?? null);
-      navigation.navigate('TripOverview');
 
-      ensureTripCoverFromDestination(created.trip.id)
-        .then((cover) => {
-          if (cover.image_url) {
-            setCurrentTrip({ ...created.trip, image_url: cover.image_url });
-          }
-        })
-        .catch((coverError) => {
-          console.log('Destination cover generation failed', coverError);
-        });
+      goToTripOverviewAfterCreate();
     } catch (error: any) {
       console.log('Create trip failed', error);
       Alert.alert('Trip creation failed', error?.message || 'Could not create the trip right now.');
     } finally {
       setSaving(false);
+      setCreatingStage('');
     }
   };
 
   const goBack = () => {
+    if (saving) {
+      return;
+    }
+
     if (step > 0) {
       setStep((current) => current - 1);
       return;
     }
+
     navigation.goBack();
   };
+
+  const ctaLabel = saving ? creatingStage || 'Creating...' : step < 2 ? 'Continue' : 'Create Trip';
 
   return (
     <View style={styles.screen}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <View style={styles.header}>
-          <Pressable onPress={goBack} style={styles.backButton}>
+          <Pressable onPress={goBack} style={styles.backButton} disabled={saving}>
             <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
           </Pressable>
           <Text style={styles.headerTitle}>Create Trip</Text>
@@ -281,10 +335,12 @@ export default function TripCreateScreen({ navigation }: Props) {
                       {done ? '✓' : index + 1}
                     </Text>
                   </View>
+
                   <Text style={[styles.stepperLabel, (done || active) && styles.stepperLabelActive]}>
                     {label}
                   </Text>
                 </View>
+
                 {index < steps.length - 1 ? (
                   <View style={[styles.stepperLine, done && styles.stepperLineActive]} />
                 ) : null}
@@ -296,18 +352,26 @@ export default function TripCreateScreen({ navigation }: Props) {
         {step === 0 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Select the trip dates</Text>
-            <Text style={styles.sectionMeta}>Pick the dates for the whole trip once, without individual availability collection.</Text>
+            <Text style={styles.sectionMeta}>
+              Pick the dates for the whole trip once, without individual availability collection.
+            </Text>
 
             <View style={styles.monthHeader}>
               <Pressable
                 onPress={() => shiftMonth(-1)}
-                disabled={!canGoToPreviousMonth}
+                disabled={!canGoToPreviousMonth || saving}
                 style={[styles.monthButton, !canGoToPreviousMonth && styles.monthButtonDisabled]}
               >
-                <Ionicons name="chevron-back" size={18} color={canGoToPreviousMonth ? colors.textPrimary : colors.textMuted} />
+                <Ionicons
+                  name="chevron-back"
+                  size={18}
+                  color={canGoToPreviousMonth ? colors.textPrimary : colors.textMuted}
+                />
               </Pressable>
+
               <Text style={styles.monthTitle}>{monthLabel(visibleMonth)}</Text>
-              <Pressable onPress={() => shiftMonth(1)} style={styles.monthButton}>
+
+              <Pressable onPress={() => shiftMonth(1)} style={styles.monthButton} disabled={saving}>
                 <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
               </Pressable>
             </View>
@@ -323,10 +387,11 @@ export default function TripCreateScreen({ navigation }: Props) {
             <View style={styles.calendarGrid}>
               {dateCells.map((cell) => {
                 const isSelected = selectedDates.includes(cell.value);
+
                 return (
                   <Pressable
                     key={cell.value}
-                    disabled={cell.isPast}
+                    disabled={cell.isPast || saving}
                     onPress={() => handleDatePress(cell.value)}
                     style={[
                       styles.dayButton,
@@ -335,11 +400,36 @@ export default function TripCreateScreen({ navigation }: Props) {
                       isSelected && styles.dayButtonSelected,
                     ]}
                   >
-                    <Text style={[styles.dayButtonText, !cell.isCurrentMonth && styles.outsideMonthText, cell.isPast && styles.disabledDayText, isSelected && styles.dayButtonTextSelected]}>{cell.day}</Text>
-                    <Text style={[styles.dayButtonMeta, !cell.isCurrentMonth && styles.outsideMonthText, cell.isPast && styles.disabledDayText, isSelected && styles.dayButtonTextSelected]}>
+                    <Text
+                      style={[
+                        styles.dayButtonText,
+                        !cell.isCurrentMonth && styles.outsideMonthText,
+                        cell.isPast && styles.disabledDayText,
+                        isSelected && styles.dayButtonTextSelected,
+                      ]}
+                    >
+                      {cell.day}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.dayButtonMeta,
+                        !cell.isCurrentMonth && styles.outsideMonthText,
+                        cell.isPast && styles.disabledDayText,
+                        isSelected && styles.dayButtonTextSelected,
+                      ]}
+                    >
                       {cell.weekday}
                     </Text>
-                    <Text style={[styles.dayButtonMonth, !cell.isCurrentMonth && styles.outsideMonthText, cell.isPast && styles.disabledDayText, isSelected && styles.dayButtonTextSelected]}>
+
+                    <Text
+                      style={[
+                        styles.dayButtonMonth,
+                        !cell.isCurrentMonth && styles.outsideMonthText,
+                        cell.isPast && styles.disabledDayText,
+                        isSelected && styles.dayButtonTextSelected,
+                      ]}
+                    >
                       {cell.month || ' '}
                     </Text>
                   </Pressable>
@@ -362,23 +452,29 @@ export default function TripCreateScreen({ navigation }: Props) {
         {step === 1 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Choose the destination</Text>
-            <Text style={styles.sectionMeta}>Type the exact destination. The trip cover will be fetched and saved after the trip is created.</Text>
+            <Text style={styles.sectionMeta}>
+              Type the exact destination. The trip cover will be fetched and saved after the trip is created.
+            </Text>
 
             <View style={styles.customDestinationCard}>
               <Text style={styles.customTitle}>Destination</Text>
+
               <TextInput
                 value={customName}
                 onChangeText={setCustomName}
                 placeholder="City, place, or area"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
+                editable={!saving}
               />
+
               <TextInput
                 value={customRegion}
                 onChangeText={setCustomRegion}
                 placeholder="Country or region"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
+                editable={!saving}
               />
             </View>
 
@@ -387,9 +483,12 @@ export default function TripCreateScreen({ navigation }: Props) {
                 <View style={styles.destinationPreviewIcon}>
                   <Ionicons name="location-outline" size={18} color={colors.accent} />
                 </View>
+
                 <View style={styles.destinationPreviewCopy}>
                   <Text style={styles.destinationPreviewTitle}>{customName.trim()}</Text>
-                  <Text style={styles.destinationPreviewMeta}>{customRegion.trim() || 'Region not specified'}</Text>
+                  <Text style={styles.destinationPreviewMeta}>
+                    {customRegion.trim() || 'Region not specified'}
+                  </Text>
                 </View>
               </View>
             ) : null}
@@ -399,7 +498,9 @@ export default function TripCreateScreen({ navigation }: Props) {
         {step === 2 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Review your trip</Text>
-            <Text style={styles.sectionMeta}>This is the final trip setup before you create the crew’s trip space.</Text>
+            <Text style={styles.sectionMeta}>
+              This is the final trip setup before you create the crew’s trip space.
+            </Text>
 
             <View style={styles.reviewCard}>
               <Text style={styles.reviewLabel}>Trip dates</Text>
@@ -418,7 +519,9 @@ export default function TripCreateScreen({ navigation }: Props) {
             <View style={styles.reviewCard}>
               <Text style={styles.reviewLabel}>Trip lead</Text>
               <Text style={styles.reviewValue}>{crew[0]?.name || user?.name || user?.email || 'You'}</Text>
-              <Text style={styles.reviewMeta}>The trip creator becomes the lead to keep the flow simple.</Text>
+              <Text style={styles.reviewMeta}>
+                The trip creator becomes the lead to keep the flow simple.
+              </Text>
             </View>
 
             <View style={styles.reviewCard}>
@@ -430,11 +533,16 @@ export default function TripCreateScreen({ navigation }: Props) {
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable onPress={next} style={styles.ctaButton}>
-          <Text style={styles.ctaText}>{saving ? 'Creating...' : step < 2 ? 'Continue' : 'Create Trip'}</Text>
+        <Pressable
+          onPress={next}
+          style={[styles.ctaButton, saving && styles.ctaButtonDisabled]}
+          disabled={saving}
+        >
+          <Text style={styles.ctaText}>{ctaLabel}</Text>
           <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
         </Pressable>
       </View>
+
       <AppFooter />
     </View>
   );
@@ -646,52 +754,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 20,
   },
-  destinationList: {
-    gap: spacing.md,
-  },
-  destinationCard: {
-    height: 132,
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  destinationCardSelected: {
-    borderWidth: 2,
-    borderColor: colors.accent,
-  },
-  destinationImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: undefined,
-    height: undefined,
-  },
-  destinationOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15,23,42,0.34)',
-  },
-  destinationContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    padding: spacing.lg,
-  },
-  destinationTitle: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  destinationRegion: {
-    marginTop: 4,
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 12,
-  },
-  selectedBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   customDestinationCard: {
     borderRadius: 18,
     backgroundColor: colors.surface,
@@ -788,6 +850,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     borderRadius: 20,
     paddingVertical: 18,
+  },
+  ctaButtonDisabled: {
+    opacity: 0.72,
   },
   ctaText: {
     color: '#FFFFFF',

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { colors } from '../theme/colors';
 
 const tabs = [
@@ -13,18 +14,29 @@ const tabs = [
   { name: 'Profile', icon: 'person-outline' },
 ] as const;
 
+type TabName = (typeof tabs)[number]['name'];
+
 const findActiveTab = (state: any): string => {
   if (!state?.routes?.length) {
     return '';
   }
 
   const currentRoute = state.routes[state.index ?? 0];
+
   if (!currentRoute) {
     return '';
   }
 
-  if (currentRoute.name === 'TripCompletion') {
+  if (currentRoute.name === 'TripOverview' || currentRoute.name === 'TripSetup' || currentRoute.name === 'Itinerary' || currentRoute.name === 'TripCompletion') {
     return 'Trips';
+  }
+
+  if (currentRoute.name === 'AddExpense') {
+    return 'Expenses';
+  }
+
+  if (currentRoute.name === 'Settings') {
+    return 'Profile';
   }
 
   if (tabs.some((tab) => tab.name === currentRoute.name)) {
@@ -33,12 +45,14 @@ const findActiveTab = (state: any): string => {
 
   if (currentRoute.state) {
     const nested = findActiveTab(currentRoute.state);
+
     if (nested) {
       return nested;
     }
   }
 
   const mainTabsRoute = state.routes.find((route: any) => route.name === 'MainTabs');
+
   if (mainTabsRoute?.state) {
     return findActiveTab(mainTabsRoute.state);
   }
@@ -55,6 +69,12 @@ export default function AppFooter() {
     return findActiveTab(navigationState);
   }, [navigationState]);
 
+  const goToTab = (tabName: TabName) => {
+    navigation.navigate('MainTabs', {
+      screen: tabName,
+    });
+  };
+
   return (
     <View
       style={[
@@ -67,12 +87,9 @@ export default function AppFooter() {
     >
       {tabs.map((tab) => {
         const selected = activeTab === tab.name;
+
         return (
-          <Pressable
-            key={tab.name}
-            style={styles.tab}
-            onPress={() => navigation.navigate('MainTabs', { screen: tab.name })}
-          >
+          <Pressable key={tab.name} style={styles.tab} onPress={() => goToTab(tab.name)}>
             <Ionicons name={tab.icon} size={26} color={selected ? colors.accent : colors.tabInactive} />
             <Text style={[styles.label, selected && styles.labelSelected]}>{tab.name}</Text>
           </Pressable>

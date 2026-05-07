@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,11 +7,10 @@ import { Ionicons } from '@expo/vector-icons';
 import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { isCompletedEvent, useTripStore } from '../store/tripStore';
-import { apiRequest, fetchTripDetails, tripCoverFileUrl } from '../config/api';
+import { apiRequest, ensureTripCoverFromDestination, fetchTripDetails, tripCoverFileUrl } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
-import { prototypeImages } from '../utils/prototypeAssets';
+import { spacing } from '../theme/spacing';
 import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripOverview'>;
@@ -33,10 +32,13 @@ export default function TripOverviewScreen({ navigation }: Props) {
   const token = useAuthStore((state) => state.token);
 
   const [loading, setLoading] = useState(false);
+  const [coverLoading, setCoverLoading] = useState(false);
+
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const itineraryDaysRef = useRef(itineraryDays);
   const hydratingRef = useRef(false);
   const hydrationRequestRef = useRef(0);
+  const coverRequestRef = useRef(0);
 
   useEffect(() => {
     itineraryDaysRef.current = itineraryDays;
@@ -53,20 +55,26 @@ export default function TripOverviewScreen({ navigation }: Props) {
     try {
       hydratingRef.current = true;
       setLoading(true);
+
       const [details, itinerary] = await Promise.all([
         fetchTripDetails(currentTrip.id),
-        apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`),
+        apiRequest<{ days: import('../store/tripStore').ItineraryDay[] }>(
+          `/api/trips/${currentTrip.id}/itinerary`
+        ),
       ]);
 
-      if (hydrationRequestRef.current != requestId) {
+      if (hydrationRequestRef.current !== requestId) {
         return;
       }
 
       const nextCrew = mapApiMembersToCrew(details.members);
+
       setCurrentTrip(details.trip);
       setCrew(nextCrew);
       setTripLead(nextCrew.find((member) => member.role === 'lead') ?? nextCrew[0] ?? null);
+
       const nextDays = Array.isArray(itinerary.days) ? itinerary.days : [];
+
       if (nextDays.length > 0) {
         setItineraryDays(nextDays);
       } else if (itineraryDaysRef.current.length === 0) {
@@ -93,6 +101,54 @@ export default function TripOverviewScreen({ navigation }: Props) {
     }, [hydrateTrip])
   );
 
+  useEffect(() => {
+    if (!currentTrip?.id) {
+      setCoverLoading(false);
+      return;
+    }
+
+    if (currentTrip.image_url) {
+      setCoverLoading(false);
+      return;
+    }
+
+    const requestId = coverRequestRef.current + 1;
+    coverRequestRef.current = requestId;
+
+    let cancelled = false;
+
+    const fetchCover = async () => {
+      try {
+        setCoverLoading(true);
+
+        const cover = await ensureTripCoverFromDestination(currentTrip.id);
+
+        if (cancelled || coverRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (cover.image_url) {
+          setCurrentTrip({
+            ...currentTrip,
+            image_url: cover.image_url,
+          });
+        }
+      } catch (error) {
+        console.log('Trip cover fetch failed', error);
+      } finally {
+        if (!cancelled && coverRequestRef.current === requestId) {
+          setCoverLoading(false);
+        }
+      }
+    };
+
+    void fetchCover();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTrip?.id, currentTrip?.image_url, setCurrentTrip]);
+
   const milestones = useMemo<Milestone[]>(
     () => [
       { label: 'Dates', done: Boolean(currentTrip?.start_date && currentTrip?.end_date) },
@@ -107,6 +163,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
     () => itineraryDays.reduce((sum, day) => sum + day.events.length, 0),
     [itineraryDays]
   );
+
   const completedEvents = useMemo(
     () =>
       itineraryDays.reduce(
@@ -115,6 +172,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
       ),
     [itineraryDays]
   );
+
   const progressPercent = totalEvents > 0 ? Math.round((completedEvents / totalEvents) * 100) : 0;
   const itineraryReady = milestones[milestones.length - 1]?.done;
   const canFinishTrip = Boolean(currentTrip && !currentTrip.completed_at && progressPercent === 100 && totalEvents > 0);
@@ -127,28 +185,59 @@ export default function TripOverviewScreen({ navigation }: Props) {
     }).start();
   }, [progressAnimation, progressPercent]);
 
+  const hasHeroImage = Boolean(currentTrip?.image_url && token);
+
   const heroSource =
     currentTrip?.image_url && token
-      ? { uri: tripCoverFileUrl(currentTrip.id), headers: { Authorization: `Bearer ${token}` }, cache: 'force-cache' }
-      : prototypeImages.tripHero;
+      ? {
+          uri: tripCoverFileUrl(currentTrip.id),
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'force-cache',
+        }
+      : null;
 
   const title = currentTrip?.name || 'Trip Overview';
   const destination = currentTrip?.destination || 'Destination pending';
   const travelRange = formatTripRange(currentTrip?.start_date, currentTrip?.end_date);
 
+  const goBack = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate('MainTabs', {
+      screen: 'Home',
+    });
+  };
+
   return (
     <View style={styles.screen}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <View style={styles.heroWrap}>
-          <Image source={heroSource as any} style={styles.heroImage} />
-          <View style={styles.heroOverlay} />
+          {hasHeroImage && heroSource ? (
+            <>
+              <Image source={heroSource as any} style={styles.heroImage} />
+              <View style={styles.heroOverlay} />
+            </>
+          ) : (
+            <View style={styles.heroLoading}>
+              <View style={styles.heroLoadingIcon}>
+                <ActivityIndicator color={colors.accent} size="large" />
+              </View>
+              <Text style={styles.heroLoadingTitle}>Preparing your trip cover</Text>
+              <Text style={styles.heroLoadingMeta}>
+                {coverLoading ? 'Fetching the destination image...' : 'Waiting for destination image...'}
+              </Text>
+            </View>
+          )}
 
-          <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={18} color="#FFFFFF" />
+          <Pressable onPress={goBack} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={18} color={hasHeroImage ? '#FFFFFF' : colors.textPrimary} />
           </Pressable>
 
           <View style={styles.heroCopy}>
-            <Text style={styles.heroTitle}>{title}</Text>
+            <Text style={[styles.heroTitle, !hasHeroImage && styles.heroTitleDark]}>{title}</Text>
           </View>
         </View>
 
@@ -157,6 +246,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
             <Text style={styles.metaText}>
               <Ionicons name="calendar-outline" size={12} color={colors.textSecondary} /> {travelRange}
             </Text>
+
             <Text style={styles.metaText}>
               <Ionicons name="location-outline" size={12} color={colors.textSecondary} /> {destination}
             </Text>
@@ -170,11 +260,13 @@ export default function TripOverviewScreen({ navigation }: Props) {
                 </View>
               ))}
             </View>
+
             <Text style={styles.crewMeta}>{crew.length} members</Text>
           </View>
 
           <View style={styles.progressCard}>
             <Text style={styles.progressTitle}>Trip Progress</Text>
+
             <View style={styles.milestoneRow}>
               {milestones.map((milestone, index) => (
                 <View key={milestone.label} style={styles.milestoneItem}>
@@ -186,10 +278,12 @@ export default function TripOverviewScreen({ navigation }: Props) {
                         <Text style={styles.milestoneNumber}>{index + 1}</Text>
                       )}
                     </View>
+
                     {index < milestones.length - 1 ? (
                       <View style={[styles.milestoneLine, milestone.done && styles.milestoneLineDone]} />
                     ) : null}
                   </View>
+
                   <Text style={[styles.milestoneLabel, milestone.done && styles.milestoneLabelDone]}>
                     {milestone.label}
                   </Text>
@@ -202,9 +296,12 @@ export default function TripOverviewScreen({ navigation }: Props) {
                 <View style={styles.progressSummaryRow}>
                   <Text style={styles.progressPercent}>{progressPercent}%</Text>
                   <Text style={styles.progressSummaryText}>
-                    {totalEvents > 0 ? `${completedEvents} of ${totalEvents} events completed` : 'Add events to start trip progress'}
+                    {totalEvents > 0
+                      ? `${completedEvents} of ${totalEvents} events completed`
+                      : 'Add events to start trip progress'}
                   </Text>
                 </View>
+
                 <View style={styles.progressTrack}>
                   <Animated.View
                     style={[
@@ -218,6 +315,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
                     ]}
                   />
                 </View>
+
                 {canFinishTrip ? (
                   <Pressable style={styles.finishTripButton} onPress={() => navigation.navigate('TripCompletion')}>
                     <Text style={styles.finishTripButtonText}>Finish the Trip</Text>
@@ -255,6 +353,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
           </View>
         </View>
       </ScrollView>
+
       <AppFooter />
     </View>
   );
@@ -275,6 +374,40 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 224,
   },
+  heroLoading: {
+    width: '100%',
+    height: 224,
+    backgroundColor: '#EEF4FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  heroLoadingIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    shadowColor: colors.shadowStrong,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  heroLoadingTitle: {
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  heroLoadingMeta: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15,23,42,0.34)',
@@ -286,7 +419,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.78)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -304,6 +437,10 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(15,23,42,0.38)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 10,
+  },
+  heroTitleDark: {
+    color: colors.textPrimary,
+    textShadowColor: 'transparent',
   },
   body: {
     marginTop: -36,
