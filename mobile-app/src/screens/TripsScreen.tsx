@@ -24,6 +24,7 @@ import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator
 import {
   ApiTrip,
   deleteTrip,
+  ensureTripCoverFromDestination,
   fetchTripDetails,
   fetchTrips,
   tripCoverFileUrl,
@@ -208,9 +209,11 @@ export default function TripsScreen({ navigation, route }: Props) {
 
     try {
       setSaving(true);
+      const nextDestination = tripDestination.trim();
+      const destinationChanged = nextDestination.toLowerCase() !== (editingTrip.destination || '').trim().toLowerCase();
       await updateTrip(editingTrip.id, {
         name: tripName.trim(),
-        destination: tripDestination.trim(),
+        destination: nextDestination,
         start_date: formatDateValue(tripStartDate),
         end_date: formatDateValue(tripEndDate.getTime() < tripStartDate.getTime() ? tripStartDate : tripEndDate),
       });
@@ -220,13 +223,34 @@ export default function TripsScreen({ navigation, route }: Props) {
             ? {
                 ...trip,
                 name: tripName.trim(),
-                destination: tripDestination.trim(),
+                destination: nextDestination,
                 start_date: formatDateValue(tripStartDate),
                 end_date: formatDateValue(tripEndDate.getTime() < tripStartDate.getTime() ? tripStartDate : tripEndDate),
               }
             : trip
         )
       );
+      if (destinationChanged) {
+        ensureTripCoverFromDestination(editingTrip.id)
+          .then((cover) => {
+            if (!cover.image_url) {
+              return;
+            }
+            setTrips((current) =>
+              current.map((trip) =>
+                trip.id === editingTrip.id
+                  ? {
+                      ...trip,
+                      image_url: cover.image_url,
+                    }
+                  : trip
+              )
+            );
+          })
+          .catch((error) => {
+            console.log('Trip cover refresh failed after destination update', error);
+          });
+      }
       closeManageModal();
     } catch (error: any) {
       Alert.alert('Update failed', error?.message || 'Could not update the trip right now.');

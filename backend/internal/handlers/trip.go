@@ -160,6 +160,7 @@ func CreateTrip(c *gin.Context) {
 		return
 	}
 
+	refreshTripCoverInBackground(trip.ID, userID, false)
 	c.JSON(http.StatusCreated, gin.H{"message": "trip created", "trip": trip})
 }
 
@@ -415,24 +416,24 @@ func GetTripByID(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"trip": gin.H{
-			"id":                    trip.ID,
-			"name":                  trip.Name,
-			"destination":           trip.Destination,
-			"start_date":            trip.StartDate,
-			"end_date":              trip.EndDate,
-			"created_by":            trip.CreatedBy,
-			"members_count":         membersCount,
-			"image_url":             trip.ImageURL,
-			"completed_at":          trip.CompletedAt,
-			"viewer_role":           trip.ViewerRole,
-			"lead_user_id":          trip.LeadUserID,
-			"setup_completed_count": trip.SetupCompletedCount,
-			"setup_pending_count":         trip.SetupPendingCount,
-			"setup_required":              trip.SetupRequired,
-			"readiness_status":            trip.ReadinessStatus,
-			"completion_confirmed_count":  trip.CompletionConfirmedCount,
-			"completion_pending_count":    trip.CompletionPendingCount,
-			"completion_requested":        trip.CompletionRequested,
+			"id":                         trip.ID,
+			"name":                       trip.Name,
+			"destination":                trip.Destination,
+			"start_date":                 trip.StartDate,
+			"end_date":                   trip.EndDate,
+			"created_by":                 trip.CreatedBy,
+			"members_count":              membersCount,
+			"image_url":                  trip.ImageURL,
+			"completed_at":               trip.CompletedAt,
+			"viewer_role":                trip.ViewerRole,
+			"lead_user_id":               trip.LeadUserID,
+			"setup_completed_count":      trip.SetupCompletedCount,
+			"setup_pending_count":        trip.SetupPendingCount,
+			"setup_required":             trip.SetupRequired,
+			"readiness_status":           trip.ReadinessStatus,
+			"completion_confirmed_count": trip.CompletionConfirmedCount,
+			"completion_pending_count":   trip.CompletionPendingCount,
+			"completion_requested":       trip.CompletionRequested,
 		},
 		"members": members,
 		"permissions": gin.H{
@@ -480,6 +481,12 @@ func UpdateTrip(c *gin.Context) {
 	}
 	defer rollbackQuietly(tx)
 
+	var previousDestination string
+	if err := tx.QueryRow(`SELECT COALESCE(destination, '') FROM trips WHERE id = $1`, tripID).Scan(&previousDestination); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load current trip destination", "details": err.Error()})
+		return
+	}
+
 	if _, err := tx.Exec(`
 		UPDATE trips
 		SET name = $2, destination = $3, start_date = $4, end_date = $5
@@ -496,6 +503,10 @@ func UpdateTrip(c *gin.Context) {
 
 	if !commitOrRespond(c, tx) {
 		return
+	}
+
+	if !strings.EqualFold(strings.TrimSpace(previousDestination), strings.TrimSpace(req.Destination)) {
+		refreshTripCoverInBackground(tripID, userID, true)
 	}
 
 	createUserNotification(userID, tripID, "Trip updated", req.Name+" was updated.", "alert", false, "", 0, userID)
