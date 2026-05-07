@@ -19,6 +19,192 @@ type Props = CompositeScreenProps<
   NativeStackScreenProps<RootStackParamList>
 >;
 
+type HomeActivityItem = {
+  id: number | string;
+  title: string;
+  body: string;
+};
+
+function cleanText(value: string) {
+  return value.replace(/\s+/g, ' ').replace(/[.]+$/g, '').trim();
+}
+
+function getNotificationTimestamp(item: ApiNotification) {
+  return (item as any).createdAt || (item as any).created_at || (item as any).created_at_text || '';
+}
+
+function formatActivityTimestamp(value?: string) {
+  if (!value) {
+    return '';
+  }
+
+  const parsedDate = new Date(value);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return '';
+  }
+
+  const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+  const day = String(parsedDate.getDate()).padStart(2, '0');
+  const year = parsedDate.getFullYear();
+
+  let hours = parsedDate.getHours();
+  const minutes = String(parsedDate.getMinutes()).padStart(2, '0');
+  const period = hours >= 12 ? 'PM' : 'AM';
+
+  hours = hours % 12;
+  hours = hours === 0 ? 12 : hours;
+
+  return `${month}/${day}/${year} ${hours}:${minutes}${period}`;
+}
+
+function appendTimestamp(body: string, value?: string) {
+  const timestamp = formatActivityTimestamp(value);
+
+  if (!timestamp) {
+    return body;
+  }
+
+  return `${body} ${timestamp}`;
+}
+
+function extractEventNameFromTargetTitle(targetTitle?: string) {
+  if (!targetTitle) {
+    return '';
+  }
+
+  const parts = targetTitle
+    .split('-')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return parts[parts.length - 1] || targetTitle.trim();
+}
+
+function extractEventNameFromAddedTitle(title: string) {
+  const match = title.match(/^(.+?)\s+added\s+to\s+events$/i);
+  return cleanText(match?.[1] || '');
+}
+
+function extractActorFromAddedBody(body: string) {
+  const match = body.match(/^event\s+added\s+by\s+(.+)$/i);
+  return cleanText(match?.[1] || '');
+}
+
+function normalizeActivityNotification(item: ApiNotification): HomeActivityItem {
+  const rawTitle = cleanText(String(item.title || ''));
+  const rawBody = cleanText(String(item.body || ''));
+  const targetEventName = extractEventNameFromTargetTitle(item.targetTitle);
+  const timestampValue = getNotificationTimestamp(item);
+
+  const titleLower = rawTitle.toLowerCase();
+  const bodyLower = rawBody.toLowerCase();
+
+  const isEventCompleted =
+    titleLower.includes('event completed') ||
+    (bodyLower.includes(' marked ') && bodyLower.includes(' complete')) ||
+    (bodyLower.includes(' marked ') && bodyLower.includes(' completed')) ||
+    bodyLower.includes(' was completed') ||
+    bodyLower.endsWith(' completed');
+
+  if (isEventCompleted) {
+    const markedCompleteMatch =
+      rawBody.match(/^(.+?)\s+marked\s+(.+?)\s+complete$/i) ||
+      rawBody.match(/^(.+?)\s+marked\s+(.+?)\s+completed$/i);
+
+    if (markedCompleteMatch) {
+      const actorName = cleanText(markedCompleteMatch[1] || 'Someone');
+      const eventName = cleanText(markedCompleteMatch[2] || targetEventName || 'Event');
+
+      return {
+        id: item.id,
+        title: `${eventName} Event Completed`,
+        body: appendTimestamp(`${actorName} marked as completed`, timestampValue),
+      };
+    }
+
+    const completedBodyMatch = rawBody.match(/^(.+?)\s+(?:was\s+)?completed$/i);
+
+    if (completedBodyMatch) {
+      const eventName = cleanText(completedBodyMatch[1] || targetEventName || 'Event');
+
+      return {
+        id: item.id,
+        title: `${eventName} Event Completed`,
+        body: appendTimestamp('Someone marked as completed', timestampValue),
+      };
+    }
+
+    return {
+      id: item.id,
+      title: `${targetEventName || 'Event'} Event Completed`,
+      body: appendTimestamp(rawBody || 'Someone marked as completed', timestampValue),
+    };
+  }
+
+  const isEventAdded =
+    titleLower.includes('event added') ||
+    titleLower.includes('added event') ||
+    titleLower.includes('new event') ||
+    titleLower.includes('added to events') ||
+    bodyLower.includes(' added ') ||
+    bodyLower.includes(' created ') ||
+    bodyLower.includes(' was added to the trip plan') ||
+    bodyLower.startsWith('event added by');
+
+  if (isEventAdded) {
+    const eventNameFromTitle = extractEventNameFromAddedTitle(rawTitle);
+    const actorNameFromBody = extractActorFromAddedBody(rawBody);
+
+    if (eventNameFromTitle || actorNameFromBody) {
+      return {
+        id: item.id,
+        title: `${eventNameFromTitle || targetEventName || 'Event'} added to Events`,
+        body: appendTimestamp(`Event added by ${actorNameFromBody || 'You'}`, timestampValue),
+      };
+    }
+
+    const wasAddedMatch = rawBody.match(/^(.+?)\s+was\s+added\s+to\s+the\s+trip\s+plan$/i);
+
+    if (wasAddedMatch) {
+      const eventName = cleanText(wasAddedMatch[1] || targetEventName || 'Event');
+
+      return {
+        id: item.id,
+        title: `${eventName} added to Events`,
+        body: appendTimestamp('Event added by You', timestampValue),
+      };
+    }
+
+    const addedByPersonMatch =
+      rawBody.match(/^(.+?)\s+added\s+(.+?)(?:\s+to\s+.+)?$/i) ||
+      rawBody.match(/^(.+?)\s+created\s+(.+?)(?:\s+to\s+.+|\s+on\s+.+|\s+for\s+.+)?$/i);
+
+    if (addedByPersonMatch) {
+      const actorName = cleanText(addedByPersonMatch[1] || 'You');
+      const eventName = cleanText(addedByPersonMatch[2] || targetEventName || 'Event');
+
+      return {
+        id: item.id,
+        title: `${eventName} added to Events`,
+        body: appendTimestamp(`Event added by ${actorName}`, timestampValue),
+      };
+    }
+
+    return {
+      id: item.id,
+      title: `${targetEventName || rawTitle || 'Event'} added to Events`,
+      body: appendTimestamp('Event added by You', timestampValue),
+    };
+  }
+
+  return {
+    id: item.id,
+    title: rawTitle || 'Trip activity',
+    body: appendTimestamp(rawBody || 'New activity was added', timestampValue),
+  };
+}
+
 export default function HomeScreen({ navigation }: Props) {
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
@@ -37,11 +223,14 @@ export default function HomeScreen({ navigation }: Props) {
       if (showSpinner) {
         setLoading(true);
       }
+
       const [tripResponse, notificationResponse] = await Promise.all([fetchTrips(), fetchNotifications()]);
       const nextTrips = Array.isArray(tripResponse.trips) ? tripResponse.trips : [];
       const nextPrimaryTrip = pickPrimaryTrip(nextTrips);
+
       setTrips(nextTrips);
       setNotifications(Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : []);
+
       if (nextPrimaryTrip?.id) {
         try {
           const itineraryResponse = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${nextPrimaryTrip.id}/itinerary`);
@@ -53,6 +242,7 @@ export default function HomeScreen({ navigation }: Props) {
       } else {
         setPrimaryTripItinerary([]);
       }
+
       hasLoadedRef.current = true;
     } catch (error) {
       console.log('Home load failed', error);
@@ -76,29 +266,36 @@ export default function HomeScreen({ navigation }: Props) {
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
+
     if (hour < 12) {
       return 'Good morning';
     }
+
     if (hour < 18) {
       return 'Good afternoon';
     }
+
     return 'Good evening';
   }, []);
 
   const primaryTrip = useMemo(() => pickPrimaryTrip(trips), [trips]);
+
   const upcomingTrips = useMemo(
     () => trips.filter((trip) => trip.id !== primaryTrip?.id && isTripUpcoming(trip)).slice(0, 4),
     [primaryTrip?.id, trips]
   );
+
   const showNextEvent = Boolean(primaryTrip && isTripActive(primaryTrip));
 
   const openTrip = async (trip: ApiTrip) => {
     try {
       const details = await fetchTripDetails(trip.id);
       const crew = mapApiMembersToCrew(details.members);
+
       setCurrentTrip(details.trip);
       setCrew(crew);
       setTripLead(crew.find((member) => member.role === 'lead') ?? crew[0] ?? null);
+
       navigation.navigate('TripOverview');
     } catch (error) {
       console.log('Open trip failed', error);
@@ -106,7 +303,11 @@ export default function HomeScreen({ navigation }: Props) {
   };
 
   const activityItems = useMemo(
-    () => notifications.filter((item) => !item.requiresAction).slice(0, 3),
+    () =>
+      notifications
+        .filter((item) => !item.requiresAction)
+        .slice(0, 3)
+        .map(normalizeActivityNotification),
     [notifications]
   );
 
@@ -114,16 +315,22 @@ export default function HomeScreen({ navigation }: Props) {
     return primaryTripItinerary
       .flatMap((day) =>
         day.events.map((event) => {
-          // Use the actual event title for completed events rather than a generic label.
           const statusLabel = isCompletedEvent(event)
-            ? `${event.title} completed`
+            ? `${event.title} Event Completed`
             : event.status === 'active'
-              ? `${event.title} in progress`
-              : `${event.title} upcoming`;
+              ? `${event.title} In Progress`
+              : `${event.title} Upcoming`;
+
+          const bodyLabel = isCompletedEvent(event)
+            ? 'Someone marked as completed'
+            : event.status === 'active'
+              ? `${day.title} • ${event.time}`
+              : `${day.title} • ${event.time}`;
+
           return {
             id: `${day.id}-${event.id}`,
             title: statusLabel,
-            body: `${event.title} • ${day.title} • ${event.time}`,
+            body: bodyLabel,
           };
         })
       )
@@ -133,19 +340,24 @@ export default function HomeScreen({ navigation }: Props) {
   const nextEvent = useMemo(() => {
     for (const day of primaryTripItinerary) {
       const activeEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'active');
+
       if (activeEvent) {
         return { day, event: activeEvent };
       }
+
       const upcomingEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'upcoming');
+
       if (upcomingEvent) {
         return { day, event: upcomingEvent };
       }
     }
+
     return null;
   }, [primaryTripItinerary]);
 
   const openLocationOptions = async (query: string) => {
     const trimmedQuery = query.trim();
+
     if (!trimmedQuery) {
       return;
     }
@@ -191,6 +403,7 @@ export default function HomeScreen({ navigation }: Props) {
             <Pressable onPress={() => navigation.navigate('CreateGroup')} style={styles.headerButton}>
               <Ionicons name="add" size={21} color={colors.accent} />
             </Pressable>
+
             <Pressable onPress={() => navigation.navigate('Notifications')} style={styles.headerButton}>
               <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
               {notifications.length > 0 ? <View style={styles.dot} /> : null}
@@ -217,6 +430,7 @@ export default function HomeScreen({ navigation }: Props) {
               <View style={styles.statusPill}>
                 <Text style={styles.statusPillText}>{tripTimelineStatus(primaryTrip)}</Text>
               </View>
+
               <Text style={styles.activeTitle}>{primaryTrip.name}</Text>
               <Text style={styles.activeMeta}>
                 {formatTripRange(primaryTrip.start_date, primaryTrip.end_date)} · {primaryTrip.members_count ?? 1} members
@@ -265,10 +479,13 @@ export default function HomeScreen({ navigation }: Props) {
                   <View style={styles.nextEventBadge}>
                     <Text style={styles.nextEventBadgeText}>{nextEvent.day.title}</Text>
                   </View>
+
                   <Text style={styles.nextEventTime}>{nextEvent.event.time}</Text>
                 </View>
+
                 <Text style={styles.nextEventTitle}>{nextEvent.event.title}</Text>
                 <Text style={styles.nextEventMeta}>{nextEvent.event.notes || nextEvent.event.location}</Text>
+
                 <Pressable style={styles.locationButton} onPress={() => openLocationOptions(nextEvent.event.location)}>
                   <Ionicons name="location-outline" size={16} color={colors.accent} />
                   <Text style={styles.locationButtonText}>Maps</Text>
@@ -285,6 +502,7 @@ export default function HomeScreen({ navigation }: Props) {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
+
           <View style={styles.activityList}>
             {activityItems.length > 0 ? (
               activityItems.map((item) => (
@@ -292,6 +510,7 @@ export default function HomeScreen({ navigation }: Props) {
                   <View style={styles.activityAvatar}>
                     <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
                   </View>
+
                   <View style={styles.activityCopy}>
                     <Text style={styles.activityText}>{item.title}</Text>
                     <Text style={styles.activitySubtext}>{item.body}</Text>
@@ -304,6 +523,7 @@ export default function HomeScreen({ navigation }: Props) {
                   <View style={styles.activityAvatar}>
                     <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
                   </View>
+
                   <View style={styles.activityCopy}>
                     <Text style={styles.activityText}>{item.title}</Text>
                     <Text style={styles.activitySubtext}>{item.body}</Text>
@@ -315,6 +535,7 @@ export default function HomeScreen({ navigation }: Props) {
                 <View style={styles.activityAvatar}>
                   <Text style={styles.activityAvatarText}>T</Text>
                 </View>
+
                 <View style={styles.activityCopy}>
                   <Text style={styles.activityText}>Trip activity will appear here</Text>
                   <Text style={styles.activitySubtext}>New events, expenses, and updates will show up as your crew uses the app.</Text>
@@ -324,7 +545,6 @@ export default function HomeScreen({ navigation }: Props) {
           </View>
         </View>
       </ScrollView>
-
     </View>
   );
 }

@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { getIdToken, onIdTokenChanged } from '@react-native-firebase/auth';
 import AppNavigator from './src/navigation/AppNavigator';
 import { RootStackParamList } from './src/navigation/AppNavigator';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { colors } from './src/theme/colors';
 import { firebaseAuth } from './src/config/firebase';
 import { useAuthStore } from './src/store/authStore';
@@ -107,13 +108,15 @@ function PushBootstrap() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <NavigationContainer theme={navTheme} ref={navigationRef}>
-        <AuthBootstrap />
-        <PushBootstrap />
-        <StatusBar style="dark" />
-        <AppNavigator />
-      </NavigationContainer>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <NavigationContainer theme={navTheme} ref={navigationRef}>
+          <AuthBootstrap />
+          <PushBootstrap />
+          <StatusBar style="dark" />
+          <AppNavigator />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
