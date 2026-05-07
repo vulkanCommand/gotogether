@@ -2,8 +2,10 @@ import React from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { NavigatorScreenParams } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
+import AppFooter from '../components/AppFooter';
 
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -30,9 +32,7 @@ export type RootStackParamList = {
   Login: undefined;
   CompleteProfile: undefined;
   PermissionsSetup: undefined;
-  MainTabs: {
-    screen?: keyof MainTabParamList;
-  } | undefined;
+  MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
   CreateGroup: undefined;
   TripCreate: undefined;
   TripOverview: undefined;
@@ -46,7 +46,7 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   Home: undefined;
-  Trips: undefined;
+  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed' } | undefined;
   Live: undefined;
   Expenses: undefined;
   Profile: undefined;
@@ -58,6 +58,7 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 function MainTabs() {
   return (
     <Tab.Navigator
+      tabBar={() => <AppFooter />}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
@@ -161,24 +162,38 @@ export default function AppNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {token && user ? (
         !user.profile_complete ? (
+          // New users must complete their profile and then grant permissions before reaching the main app.
           <>
             <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
             <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
+            <Stack.Screen name="TripCreate" component={TripCreateScreen} />
+            <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
+            <Stack.Screen name="TripSetup" component={TripSetupScreen} />
+            <Stack.Screen name="Itinerary" component={ItineraryScreen} />
+            <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
+            <Stack.Screen name="TripCompletion" component={TripCompletionScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
           </>
         ) : (
-        <>
-          <Stack.Screen name="MainTabs" component={MainTabs} />
-          <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
-          <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
-          <Stack.Screen name="TripCreate" component={TripCreateScreen} />
-          <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
-          <Stack.Screen name="TripSetup" component={TripSetupScreen} />
-          <Stack.Screen name="Itinerary" component={ItineraryScreen} />
-          <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
-          <Stack.Screen name="TripCompletion" component={TripCompletionScreen} />
-          <Stack.Screen name="Settings" component={SettingsScreen} />
-          <Stack.Screen name="Notifications" component={NotificationsScreen} />
-        </>
+          // Returning users are directed through the permissions setup before the main tabs so that
+          // required permissions are always granted.  Once permissions are accepted, the screen
+          // navigates to MainTabs and is not shown again until the app is reinstalled.
+          <>
+            <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
+            <Stack.Screen name="TripCreate" component={TripCreateScreen} />
+            <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
+            <Stack.Screen name="TripSetup" component={TripSetupScreen} />
+            <Stack.Screen name="Itinerary" component={ItineraryScreen} />
+            <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
+            <Stack.Screen name="TripCompletion" component={TripCompletionScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          </>
         )
       ) : (
         <>

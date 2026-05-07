@@ -83,12 +83,12 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen showFooter>
+    <Screen showFooter showBackButton>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <SectionTitle title="Settings" subtitle="Account actions and permission shortcuts." action={<NotificationBell />} />
 
-        <PrimaryButton title="Grant permissions again" variant="secondary" onPress={() => navigation.navigate('PermissionsSetup')} />
-        <PrimaryButton title="Refresh friends" variant="secondary" onPress={refreshFriends} />
+        {/* Permissions are requested automatically on app launch; no need to show a manual grant option */}
+        {/* Removed refresh friends here; it now lives on the contact search page */}
         <PrimaryButton title="Sign out" variant="secondary" onPress={handleSignOut} />
         <PrimaryButton title="Delete account" variant="secondary" onPress={handleDeleteAccount} />
       </ScrollView>

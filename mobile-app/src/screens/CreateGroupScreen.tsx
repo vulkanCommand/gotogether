@@ -1,19 +1,25 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View, Linking } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
 import { useFriendStore } from '../store/friendStore';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { syncDeviceContacts } from '../config/api';
+import { fetchFriends, sendSMSInvite, syncDeviceContacts } from '../config/api';
+import { collectDeviceContactLookupPayload, DeviceInviteContact } from '../utils/contacts';
+import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
 
 export default function CreateGroupScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const setCrew = useTripStore((state) => state.setCrew);
   const friends = useFriendStore((state) => state.friends);
   const setFriends = useFriendStore((state) => state.setFriends);
@@ -21,6 +27,36 @@ export default function CreateGroupScreen({ navigation }: Props) {
 
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [inviting, setInviting] = useState(false);
+  const [syncingFriends, setSyncingFriends] = useState(false);
+  const [deviceContacts, setDeviceContacts] = useState<DeviceInviteContact[]>([]);
+
+  const refreshFriends = useCallback(async () => {
+    try {
+      setSyncingFriends(true);
+      const contacts = await collectDeviceContactLookupPayload();
+      setDeviceContacts(contacts.contacts);
+      if (contacts.granted) {
+        await syncDeviceContacts({
+          emails: contacts.emails,
+          phones: contacts.phones,
+        });
+      }
+
+      const response = await fetchFriends();
+      setFriends(response.friends);
+    } catch (error) {
+      console.log('Auto friend sync failed', error);
+    } finally {
+      setSyncingFriends(false);
+    }
+  }, [setFriends]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshFriends();
+    }, [refreshFriends])
+  );
 
   const filteredFriends = useMemo(() => {
     const value = search.trim().toLowerCase();
@@ -29,7 +65,7 @@ export default function CreateGroupScreen({ navigation }: Props) {
     }
 
     return friends.filter((friend) =>
-      `${friend.name} ${friend.email} ${friend.username}`.toLowerCase().includes(value)
+      `${friend.name} ${friend.email} ${friend.username} ${friend.phone}`.toLowerCase().includes(value)
     );
   }, [friends, search]);
 
@@ -37,6 +73,34 @@ export default function CreateGroupScreen({ navigation }: Props) {
     () => friends.filter((friend) => selectedIds.includes(friend.id)),
     [friends, selectedIds]
   );
+
+  const inviteCandidates = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const friendEmailSet = new Set(friends.map((friend) => friend.email?.trim().toLowerCase()).filter(Boolean));
+    const friendPhoneSet = new Set(friends.map((friend) => formatPhoneForFirebase(friend.phone)).filter(Boolean));
+
+    return deviceContacts
+      .filter((contact) => {
+        const hasUnsyncedChannel =
+          contact.emails.some((email) => !friendEmailSet.has(email)) ||
+          contact.phones.some((phone) => !friendPhoneSet.has(phone));
+        if (!hasUnsyncedChannel) {
+          return false;
+        }
+        if (!normalizedSearch) {
+          return false;
+        }
+
+        return `${contact.name} ${contact.emails.join(' ')} ${contact.phones.join(' ')}`
+          .toLowerCase()
+          .includes(normalizedSearch);
+      })
+      .map((contact) => ({
+        ...contact,
+        invitePhone: contact.phones.find((phone) => !friendPhoneSet.has(phone)) || '',
+      }))
+      .filter((contact) => Boolean(contact.invitePhone));
+  }, [deviceContacts, friends, search]);
 
   const toggle = (id: number) => {
     setSelectedIds((current) =>
@@ -50,10 +114,35 @@ export default function CreateGroupScreen({ navigation }: Props) {
       return;
     }
     try {
-      const response = await syncDeviceContacts({ emails: [email], phones: [] });
+      await syncDeviceContacts({ emails: [email], phones: [] });
+      const response = await fetchFriends();
       setFriends(response.friends);
     } catch (error) {
       console.log('Manual friend connect failed', error);
+    }
+  };
+
+  const normalizedInvitePhone = useMemo(() => formatPhoneForFirebase(search), [search]);
+  const canInviteBySMS = normalizedInvitePhone.length > 0;
+
+  const inviteBySMS = async () => {
+    if (!canInviteBySMS) {
+      return;
+    }
+
+    try {
+      setInviting(true);
+      // Use the device SMS composer directly.  On some deployments the
+      // backend provider for SMS is not configured, so attempting to send
+      // invites via the API fails.  Using a deep link into the default
+      // messenger app bypasses that requirement and provides a better UX.
+      const smsUrl = `sms:${normalizedInvitePhone}`;
+      await Linking.openURL(smsUrl);
+      Alert.alert('Invite', `Use your messaging app to send an invite to ${formatPhoneForDisplay(normalizedInvitePhone)}.`);
+    } catch (error: any) {
+      Alert.alert('Invite failed', error?.message || 'Could not open the SMS composer right now.');
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -119,7 +208,13 @@ export default function CreateGroupScreen({ navigation }: Props) {
             placeholderTextColor={colors.textMuted}
             style={styles.searchInput}
           />
+          {/* small refresh button to re-sync contacts and friends */}
+          <Pressable onPress={() => void refreshFriends()} style={styles.refreshButton} hitSlop={8}>
+            <Ionicons name="refresh" size={18} color={colors.textMuted} />
+          </Pressable>
         </View>
+
+        {syncingFriends ? <Text style={styles.syncingText}>Syncing contacts and friends...</Text> : null}
 
         <View style={styles.list}>
           {filteredFriends.map((friend) => {
@@ -146,15 +241,60 @@ export default function CreateGroupScreen({ navigation }: Props) {
             );
           })}
 
+          {inviteCandidates.length > 0 ? (
+            <View style={styles.inviteSection}>
+              <Text style={styles.inviteSectionTitle}>Invite contacts to the app</Text>
+              {inviteCandidates.map((contact) => (
+                <View key={contact.id} style={styles.inviteRow}>
+                  <View style={styles.friendAvatar}>
+                    <Text style={styles.friendAvatarText}>
+                      {contact.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.inviteCopy}>
+                    <Text style={styles.friendName}>{contact.name}</Text>
+                    <Text style={styles.inviteMeta}>{formatPhoneForDisplay(contact.invitePhone)}</Text>
+                  </View>
+                  <Pressable
+                    onPress={async () => {
+                      try {
+                        setInviting(true);
+                        // Open SMS composer for the selected contact instead of calling the backend.  This
+                        // avoids the “sms provider is not configured” error.
+                        const smsUrl = `sms:${contact.invitePhone}`;
+                        await Linking.openURL(smsUrl);
+                        Alert.alert('Invite', `Use your messaging app to send an invite to ${formatPhoneForDisplay(contact.invitePhone)}.`);
+                      } catch (error: any) {
+                        Alert.alert('Invite failed', error?.message || 'Could not open the SMS composer right now.');
+                      } finally {
+                        setInviting(false);
+                      }
+                    }}
+                    style={styles.inlineInviteButton}
+                  >
+                    <Text style={styles.inlineInviteButtonText}>{inviting ? 'Sending...' : 'Invite'}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           {filteredFriends.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>No friends found</Text>
               <Text style={styles.emptyCopy}>
-                Search for a connected friend, or continue with just your own trip crew for now.
+                Search for a connected friend, or invite one of your contacts if they have not joined yet.
               </Text>
               {search.trim().includes('@') ? (
                 <Pressable onPress={connectByEmail} style={styles.connectButton}>
                   <Text style={styles.connectButtonText}>Connect {search.trim()}</Text>
+                </Pressable>
+              ) : null}
+              {canInviteBySMS ? (
+                <Pressable onPress={inviteBySMS} style={styles.connectButton}>
+                  <Text style={styles.connectButtonText}>
+                    {inviting ? 'Sending SMS...' : `Invite ${formatPhoneForDisplay(normalizedInvitePhone)}`}
+                  </Text>
                 </Pressable>
               ) : null}
             </View>
@@ -163,12 +303,13 @@ export default function CreateGroupScreen({ navigation }: Props) {
       </ScrollView>
 
       {selectedIds.length > 0 ? (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { bottom: 68 + Math.max(insets.bottom, 12) - 12 }]}>
           <Pressable onPress={handleContinue} style={styles.ctaButton}>
-            <Text style={styles.ctaText}>Create Group · {selectedIds.length + 1} members</Text>
+            <Text style={styles.ctaText}>Create Group ({selectedIds.length + 1} members)</Text>
           </Pressable>
         </View>
       ) : null}
+      <AppFooter />
     </View>
   );
 }
@@ -181,7 +322,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 140,
+    paddingBottom: 220,
   },
   header: {
     flexDirection: 'row',
@@ -265,8 +406,26 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     paddingVertical: 0,
   },
+  refreshButton: {
+    marginLeft: 4,
+  },
   list: {
     gap: 8,
+  },
+  inviteSection: {
+    gap: 8,
+    marginTop: spacing.sm,
+  },
+  inviteSectionTitle: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  syncingText: {
+    marginBottom: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: 12,
   },
   friendRow: {
     flexDirection: 'row',
@@ -301,6 +460,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.textPrimary,
+  },
+  inviteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  inviteCopy: {
+    flex: 1,
+  },
+  inviteMeta: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  inlineInviteButton: {
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  inlineInviteButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
   checkCircle: {
     width: 20,
@@ -350,9 +539,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
     paddingHorizontal: 20,
-    paddingBottom: 28,
+    paddingBottom: 16,
     paddingTop: 12,
     backgroundColor: colors.background,
   },

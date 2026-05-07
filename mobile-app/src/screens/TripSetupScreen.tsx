@@ -121,7 +121,7 @@ export default function TripSetupScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen showFooter>
+    <Screen showFooter showBackButton>
       <SectionTitle
         title="Confirm Proposal"
         subtitle={`Review the proposed plan for ${tripName}, confirm which dates work for you, and cast your lead vote.`}

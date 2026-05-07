@@ -31,8 +31,9 @@ export default function PermissionsSetupScreen({ navigation }: Props) {
       setLoading(true);
 
       const contacts = await collectDeviceContactLookupPayload();
-      setContactsStatus(contacts.granted ? 'granted' : 'denied');
-      if (contacts.granted) {
+      const contactsGranted = contacts.granted;
+      setContactsStatus(contactsGranted ? 'granted' : 'denied');
+      if (contactsGranted) {
         const response = await syncDeviceContacts({
           emails: contacts.emails,
           phones: contacts.phones,
@@ -41,12 +42,28 @@ export default function PermissionsSetupScreen({ navigation }: Props) {
       }
 
       const location = await Location.requestForegroundPermissionsAsync();
-      setLocationStatus(location.status === 'granted' ? 'granted' : 'denied');
+      const locationGranted = location.status === 'granted';
+      setLocationStatus(locationGranted ? 'granted' : 'denied');
 
       const media = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      setMediaStatus(media.status === 'granted' ? 'granted' : 'denied');
+      const mediaGranted = media.status === 'granted';
+      setMediaStatus(mediaGranted ? 'granted' : 'denied');
 
-      navigation.replace('MainTabs');
+      // Ensure all permissions are granted; otherwise force the user back to onboarding
+      if (contactsGranted && locationGranted && mediaGranted) {
+        navigation.replace('MainTabs');
+      } else {
+        Alert.alert(
+          'Permissions required',
+          'All permissions are required to use the app. Please grant all permissions to continue.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.replace('Onboarding'),
+            },
+          ]
+        );
+      }
     } catch (error: any) {
       console.log('Permission setup failed', error);
       Alert.alert('Permission setup failed', error?.message || 'Could not complete setup');
@@ -71,12 +88,6 @@ export default function PermissionsSetupScreen({ navigation }: Props) {
       <PrimaryButton
         title={loading ? 'Requesting permissions...' : 'Allow and continue'}
         onPress={requestAllPermissions}
-      />
-
-      <PrimaryButton
-        title="Skip for now"
-        variant="secondary"
-        onPress={() => navigation.replace('MainTabs')}
       />
     </Screen>
   );

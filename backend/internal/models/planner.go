@@ -10,6 +10,7 @@ type ItineraryEventPayload struct {
 	Notes            string   `json:"notes"`
 	Attendees        []string `json:"attendees"`
 	Status           string   `json:"status"`
+	IsCompleted      bool     `json:"isCompleted"`
 	CompletedAt      string   `json:"completedAt,omitempty"`
 }
 

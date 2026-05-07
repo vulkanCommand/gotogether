@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"gotogether-backend/internal/db"
 	"gotogether-backend/internal/models"
@@ -150,6 +151,11 @@ func CreateTrip(c *gin.Context) {
 		return
 	}
 
+	if err := syncTripItineraryDaysTx(tx, trip.ID, req.StartDate, req.EndDate); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create trip itinerary days", "details": err.Error()})
+		return
+	}
+
 	if !commitOrRespond(c, tx) {
 		return
 	}
@@ -177,7 +183,17 @@ func GetTrips(c *gin.Context) {
 			COALESCE(viewer.role, '') AS viewer_role,
 			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id,
 			COUNT(DISTINCT CASE WHEN setup.completed_at IS NOT NULL THEN setup.user_id END)::int AS setup_completed_count,
-			COALESCE(viewer_setup.completed_at::text, '') AS viewer_setup_completed_at
+			COALESCE(viewer_setup.completed_at::text, '') AS viewer_setup_completed_at,
+			COALESCE((
+				SELECT COUNT(*)
+				FROM trip_completion_confirmations tcc
+				WHERE tcc.trip_id = t.id
+			), 0)::int AS completion_confirmed_count,
+			EXISTS(
+				SELECT 1
+				FROM trip_completion_confirmations tcc
+				WHERE tcc.trip_id = t.id
+			) AND COALESCE(t.completed_at::text, '') = '' AS completion_requested
 		FROM trips t
 		LEFT JOIN trip_members tm ON tm.trip_id = t.id
 		LEFT JOIN trip_members viewer ON viewer.trip_id = t.id AND viewer.user_id = $1
@@ -202,6 +218,8 @@ func GetTrips(c *gin.Context) {
 	for rows.Next() {
 		var trip models.TripListItem
 		var viewerSetupCompletedAt string
+		var completionConfirmedCount int
+		var completionRequested bool
 		if err := rows.Scan(
 			&trip.ID,
 			&trip.Name,
@@ -216,6 +234,8 @@ func GetTrips(c *gin.Context) {
 			&trip.LeadUserID,
 			&trip.SetupCompletedCount,
 			&viewerSetupCompletedAt,
+			&completionConfirmedCount,
+			&completionRequested,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read trips", "details": err.Error()})
 			return
@@ -226,6 +246,12 @@ func GetTrips(c *gin.Context) {
 			trip.MembersCount,
 			trip.SetupCompletedCount,
 		)
+		trip.CompletionConfirmedCount = completionConfirmedCount
+		trip.CompletionRequested = completionRequested
+		trip.CompletionPendingCount = trip.MembersCount - completionConfirmedCount
+		if trip.CompletionPendingCount < 0 {
+			trip.CompletionPendingCount = 0
+		}
 		trips = append(trips, trip)
 	}
 	if err := rows.Err(); err != nil {
@@ -252,6 +278,8 @@ func GetTripByID(c *gin.Context) {
 	var trip models.Trip
 	var membersCount int
 	var viewerSetupCompletedAt string
+	var completionConfirmedCount int
+	var completionRequested bool
 	err = db.DB.QueryRow(`
 		SELECT
 			t.id,
@@ -266,7 +294,17 @@ func GetTripByID(c *gin.Context) {
 			COALESCE(viewer.role, '') AS viewer_role,
 			COALESCE(MAX(CASE WHEN tm.role = 'lead' THEN tm.user_id END), t.created_by) AS lead_user_id,
 			COUNT(DISTINCT CASE WHEN setup.completed_at IS NOT NULL THEN setup.user_id END)::int AS setup_completed_count,
-			COALESCE(viewer_setup.completed_at::text, '') AS viewer_setup_completed_at
+			COALESCE(viewer_setup.completed_at::text, '') AS viewer_setup_completed_at,
+			COALESCE((
+				SELECT COUNT(*)
+				FROM trip_completion_confirmations tcc
+				WHERE tcc.trip_id = t.id
+			), 0)::int AS completion_confirmed_count,
+			EXISTS(
+				SELECT 1
+				FROM trip_completion_confirmations tcc
+				WHERE tcc.trip_id = t.id
+			) AND COALESCE(t.completed_at::text, '') = '' AS completion_requested
 		FROM trips t
 		LEFT JOIN trip_members tm ON tm.trip_id = t.id
 		LEFT JOIN trip_members viewer ON viewer.trip_id = t.id AND viewer.user_id = $2
@@ -296,6 +334,8 @@ func GetTripByID(c *gin.Context) {
 		&trip.LeadUserID,
 		&trip.SetupCompletedCount,
 		&viewerSetupCompletedAt,
+		&completionConfirmedCount,
+		&completionRequested,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -315,6 +355,12 @@ func GetTripByID(c *gin.Context) {
 		membersCount,
 		trip.SetupCompletedCount,
 	)
+	trip.CompletionConfirmedCount = completionConfirmedCount
+	trip.CompletionRequested = completionRequested
+	trip.CompletionPendingCount = membersCount - completionConfirmedCount
+	if trip.CompletionPendingCount < 0 {
+		trip.CompletionPendingCount = 0
+	}
 
 	memberRows, err := db.DB.Query(`
 		SELECT
@@ -381,9 +427,12 @@ func GetTripByID(c *gin.Context) {
 			"viewer_role":           trip.ViewerRole,
 			"lead_user_id":          trip.LeadUserID,
 			"setup_completed_count": trip.SetupCompletedCount,
-			"setup_pending_count":   trip.SetupPendingCount,
-			"setup_required":        trip.SetupRequired,
-			"readiness_status":      trip.ReadinessStatus,
+			"setup_pending_count":         trip.SetupPendingCount,
+			"setup_required":              trip.SetupRequired,
+			"readiness_status":            trip.ReadinessStatus,
+			"completion_confirmed_count":  trip.CompletionConfirmedCount,
+			"completion_pending_count":    trip.CompletionPendingCount,
+			"completion_requested":        trip.CompletionRequested,
 		},
 		"members": members,
 		"permissions": gin.H{
@@ -392,6 +441,165 @@ func GetTripByID(c *gin.Context) {
 			"can_complete_trip":  trip.ViewerRole == "lead",
 		},
 	})
+}
+
+func UpdateTrip(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+
+	if !ensureTripLeadAccess(c, tripID, userID) {
+		return
+	}
+
+	var req models.UpdateTripRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.Destination = strings.TrimSpace(req.Destination)
+	req.StartDate = strings.TrimSpace(req.StartDate)
+	req.EndDate = strings.TrimSpace(req.EndDate)
+	if req.Name == "" || req.Destination == "" || req.StartDate == "" || req.EndDate == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name, destination, start_date, and end_date are required"})
+		return
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	if _, err := tx.Exec(`
+		UPDATE trips
+		SET name = $2, destination = $3, start_date = $4, end_date = $5
+		WHERE id = $1
+	`, tripID, req.Name, req.Destination, req.StartDate, req.EndDate); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update trip", "details": err.Error()})
+		return
+	}
+
+	if err := syncTripItineraryDaysTx(tx, tripID, req.StartDate, req.EndDate); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync itinerary days", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
+		return
+	}
+
+	createUserNotification(userID, tripID, "Trip updated", req.Name+" was updated.", "alert", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Trip updated", req.Name+" was updated for the crew.", "alert", false)
+	c.JSON(http.StatusOK, gin.H{"updated": true})
+}
+
+func syncTripItineraryDaysTx(tx *sql.Tx, tripID int, startDate string, endDate string) error {
+	start, err := time.Parse("2006-01-02", strings.TrimSpace(startDate))
+	if err != nil {
+		return err
+	}
+	end, err := time.Parse("2006-01-02", strings.TrimSpace(endDate))
+	if err != nil {
+		return err
+	}
+	if end.Before(start) {
+		return fmt.Errorf("end date cannot be before start date")
+	}
+
+	type existingDay struct {
+		ID int
+	}
+
+	existingDays := make([]existingDay, 0)
+	rows, err := tx.Query(`
+		SELECT id
+		FROM itinerary_days
+		WHERE trip_id = $1
+		ORDER BY day_order ASC, id ASC
+	`, tripID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var day existingDay
+		if err := rows.Scan(&day.ID); err != nil {
+			return err
+		}
+		existingDays = append(existingDays, day)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	desiredLabels := make([]string, 0)
+	for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
+		desiredLabels = append(desiredLabels, cursor.Format("Jan 2"))
+	}
+
+	for index, label := range desiredLabels {
+		if index < len(existingDays) {
+			if _, err := tx.Exec(`
+				UPDATE itinerary_days
+				SET title = $1, date_label = $1, day_order = $2
+				WHERE id = $3
+			`, label, index, existingDays[index].ID); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if _, err := tx.Exec(`
+			INSERT INTO itinerary_days (trip_id, title, date_label, day_order)
+			VALUES ($1, $2, $3, $4)
+		`, tripID, label, label, index); err != nil {
+			return err
+		}
+	}
+
+	if len(existingDays) > len(desiredLabels) {
+		for _, day := range existingDays[len(desiredLabels):] {
+			if _, err := tx.Exec(`DELETE FROM itinerary_days WHERE id = $1`, day.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	return normalizeTripActiveEventTx(tx, tripID)
+}
+
+func DeleteTrip(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	tripID, ok := parseTripID(c)
+	if !ok {
+		return
+	}
+
+	if !ensureTripLeadAccess(c, tripID, userID) {
+		return
+	}
+
+	if _, err := db.DB.Exec(`DELETE FROM trips WHERE id = $1`, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete trip", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 func CompleteTrip(c *gin.Context) {
@@ -407,8 +615,40 @@ func CompleteTrip(c *gin.Context) {
 		return
 	}
 
-	if err := insertTripCompletionConfirmation(tripID, userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start trip completion", "details": err.Error()})
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start completion transaction"})
+		return
+	}
+	defer rollbackQuietly(tx)
+
+	if _, err := tx.Exec(`DELETE FROM trip_completion_confirmations WHERE trip_id = $1`, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear completion confirmations", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE notifications
+		SET action_completed_at = CURRENT_TIMESTAMP,
+			cleared_at = CURRENT_TIMESTAMP
+		WHERE trip_id = $1
+			AND action_type = 'trip_complete'
+			AND action_completed_at IS NULL
+	`, tripID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear trip completion notifications", "details": err.Error()})
+		return
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE trips
+		SET completed_at = CURRENT_TIMESTAMP, completed_by_user_id = $2
+		WHERE id = $1
+	`, tripID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to complete trip", "details": err.Error()})
+		return
+	}
+
+	if !commitOrRespond(c, tx) {
 		return
 	}
 
@@ -417,11 +657,9 @@ func CompleteTrip(c *gin.Context) {
 	if strings.TrimSpace(tripName) == "" {
 		tripName = "this trip"
 	}
-	createTripActionNotifications(tripID, userID, "Confirm trip completion", "Trip lead marked "+strings.TrimSpace(tripName)+" complete. Accept to confirm.", "task", true, "trip_complete", tripID)
-
-	var completedAt string
-	_ = db.DB.QueryRow(`SELECT COALESCE(completed_at::text, '') FROM trips WHERE id = $1`, tripID).Scan(&completedAt)
-	c.JSON(http.StatusOK, gin.H{"completed": strings.TrimSpace(completedAt) != "", "pending_confirmations": strings.TrimSpace(completedAt) == ""})
+	createUserNotification(userID, tripID, "Trip completed", "You finished "+strings.TrimSpace(tripName)+".", "alert", false, "", 0, userID)
+	createTripNotifications(tripID, userID, "Trip completed", strings.TrimSpace(tripName)+" has been wrapped up and moved to completed trips.", "alert", false)
+	c.JSON(http.StatusOK, gin.H{"completed": true, "pending_confirmations": false})
 }
 
 func insertTripCompletionConfirmation(tripID int, userID int) error {

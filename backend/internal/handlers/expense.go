@@ -623,10 +623,38 @@ func buildExpenseSplits(req models.CreateExpenseRequest, members []tripExpenseMe
 		return splits, nil
 	}
 
-	splits := make([]models.ExpenseSplitPayload, 0, len(members))
-	base := math.Floor((amount/float64(len(members)))*100) / 100
-	remainingCents := int(math.Round(amount*100)) - int(math.Round(base*100))*len(members)
-	for index, member := range members {
+	selectedMembers := members
+	if len(req.SplitPreview) > 0 {
+		selectedIDs := map[int]bool{}
+		filteredMembers := make([]tripExpenseMember, 0, len(req.SplitPreview))
+		for _, incoming := range req.SplitPreview {
+			memberID := parseNumericID(incoming.MemberID)
+			if memberID <= 0 || selectedIDs[memberID] {
+				continue
+			}
+			memberName, exists := memberNames[memberID]
+			if !exists {
+				continue
+			}
+			selectedIDs[memberID] = true
+			filteredMembers = append(filteredMembers, tripExpenseMember{
+				ID:   memberID,
+				Name: memberName,
+			})
+		}
+		if len(filteredMembers) > 0 {
+			selectedMembers = filteredMembers
+		}
+	}
+
+	if len(selectedMembers) == 0 {
+		return nil, fmt.Errorf("equal split needs at least one participant")
+	}
+
+	splits := make([]models.ExpenseSplitPayload, 0, len(selectedMembers))
+	base := math.Floor((amount/float64(len(selectedMembers)))*100) / 100
+	remainingCents := int(math.Round(amount*100)) - int(math.Round(base*100))*len(selectedMembers)
+	for index, member := range selectedMembers {
 		memberAmount := base
 		if index < remainingCents {
 			memberAmount += 0.01

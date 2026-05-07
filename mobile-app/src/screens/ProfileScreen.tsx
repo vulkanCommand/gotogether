@@ -1,22 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import Pill from '../components/Pill';
-import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
 import TextField from '../components/TextField';
 import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { deleteMyProfileImage, profileImageFileUrl, updateMyProfile, updateMyProfileImage } from '../config/api';
+import {
+  deleteMyProfileImage,
+  profileImageFileUrl,
+  updateMyProfile,
+  updateMyProfileImage,
+  fetchTrips,
+} from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { useFriendStore } from '../store/friendStore';
 
@@ -26,10 +28,38 @@ type Props = CompositeScreenProps<
 >;
 
 export default function ProfileScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const token = useAuthStore((state) => state.token);
   const setUser = useAuthStore((state) => state.setUser);
   const friends = useFriendStore((state) => state.friends);
+
+  // Cache buster for the profile image URL.  This value is created once
+  // when the component mounts and remains constant for the lifetime of
+  // this component.  When the user uploads a new profile image we call
+  // setUser which triggers a re-render and picks up a new timestamp
+  // for the avatarSource.
+  const [avatarCacheBust] = useState(() => Date.now());
+
+  // State to hold the number of trips that have been completed.  We query
+  // the backend on mount to populate this value.
+  const [completedTripsCount, setCompletedTripsCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Fetch the user's trips and count how many have a completed_at timestamp.
+    const loadTrips = async () => {
+      try {
+        const response = await fetchTrips();
+        const trips = Array.isArray(response.trips) ? response.trips : [];
+        const completed = trips.filter((trip) => Boolean(trip.completed_at)).length;
+        setCompletedTripsCount(completed);
+      } catch (error) {
+        console.log('Profile trip count load failed', error);
+        setCompletedTripsCount(0);
+      }
+    };
+    void loadTrips();
+  }, []);
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? '');
@@ -104,28 +134,36 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
+  // To bust caches when the user updates their profile photo we append a timestamp
+  // query param to the image URL.  Without this some platforms continue to
+  // display a stale avatar until the component remounts.  We use Date.now
+  // instead of updated_at because the updated_at field may not reflect the
+  // image change immediately.
   const avatarSource =
     user?.profile_image_url && token
-      ? { uri: profileImageFileUrl(), headers: { Authorization: `Bearer ${token}` } }
+      ? { uri: `${profileImageFileUrl()}?cb=${avatarCacheBust}`, headers: { Authorization: `Bearer ${token}` } }
       : null;
 
   return (
-    <Screen>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <SectionTitle
-          title="Profile"
-          subtitle="Your travel identity and connected friends."
-          action={
-            <View style={styles.headerActions}>
-              <NotificationBell />
-              <Pressable style={styles.iconButton} onPress={() => navigation.navigate('Settings')}>
-                <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-          }
-        />
+    <View style={styles.screen}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 22) + 12 }]}
+      >
+        <View style={styles.topRow}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.headerTitle}>Profile</Text>
+            <Text style={styles.headerSubtitle}>Travel profile and friends.</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <NotificationBell />
+            <Pressable style={styles.iconButton} onPress={() => navigation.navigate('Settings')}>
+              <Ionicons name="settings-outline" size={20} color={colors.textPrimary} />
+            </Pressable>
+          </View>
+        </View>
 
-        <AppCard>
+        <View style={styles.card}>
           <View style={styles.header}>
             <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
               {avatarSource ? (
@@ -136,11 +174,21 @@ export default function ProfileScreen({ navigation }: Props) {
             </Pressable>
 
             <View style={styles.identity}>
-              <Text style={styles.name}>{user?.name || 'Your name'}</Text>
+              {/* Display the number of completed trips instead of the user's name.  If the
+                  value is still loading show the user's name as a fallback. */}
+              <Text style={styles.name}>
+                {completedTripsCount != null
+                  ? `${completedTripsCount} trip${completedTripsCount === 1 ? '' : 's'} completed`
+                  : user?.name || 'Your name'}
+              </Text>
               <Text style={styles.email}>{user?.email || user?.phone || 'Signed in user'}</Text>
-              <View style={styles.identityPills}>
-                <Pill label={`${friends.length} connected friends`} tone="accent" />
-                <Pill label={user?.username ? `@${user.username}` : 'Profile ready'} />
+              <View style={styles.statRow}>
+                <View style={styles.statPill}>
+                  <Text style={styles.statPillText}>{friends.length} connected friends</Text>
+                </View>
+                <View style={styles.statPill}>
+                  <Text style={styles.statPillText}>{user?.username ? `@${user.username}` : 'Profile ready'}</Text>
+                </View>
               </View>
             </View>
           </View>
@@ -155,9 +203,9 @@ export default function ProfileScreen({ navigation }: Props) {
               </Pressable>
             ) : null}
           </View>
-        </AppCard>
+        </View>
 
-        <AppCard>
+        <View style={styles.card}>
           <View style={styles.detailHeader}>
             <Text style={styles.cardTitle}>Details</Text>
             <Pressable onPress={() => setEditing((value) => !value)}>
@@ -172,7 +220,9 @@ export default function ProfileScreen({ navigation }: Props) {
               <TextField label="Phone number" placeholder="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
               <TextField label="Home city" placeholder="Home city" value={homeCity} onChangeText={setHomeCity} />
               <TextField label="Short bio" placeholder="Short bio" value={bio} onChangeText={setBio} multiline />
-              <PrimaryButton title={saving ? 'Saving...' : 'Save profile'} onPress={saveProfile} />
+              <Pressable style={[styles.primaryButton, saving && styles.primaryButtonDisabled]} onPress={saveProfile} disabled={saving}>
+                <Text style={styles.primaryButtonText}>{saving ? 'Saving...' : 'Save profile'}</Text>
+              </Pressable>
             </>
           ) : (
             <>
@@ -182,9 +232,9 @@ export default function ProfileScreen({ navigation }: Props) {
               <DetailRow label="Bio" value={user?.bio || 'No bio added yet.'} />
             </>
           )}
-        </AppCard>
+        </View>
       </ScrollView>
-    </Screen>
+    </View>
   );
 }
 
@@ -198,8 +248,40 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
   content: {
-    paddingBottom: spacing.xl,
+    paddingHorizontal: 20,
+    paddingBottom: 120,
+    gap: spacing.lg,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  headerCopy: {
+    flex: 1,
+  },
+  headerTitle: {
+    color: colors.textPrimary,
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  headerSubtitle: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
+  card: {
+    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
   },
   iconButton: {
     width: 42,
@@ -221,9 +303,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarWrap: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: '#EEF4FF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -234,32 +316,40 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   avatarText: {
-    fontSize: 30,
-    fontWeight: '800',
+    fontSize: 24,
+    fontWeight: '700',
     color: colors.accent,
   },
   identity: {
     flex: 1,
   },
   name: {
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   email: {
     marginTop: 4,
     color: colors.textSecondary,
   },
-  stat: {
-    marginTop: 6,
-    color: colors.accent,
-    fontWeight: '700',
-  },
-  identityPills: {
+  statRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
     marginTop: spacing.sm,
+  },
+  statPill: {
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  statPillText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '700',
   },
   imageActions: {
     flexDirection: 'row',
@@ -284,13 +374,29 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   cardTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   editLink: {
     color: colors.accent,
-    fontWeight: '800',
+    fontWeight: '700',
+  },
+  primaryButton: {
+    marginTop: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.7,
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
   },
   detailRow: {
     paddingVertical: 12,

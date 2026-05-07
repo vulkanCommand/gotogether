@@ -1,5 +1,12 @@
 import * as Contacts from 'expo-contacts';
 
+export type DeviceInviteContact = {
+  id: string;
+  name: string;
+  emails: string[];
+  phones: string[];
+};
+
 export async function collectDeviceContactLookupPayload() {
   const permission = await Contacts.requestPermissionsAsync();
   if (permission.status !== 'granted') {
@@ -7,6 +14,7 @@ export async function collectDeviceContactLookupPayload() {
       granted: false,
       emails: [] as string[],
       phones: [] as string[],
+      contacts: [] as DeviceInviteContact[],
     };
   }
 
@@ -17,20 +25,36 @@ export async function collectDeviceContactLookupPayload() {
 
   const emailSet = new Set<string>();
   const phoneSet = new Set<string>();
+  const contacts: DeviceInviteContact[] = [];
 
   for (const contact of response.data) {
+    const contactEmails: string[] = [];
+    const contactPhones: string[] = [];
+
     for (const email of contact.emails ?? []) {
       const value = email.email?.trim().toLowerCase();
       if (value) {
         emailSet.add(value);
+        contactEmails.push(value);
       }
     }
 
     for (const phone of contact.phoneNumbers ?? []) {
       const digits = (phone.number ?? '').replace(/\D+/g, '');
       if (digits) {
-        phoneSet.add(digits.length === 10 ? `1${digits}` : digits);
+        const normalized = digits.length === 10 ? `1${digits}` : digits;
+        phoneSet.add(normalized);
+        contactPhones.push(normalized);
       }
+    }
+
+    if (contactEmails.length > 0 || contactPhones.length > 0) {
+      contacts.push({
+        id: contact.id,
+        name: contact.name?.trim() || contact.firstName?.trim() || 'Contact',
+        emails: contactEmails,
+        phones: contactPhones,
+      });
     }
   }
 
@@ -38,5 +62,6 @@ export async function collectDeviceContactLookupPayload() {
     granted: true,
     emails: Array.from(emailSet),
     phones: Array.from(phoneSet),
+    contacts,
   };
 }

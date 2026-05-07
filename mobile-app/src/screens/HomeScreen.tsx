@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -7,12 +7,12 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { useAuthStore } from '../store/authStore';
-import { useTripStore } from '../store/tripStore';
-import { ApiNotification, ApiTrip, fetchNotifications, fetchTripDetails, fetchTrips, tripCoverFileUrl } from '../config/api';
+import { ItineraryDay, isCompletedEvent, useTripStore } from '../store/tripStore';
+import { ApiNotification, ApiTrip, apiRequest, fetchNotifications, fetchTripDetails, fetchTrips, tripCoverFileUrl } from '../config/api';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { prototypeImages } from '../utils/prototypeAssets';
-import { formatTripRange, mapApiMembersToCrew, pickPrimaryTrip, tripTimelineStatus } from '../utils/tripFlow';
+import { formatTripRange, isTripActive, isTripUpcoming, mapApiMembersToCrew, pickPrimaryTrip, tripTimelineStatus } from '../utils/tripFlow';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -28,6 +28,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   const [trips, setTrips] = useState<ApiTrip[]>([]);
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [primaryTripItinerary, setPrimaryTripItinerary] = useState<ItineraryDay[]>([]);
   const [loading, setLoading] = useState(true);
   const hasLoadedRef = useRef(false);
 
@@ -37,14 +38,28 @@ export default function HomeScreen({ navigation }: Props) {
         setLoading(true);
       }
       const [tripResponse, notificationResponse] = await Promise.all([fetchTrips(), fetchNotifications()]);
-      setTrips(Array.isArray(tripResponse.trips) ? tripResponse.trips : []);
+      const nextTrips = Array.isArray(tripResponse.trips) ? tripResponse.trips : [];
+      const nextPrimaryTrip = pickPrimaryTrip(nextTrips);
+      setTrips(nextTrips);
       setNotifications(Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : []);
+      if (nextPrimaryTrip?.id) {
+        try {
+          const itineraryResponse = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${nextPrimaryTrip.id}/itinerary`);
+          setPrimaryTripItinerary(Array.isArray(itineraryResponse.days) ? itineraryResponse.days : []);
+        } catch (error) {
+          console.log('Home itinerary load failed', error);
+          setPrimaryTripItinerary([]);
+        }
+      } else {
+        setPrimaryTripItinerary([]);
+      }
       hasLoadedRef.current = true;
     } catch (error) {
       console.log('Home load failed', error);
       if (!hasLoadedRef.current) {
         setTrips([]);
         setNotifications([]);
+        setPrimaryTripItinerary([]);
       }
     } finally {
       if (showSpinner) {
@@ -72,9 +87,10 @@ export default function HomeScreen({ navigation }: Props) {
 
   const primaryTrip = useMemo(() => pickPrimaryTrip(trips), [trips]);
   const upcomingTrips = useMemo(
-    () => trips.filter((trip) => trip.id !== primaryTrip?.id && !trip.completed_at).slice(0, 4),
+    () => trips.filter((trip) => trip.id !== primaryTrip?.id && isTripUpcoming(trip)).slice(0, 4),
     [primaryTrip?.id, trips]
   );
+  const showNextEvent = Boolean(primaryTrip && isTripActive(primaryTrip));
 
   const openTrip = async (trip: ApiTrip) => {
     try {
@@ -89,7 +105,78 @@ export default function HomeScreen({ navigation }: Props) {
     }
   };
 
-  const activityItems = notifications.slice(0, 3);
+  const activityItems = useMemo(
+    () => notifications.filter((item) => !item.requiresAction).slice(0, 3),
+    [notifications]
+  );
+
+  const fallbackActivityItems = useMemo(() => {
+    return primaryTripItinerary
+      .flatMap((day) =>
+        day.events.map((event) => {
+          // Use the actual event title for completed events rather than a generic label.
+          const statusLabel = isCompletedEvent(event)
+            ? `${event.title} completed`
+            : event.status === 'active'
+              ? `${event.title} in progress`
+              : `${event.title} upcoming`;
+          return {
+            id: `${day.id}-${event.id}`,
+            title: statusLabel,
+            body: `${event.title} • ${day.title} • ${event.time}`,
+          };
+        })
+      )
+      .slice(0, 3);
+  }, [primaryTripItinerary]);
+
+  const nextEvent = useMemo(() => {
+    for (const day of primaryTripItinerary) {
+      const activeEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'active');
+      if (activeEvent) {
+        return { day, event: activeEvent };
+      }
+      const upcomingEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'upcoming');
+      if (upcomingEvent) {
+        return { day, event: upcomingEvent };
+      }
+    }
+    return null;
+  }, [primaryTripItinerary]);
+
+  const openLocationOptions = async (query: string) => {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      return;
+    }
+
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trimmedQuery)}`;
+    const appleMapsUrl = `http://maps.apple.com/?q=${encodeURIComponent(trimmedQuery)}`;
+
+    Alert.alert('Open location', trimmedQuery, [
+      {
+        text: 'Google Maps',
+        onPress: async () => {
+          try {
+            await Linking.openURL(googleMapsUrl);
+          } catch {
+            Alert.alert('Maps unavailable', 'Could not open Google Maps right now.');
+          }
+        },
+      },
+      {
+        text: 'Apple Maps',
+        onPress: async () => {
+          try {
+            await Linking.openURL(appleMapsUrl);
+          } catch {
+            Alert.alert('Maps unavailable', 'Could not open Apple Maps right now.');
+          }
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   return (
     <View style={styles.screen}>
@@ -169,11 +256,50 @@ export default function HomeScreen({ navigation }: Props) {
           </ScrollView>
         </View>
 
+        {showNextEvent ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Next Event</Text>
+            {nextEvent ? (
+              <View style={styles.nextEventCard}>
+                <View style={styles.nextEventHeader}>
+                  <View style={styles.nextEventBadge}>
+                    <Text style={styles.nextEventBadgeText}>{nextEvent.day.title}</Text>
+                  </View>
+                  <Text style={styles.nextEventTime}>{nextEvent.event.time}</Text>
+                </View>
+                <Text style={styles.nextEventTitle}>{nextEvent.event.title}</Text>
+                <Text style={styles.nextEventMeta}>{nextEvent.event.notes || nextEvent.event.location}</Text>
+                <Pressable style={styles.locationButton} onPress={() => openLocationOptions(nextEvent.event.location)}>
+                  <Ionicons name="location-outline" size={16} color={colors.accent} />
+                  <Text style={styles.locationButtonText}>Maps</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.nextEventCard}>
+                <Text style={styles.nextEventTitle}>No itinerary event yet</Text>
+                <Text style={styles.nextEventMeta}>Your next stop will appear here after you add events to the trip.</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
           <View style={styles.activityList}>
             {activityItems.length > 0 ? (
               activityItems.map((item) => (
+                <View key={item.id} style={styles.activityRow}>
+                  <View style={styles.activityAvatar}>
+                    <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.activityCopy}>
+                    <Text style={styles.activityText}>{item.title}</Text>
+                    <Text style={styles.activitySubtext}>{item.body}</Text>
+                  </View>
+                </View>
+              ))
+            ) : fallbackActivityItems.length > 0 ? (
+              fallbackActivityItems.map((item) => (
                 <View key={item.id} style={styles.activityRow}>
                   <View style={styles.activityAvatar}>
                     <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
@@ -371,6 +497,65 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: colors.textMuted,
     fontSize: 11,
+  },
+  nextEventCard: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 10,
+  },
+  nextEventHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  nextEventBadge: {
+    borderRadius: radius.pill,
+    backgroundColor: '#E7F0FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  nextEventBadgeText: {
+    color: colors.accentStrong,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  nextEventTime: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  nextEventTitle: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  nextEventMeta: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  locationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  locationButtonText: {
+    color: colors.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+    maxWidth: 220,
   },
   activityList: {
     gap: spacing.md,

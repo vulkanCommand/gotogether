@@ -1,125 +1,209 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import Pill from '../components/Pill';
-import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
-import TextField from '../components/TextField';
-import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
 import { ExpenseSplit, useTripStore } from '../store/tripStore';
+import { useAuthStore } from '../store/authStore';
 import { createTripExpense, updateTripExpense } from '../config/api';
+import { buildEqualSplitPreview, formatMoney, getExpenseGroupDisplayName } from '../utils/expenseCalculations';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddExpense'>;
+type SplitMode = 'Equal split' | 'Custom split';
+
+const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+const palette = {
+  screen: '#F3F6FB',
+  panel: '#FFFFFF',
+  panelSoft: '#F8FAFD',
+  cardBorder: '#DEE7F2',
+  heroText: '#0F172A',
+  text: '#0F172A',
+  textMuted: '#667085',
+  line: '#DEE7F2',
+  teal: '#2563EB',
+  tealSoft: '#E7F0FF',
+  orange: '#EA580C',
+  red: '#DC4C3E',
+  white: '#FFFFFF',
+  modalOverlay: 'rgba(15, 23, 42, 0.25)',
+};
 
 export default function AddExpenseScreen({ navigation, route }: Props) {
+  const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
   const currentTrip = useTripStore((state) => state.currentTrip);
   const crew = useTripStore((state) => state.crew);
   const expenses = useTripStore((state) => state.expenses);
   const expenseGroups = useTripStore((state) => state.expenseGroups);
   const itineraryDays = useTripStore((state) => state.itineraryDays);
-  const totalExpenseAmount = useTripStore((state) => state.totalExpenseAmount);
   const addExpense = useTripStore((state) => state.addExpense);
   const updateExpense = useTripStore((state) => state.updateExpense);
 
   const crewList = crew.length > 0 ? crew : [];
-  const defaultGroupId = route.params?.groupId ?? expenseGroups[0]?.id;
+  const defaultGroupId = route.params?.groupId ?? expenseGroups[0]?.id ?? 0;
   const editingExpenseId = route.params?.expenseId;
   const editingExpense = expenses.find((expense) => expense.id === editingExpenseId);
+
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [paidByUserId, setPaidByUserId] = useState(Number(crewList[0]?.id || 0));
-  const [expenseGroupId, setExpenseGroupId] = useState(defaultGroupId ?? 0);
+  const [paidByUserId, setPaidByUserId] = useState(Number(user?.id || crewList[0]?.id || 0));
+  const [expenseGroupId, setExpenseGroupId] = useState(defaultGroupId);
   const [linkedEventId, setLinkedEventId] = useState(route.params?.eventId ?? '');
-  const [splitMethod, setSplitMethod] = useState<'Equal split' | 'Custom split'>('Equal split');
+  const [splitMethod, setSplitMethod] = useState<SplitMode>('Equal split');
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>(crewList.map((member) => member.id));
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [showSplitModal, setShowSplitModal] = useState(false);
+  // show group picker modal for selecting an expense group from all available groups
+  const [showGroupPicker, setShowGroupPicker] = useState(false);
+  const [showPayerModal, setShowPayerModal] = useState(false);
+
+  useEffect(() => {
+    if (crewList.length === 0) {
+      return;
+    }
+
+    setSelectedParticipantIds((current) => (current.length > 0 ? current : crewList.map((member) => member.id)));
+    if (!paidByUserId) {
+      setPaidByUserId(Number(user?.id || crewList[0]?.id || 0));
+    }
+  }, [crewList, paidByUserId, user?.id]);
 
   useEffect(() => {
     if (!editingExpense) {
       return;
     }
+
     setTitle(editingExpense.title);
     setAmount(String(editingExpense.amount));
-    setPaidByUserId(editingExpense.paidByUserId ?? Number(crewList[0]?.id || 0));
-    setExpenseGroupId(editingExpense.expenseGroupId ?? defaultGroupId ?? 0);
+    setPaidByUserId(editingExpense.paidByUserId ?? Number(user?.id || crewList[0]?.id || 0));
+    setExpenseGroupId(editingExpense.expenseGroupId ?? defaultGroupId);
     setLinkedEventId(editingExpense.linkedEventId ?? '');
     setSplitMethod(editingExpense.splitMethod.toLowerCase().includes('custom') ? 'Custom split' : 'Equal split');
     setNotes(editingExpense.notes ?? '');
-    const amounts: Record<string, string> = {};
-    editingExpense.splitPreview.forEach((split) => {
-      amounts[split.memberId] = String(split.amount);
-    });
-    setCustomAmounts(amounts);
-  }, [defaultGroupId, editingExpense]);
+    setSelectedParticipantIds(editingExpense.splitPreview.map((split) => split.memberId));
+    setCustomAmounts(
+      editingExpense.splitPreview.reduce<Record<string, string>>((accumulator, split) => {
+        accumulator[split.memberId] = split.amount.toFixed(2);
+        return accumulator;
+      }, {})
+    );
+  }, [crewList, defaultGroupId, editingExpense, user?.id]);
 
-  const parsedAmount = Number(amount);
-  const safeAmount = Number.isFinite(parsedAmount) ? parsedAmount : 0;
-  const memberCount = Math.max(crewList.length, 1);
+  const selectedGroup = expenseGroups.find((group) => group.id === expenseGroupId) ?? expenseGroups[0] ?? null;
+  const selectedGroupLabel = getExpenseGroupDisplayName(selectedGroup?.name || 'Trip expenses', currentTrip?.name);
+  const amountValue = roundCurrency(Number(amount || 0));
+
+  const memberOptions = useMemo(
+    () =>
+      crewList.map((member) => ({
+        id: member.id,
+        name: member.name,
+      })),
+    [crewList]
+  );
 
   const eventOptions = useMemo(
     () =>
       itineraryDays.flatMap((day) =>
         day.events.map((event) => ({
           id: event.id,
-          label: `${day.title}: ${event.title}`,
+          label: event.title,
+          meta: day.title,
         }))
       ),
     [itineraryDays]
   );
 
   const splitPreview = useMemo<ExpenseSplit[]>(() => {
-    if (crewList.length === 0) {
+    const selectedMembers = memberOptions.filter((member) => selectedParticipantIds.includes(member.id));
+    if (selectedMembers.length === 0) {
       return [];
     }
 
-    if (splitMethod === 'Custom split') {
-      return crewList.map((member) => ({
-        memberId: member.id,
-        memberName: member.name,
-        amount: Number(customAmounts[member.id] || 0),
-      }));
+    if (splitMethod === 'Equal split') {
+      return buildEqualSplitPreview(memberOptions, selectedParticipantIds, amountValue);
     }
 
-    const base = Math.floor((safeAmount / memberCount) * 100) / 100;
-    const remainingCents = Math.round(safeAmount * 100) - Math.round(base * 100) * memberCount;
-    return crewList.map((member, index) => ({
+    return selectedMembers.map((member) => ({
       memberId: member.id,
       memberName: member.name,
-      amount: Number((base + (index < remainingCents ? 0.01 : 0)).toFixed(2)),
+      amount: roundCurrency(Number(customAmounts[member.id] || 0)),
     }));
-  }, [crewList, customAmounts, memberCount, safeAmount, splitMethod]);
+  }, [amountValue, customAmounts, memberOptions, selectedParticipantIds, splitMethod]);
 
-  const customTotal = splitPreview.reduce((sum, split) => sum + split.amount, 0);
-  const customValid = splitMethod === 'Equal split' || Math.abs(customTotal - safeAmount) <= 0.01;
+  const customTotal = useMemo(
+    () => roundCurrency(splitPreview.reduce((sum, split) => sum + split.amount, 0)),
+    [splitPreview]
+  );
 
-  const handleSaveExpense = async () => {
-    if (!currentTrip?.id) {
-      Alert.alert('No trip selected', 'Open a trip before adding expenses.');
+  const customValid = splitMethod === 'Equal split' || Math.abs(customTotal - amountValue) <= 0.01;
+  const canSave = title.trim().length > 0 && amountValue > 0 && splitPreview.length > 0 && customValid && expenseGroupId > 0;
+  const paidByName = memberOptions.find((member) => Number(member.id) === paidByUserId)?.name || 'you';
+  const paidByLabel = String(user?.id) === String(paidByUserId) ? 'you' : paidByName;
+  const splitLabel = splitMethod === 'Equal split' ? 'equally' : 'custom';
+  const perPersonLabel = splitPreview.length > 0 ? formatMoney(amountValue / splitPreview.length) : '$0.00';
+
+  const toggleParticipant = (memberId: string) => {
+    setSelectedParticipantIds((current) => {
+      if (current.includes(memberId)) {
+        if (current.length === 1) {
+          return current;
+        }
+        return current.filter((id) => id !== memberId);
+      }
+      return [...current, memberId];
+    });
+  };
+
+  /**
+   * Open a modal to choose which expense group this expense belongs to.
+   * Previously this used a simple Alert which truncated long lists and
+   * provided no scrolling. Using our own modal makes the list scrollable
+   * and more user friendly on mobile devices.
+   */
+  const openGroupPicker = () => {
+    setShowGroupPicker(true);
+  };
+
+  const handleSave = async () => {
+    // Determine the tripId based on the selected group.  In earlier versions the
+    // AddExpense screen always used the currently active trip.  If the user
+    // chooses a group from a different trip the group has a tripId field.  We
+    // fall back to currentTrip.id for backwards compatibility.
+    const selectedGroupObj = expenseGroups.find((g) => g.id === expenseGroupId);
+    const tripIdForExpense = selectedGroupObj?.tripId ?? currentTrip?.id;
+    if (!tripIdForExpense) {
+      Alert.alert('No trip selected', 'Open a trip before adding an expense.');
       return;
     }
-    if (!title.trim() || safeAmount <= 0) {
-      Alert.alert('Missing details', 'Enter a title and positive amount.');
-      return;
-    }
-    if (crewList.length === 0) {
-      Alert.alert('Crew missing', 'Trip members must load before adding a split.');
-      return;
-    }
-    if (!customValid) {
-      Alert.alert('Custom split mismatch', 'Custom split amounts must equal the expense total.');
+
+    if (!canSave) {
+      Alert.alert('Expense incomplete', 'Add description, amount, group, and a valid split before saving.');
       return;
     }
 
     try {
+      setSaving(true);
       const payload = {
         title: title.trim(),
-        amount: Number(safeAmount.toFixed(2)),
+        amount: amountValue,
         paidByUserId,
         expenseGroupId,
         linkedEventId,
@@ -129,14 +213,14 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
       };
 
       const response = editingExpenseId
-        ? await updateTripExpense(currentTrip.id, editingExpenseId, payload)
-        : await createTripExpense(currentTrip.id, payload);
+        ? await updateTripExpense(tripIdForExpense, editingExpenseId, payload)
+        : await createTripExpense(tripIdForExpense, payload);
 
       const savedExpense = {
         id: response.expense.id,
         title: response.expense.title ?? payload.title,
         amount: response.expense.amount ?? payload.amount,
-        paidBy: response.expense.paidBy ?? crewList.find((member) => Number(member.id) === paidByUserId)?.name ?? 'Trip member',
+        paidBy: response.expense.paidBy ?? memberOptions.find((member) => Number(member.id) === paidByUserId)?.name ?? 'Trip member',
         paidByUserId: response.expense.paidByUserId ?? paidByUserId,
         expenseGroupId: response.expense.expenseGroupId ?? expenseGroupId,
         linkedEventId: response.expense.linkedEventId ?? linkedEventId,
@@ -147,6 +231,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
         createdAt: response.expense.createdAt || new Date().toISOString(),
         splitPreview: Array.isArray(response.expense.splitPreview) ? response.expense.splitPreview : splitPreview,
       };
+
       if (editingExpenseId) {
         updateExpense(editingExpenseId, savedExpense);
       } else {
@@ -156,299 +241,775 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
       navigation.navigate('MainTabs', { screen: 'Expenses' });
     } catch (error: any) {
       Alert.alert('Save failed', error?.message || 'Could not save expense');
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <Screen showFooter>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <SectionTitle
-          title={editingExpenseId ? 'Edit Split' : 'Add Split'}
-          subtitle="Choose the group, payer, event link, then split it equally or custom."
-          action={<NotificationBell />}
-        />
+    <View style={styles.screen}>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        // Use height behavior on Android to ensure the view resizes when the keyboard appears.
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + 8 }]}>
+          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+            <Text style={styles.headerActionText}>✕</Text>
+          </Pressable>
+          <Text style={styles.headerTitle}>{editingExpenseId ? 'Edit an expense' : 'Add an expense'}</Text>
+          <Pressable onPress={handleSave} disabled={!canSave || saving} hitSlop={8}>
+            <Text style={[styles.headerSaveText, (!canSave || saving) && styles.headerSaveTextDisabled]}>
+              {saving ? 'Saving' : 'Save'}
+            </Text>
+          </Pressable>
+        </View>
 
-        <AppCard>
-          <View style={styles.headerRow}>
-            <View style={styles.headerInfo}>
-              <Text style={styles.eyebrow}>Trip context</Text>
-              <Text style={styles.tripTitle}>{currentTrip?.name ?? 'Current trip'}</Text>
-              <Text style={styles.tripMeta}>
-                {crewList.length} crew members - {expenses.length} logged split{expenses.length === 1 ? '' : 's'}
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 28 }]}
+        >
+          <View style={styles.contextRow}>
+            <Text style={styles.contextLabel}>With you and:</Text>
+            <Pressable style={styles.groupPill} onPress={openGroupPicker}>
+              <Ionicons name="people-outline" size={15} color={palette.text} />
+              <Text style={styles.groupPillText} numberOfLines={1}>
+                {selectedGroupLabel || currentTrip?.name || 'Trip expenses'}
               </Text>
+              <Ionicons name="chevron-down" size={14} color={palette.textMuted} />
+            </Pressable>
+          </View>
+
+          <View style={styles.formCard}>
+            <View style={styles.editorRow}>
+              <View style={styles.leadingIconBox}>
+                <Ionicons name="receipt-outline" size={22} color={palette.teal} />
+              </View>
+              <TextInput
+                value={title}
+                onChangeText={setTitle}
+                placeholder="Enter a description"
+                placeholderTextColor={palette.textMuted}
+                style={styles.editorInput}
+              />
             </View>
-            <Pill label={`$${totalExpenseAmount().toFixed(2)} total`} tone="accent" />
+
+            <View style={styles.editorRow}>
+              <View style={styles.leadingIconBox}>
+                <Text style={styles.currencySymbol}>$</Text>
+              </View>
+              <TextInput
+                value={amount}
+                onChangeText={setAmount}
+                placeholder="0.00"
+                placeholderTextColor={palette.textMuted}
+                keyboardType="numeric"
+                style={styles.amountInput}
+              />
+            </View>
+
+            <View style={styles.inlineActionRow}>
+              <Text style={styles.inlineActionText}>Paid by</Text>
+              <Pressable style={styles.inlineChip} onPress={() => setShowPayerModal(true)}>
+                <Text style={styles.inlineChipText}>{paidByLabel}</Text>
+              </Pressable>
+              <Text style={styles.inlineActionText}>and split</Text>
+              <Pressable style={styles.inlineChip} onPress={() => setShowSplitModal(true)}>
+                <Text style={styles.inlineChipText}>{splitLabel}</Text>
+              </Pressable>
+            </View>
           </View>
-        </AppCard>
 
-        <AppCard>
-          <Text style={styles.eyebrow}>Expense details</Text>
-          <TextField label="Expense title" value={title} onChangeText={setTitle} placeholder="Expense title" />
-          <TextField label="Amount" value={amount} onChangeText={setAmount} placeholder="Amount" keyboardType="numeric" />
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryHeader}>
+              <Text style={styles.summaryTitle}>Split summary</Text>
+              <Text style={styles.summaryMeta}>{splitPreview.length} people</Text>
+            </View>
 
-          <Text style={styles.fieldLabel}>Expense group</Text>
-          <View style={styles.chipRow}>
-            {expenseGroups.map((group) => (
-              <Chip key={group.id} label={group.name} selected={expenseGroupId === group.id} onPress={() => setExpenseGroupId(group.id)} />
-            ))}
-          </View>
+            {splitPreview.length === 0 ? (
+              <Text style={styles.summaryEmpty}>Choose people who are part of this expense.</Text>
+            ) : (
+              splitPreview.map((split) => (
+                <View key={split.memberId} style={styles.summaryRow}>
+                  <Text style={styles.summaryName}>{split.memberName}</Text>
+                  <Text style={styles.summaryAmount}>{formatMoney(split.amount)}</Text>
+                </View>
+              ))
+            )}
 
-          <Text style={styles.fieldLabel}>Paid by</Text>
-          <View style={styles.chipRow}>
-            {crewList.map((member) => (
-              <Chip key={member.id} label={member.name} selected={paidByUserId === Number(member.id)} onPress={() => setPaidByUserId(Number(member.id))} />
-            ))}
+            {splitMethod === 'Custom split' && !customValid ? (
+              <Text style={styles.summaryWarning}>Custom split must total {formatMoney(amountValue)}.</Text>
+            ) : null}
           </View>
 
           {eventOptions.length > 0 ? (
-            <>
-              <Text style={styles.fieldLabel}>Link to itinerary event</Text>
-              <View style={styles.chipRow}>
-                <Chip label="None" selected={!linkedEventId} onPress={() => setLinkedEventId('')} />
+            <View style={styles.optionalCard}>
+              <Text style={styles.optionalTitle}>Link to itinerary</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                <MemberChip label="None" selected={!linkedEventId} onPress={() => setLinkedEventId('')} compact />
                 {eventOptions.map((event) => (
-                  <Chip key={event.id} label={event.label} selected={linkedEventId === event.id} onPress={() => setLinkedEventId(event.id)} />
-                ))}
-              </View>
-            </>
-          ) : null}
-
-          <TextField label="Notes" value={notes} onChangeText={setNotes} placeholder="Notes" multiline />
-        </AppCard>
-
-        <AppCard>
-          <Text style={styles.eyebrow}>Split method</Text>
-          <View style={styles.optionRow}>
-            {(['Equal split', 'Custom split'] as const).map((option) => (
-              <Pressable key={option} onPress={() => setSplitMethod(option)} style={[styles.optionCard, splitMethod === option && styles.optionCardSelected]}>
-                <Text style={[styles.optionText, splitMethod === option && styles.optionTextSelected]}>{option}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {splitMethod === 'Custom split' ? (
-            <View style={styles.customList}>
-              {crewList.map((member) => (
-                <View key={member.id} style={styles.customRow}>
-                  <Text style={styles.previewName}>{member.name}</Text>
-                  <TextField
-                    value={customAmounts[member.id] ?? ''}
-                    onChangeText={(value) => setCustomAmounts((current) => ({ ...current, [member.id]: value }))}
-                    placeholder="0.00"
-                    keyboardType="numeric"
-                    containerStyle={styles.amountFieldWrap}
-                    style={styles.amountInput}
+                  <MemberChip
+                    key={event.id}
+                    label={`${event.meta} · ${event.label}`}
+                    selected={linkedEventId === event.id}
+                    onPress={() => setLinkedEventId(event.id)}
+                    compact
                   />
-                </View>
-              ))}
-              <Text style={[styles.customHint, !customValid && styles.customHintError]}>
-                Custom total: ${customTotal.toFixed(2)} / ${safeAmount.toFixed(2)}
-              </Text>
+                ))}
+              </ScrollView>
             </View>
           ) : null}
-        </AppCard>
 
-        <AppCard>
-          <View style={styles.previewHeader}>
-            <View>
-              <Text style={styles.eyebrow}>Split preview</Text>
-              <Text style={styles.previewTitle}>${safeAmount > 0 ? safeAmount.toFixed(2) : '0.00'} total</Text>
-            </View>
-            <View style={styles.previewPill}>
-              <Text style={styles.previewPillText}>{memberCount} people</Text>
-            </View>
+          <View style={styles.optionalCard}>
+            <Text style={styles.optionalTitle}>Notes (optional)</Text>
+            <TextInput
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Add a note if the group needs context"
+              placeholderTextColor={palette.textMuted}
+              multiline
+              style={styles.notesInput}
+            />
           </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-          <View style={styles.previewList}>
-            {splitPreview.map((item) => (
-              <View key={item.memberId} style={styles.previewRow}>
-                <Text style={styles.previewName}>{item.memberName}</Text>
-                <Text style={styles.previewAmount}>${item.amount.toFixed(2)}</Text>
-              </View>
-            ))}
+      <Modal visible={showPayerModal} transparent animationType="slide" onRequestClose={() => setShowPayerModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Pressable onPress={() => setShowPayerModal(false)}>
+                <Text style={styles.modalAction}>Cancel</Text>
+              </Pressable>
+              <Text style={styles.modalTitle}>Paid by</Text>
+              <Pressable onPress={() => setShowPayerModal(false)}>
+                <Text style={styles.modalAction}>Done</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.modalLead}>Select who paid the full amount.</Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalList}>
+              {memberOptions.map((member) => {
+                const selected = Number(member.id) === paidByUserId;
+                return (
+                  <Pressable
+                    key={member.id}
+                    style={styles.memberRow}
+                    onPress={() => {
+                      setPaidByUserId(Number(member.id));
+                      setShowPayerModal(false);
+                    }}
+                  >
+                    <View style={styles.memberLeft}>
+                      <View style={styles.avatarCircle}>
+                        <Text style={styles.avatarText}>{getInitials(member.name)}</Text>
+                      </View>
+                      <Text style={styles.memberName}>{member.name}</Text>
+                    </View>
+                    <SelectionCheck selected={selected} />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
-        </AppCard>
-
-        <View style={styles.actions}>
-          <PrimaryButton title={editingExpenseId ? 'Save Changes' : 'Save Expense'} onPress={handleSaveExpense} />
-          <PrimaryButton title="Back to Expenses" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Expenses' })} />
         </View>
-      </ScrollView>
-    </Screen>
+      </Modal>
+
+      <Modal
+        visible={showSplitModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSplitModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          {/* Wrap the split modal in a KeyboardAvoidingView so that custom split inputs are not hidden by the soft keyboard. */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+            style={styles.modalCard}
+          >
+            <View style={styles.modalHeader}>
+              <Pressable onPress={() => setShowSplitModal(false)}>
+                <Text style={styles.modalAction}>Cancel</Text>
+              </Pressable>
+              <Text style={styles.modalTitle}>Split options</Text>
+              <Pressable onPress={() => setShowSplitModal(false)}>
+                <Text style={styles.modalAction}>Done</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.modalHeading}>{splitMethod === 'Equal split' ? 'Split equally' : 'Custom split'}</Text>
+            <Text style={styles.modalLead}>
+              {splitMethod === 'Equal split'
+                ? 'Select which people owe an equal share.'
+                : 'Select people and enter each share so the total matches the expense amount.'}
+            </Text>
+
+            <View style={styles.modeRow}>
+              <Pressable
+                onPress={() => setSplitMethod('Equal split')}
+                style={[styles.modePill, splitMethod === 'Equal split' && styles.modePillSelected]}
+              >
+                <Text style={[styles.modePillText, splitMethod === 'Equal split' && styles.modePillTextSelected]}>=</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setSplitMethod('Custom split')}
+                style={[styles.modePill, splitMethod === 'Custom split' && styles.modePillSelected]}
+              >
+                <Text style={[styles.modePillText, splitMethod === 'Custom split' && styles.modePillTextSelected]}>1.23</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalList}
+              keyboardShouldPersistTaps="handled"
+            >
+              {memberOptions.map((member) => {
+                const selected = selectedParticipantIds.includes(member.id);
+                return (
+                  <View key={member.id} style={styles.memberRow}>
+                    <Pressable style={styles.memberLeft} onPress={() => toggleParticipant(member.id)}>
+                      <View style={styles.avatarCircle}>
+                        <Text style={styles.avatarText}>{getInitials(member.name)}</Text>
+                      </View>
+                      <Text style={styles.memberName}>{member.name}</Text>
+                    </Pressable>
+
+                    {splitMethod === 'Custom split' ? (
+                      <View style={styles.customSplitRow}>
+                        <TextInput
+                          value={customAmounts[member.id] ?? ''}
+                          onChangeText={(value) => {
+                            setSelectedParticipantIds((current) =>
+                              current.includes(member.id) ? current : [...current, member.id]
+                            );
+                            setCustomAmounts((current) => ({ ...current, [member.id]: value }));
+                          }}
+                          placeholder="0.00"
+                          placeholderTextColor={palette.textMuted}
+                          keyboardType="numeric"
+                          style={[styles.customAmountInput, !selected && styles.customAmountInputMuted]}
+                        />
+                        <Pressable onPress={() => toggleParticipant(member.id)}>
+                          <SelectionCheck selected={selected} />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <Pressable onPress={() => toggleParticipant(member.id)}>
+                        <SelectionCheck selected={selected} />
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <View>
+                <Text style={styles.modalFooterValue}>
+                  {splitMethod === 'Equal split' ? `${perPersonLabel}/person` : formatMoney(customTotal)}
+                </Text>
+                <Text style={styles.modalFooterMeta}>
+                  {selectedParticipantIds.length === memberOptions.length ? 'All' : `${selectedParticipantIds.length} selected`}
+                </Text>
+              </View>
+              {splitMethod === 'Custom split' && !customValid ? (
+                <Text style={styles.modalFooterWarning}>Needs {formatMoney(amountValue)}</Text>
+              ) : null}
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Expense group picker modal */}
+      <Modal
+        visible={showGroupPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowGroupPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Pressable onPress={() => setShowGroupPicker(false)}>
+                <Text style={styles.modalAction}>Cancel</Text>
+              </Pressable>
+              <Text style={styles.modalTitle}>Select group</Text>
+              <Pressable onPress={() => setShowGroupPicker(false)}>
+                <Text style={styles.modalAction}>Done</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.modalLead}>Choose where this expense belongs.</Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalList}>
+              {expenseGroups.map((group) => {
+                const selected = group.id === expenseGroupId;
+                return (
+                  <Pressable
+                    key={group.id}
+                    style={styles.memberRow}
+                    onPress={() => {
+                      setExpenseGroupId(group.id);
+                      setShowGroupPicker(false);
+                    }}
+                  >
+                    <View style={styles.memberLeft}>
+                      <View style={styles.avatarCircle}>
+                        <Text style={styles.avatarText}>{getInitials(getExpenseGroupDisplayName(group.name, currentTrip?.name).slice(0, 2))}</Text>
+                      </View>
+                      <Text style={styles.memberName}>{getExpenseGroupDisplayName(group.name, currentTrip?.name)}</Text>
+                    </View>
+                    <SelectionCheck selected={selected} />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
-function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+function MemberChip({
+  label,
+  selected,
+  onPress,
+  compact = false,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  compact?: boolean;
+}) {
   return (
-    <Pressable onPress={onPress} style={[styles.chip, selected && styles.chipSelected]}>
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]} numberOfLines={1}>
+    <Pressable onPress={onPress} style={[styles.memberChip, compact && styles.memberChipCompact, selected && styles.memberChipSelected]}>
+      <Text style={[styles.memberChipText, selected && styles.memberChipTextSelected]} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
   );
 }
 
+function SelectionCheck({ selected }: { selected: boolean }) {
+  return (
+    <View style={[styles.checkCircle, selected && styles.checkCircleSelected]}>
+      {selected ? <Ionicons name="checkmark" size={14} color={palette.white} /> : null}
+    </View>
+  );
+}
+
+function getInitials(name: string) {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('');
+}
+
 const styles = StyleSheet.create({
-  content: {
-    paddingBottom: spacing.xl,
+  screen: {
+    flex: 1,
+    backgroundColor: palette.screen,
   },
-  headerRow: {
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 18,
+  },
+  headerActionText: {
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: '700',
+    minWidth: 44,
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: palette.heroText,
+    fontSize: 21,
+    fontWeight: '700',
+  },
+  headerSaveText: {
+    color: palette.teal,
+    fontSize: 18,
+    fontWeight: '700',
+    minWidth: 44,
+    textAlign: 'right',
+  },
+  headerSaveTextDisabled: {
+    color: palette.textMuted,
+  },
+  content: {
+    paddingHorizontal: 20,
+    gap: 18,
+  },
+  contextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  contextLabel: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  groupPill: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    backgroundColor: palette.panel,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  groupPillText: {
+    flex: 1,
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  formCard: {
+    backgroundColor: palette.panel,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    padding: 18,
+    gap: 18,
+  },
+  editorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  leadingIconBox: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.tealSoft,
+  },
+  currencySymbol: {
+    color: palette.teal,
+    fontSize: 30,
+    fontWeight: '700',
+  },
+  editorInput: {
+    flex: 1,
+    minHeight: 52,
+    borderBottomWidth: 2,
+    borderBottomColor: palette.teal,
+    color: palette.text,
+    fontSize: 17,
+    paddingVertical: 0,
+  },
+  amountInput: {
+    flex: 1,
+    minHeight: 52,
+    borderBottomWidth: 2,
+    borderBottomColor: palette.line,
+    color: palette.text,
+    fontSize: 28,
+    fontWeight: '600',
+    paddingVertical: 0,
+  },
+  inlineActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingTop: 8,
+  },
+  inlineActionText: {
+    color: palette.text,
+    fontSize: 15,
+  },
+  inlineChip: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  inlineChipText: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  summaryCard: {
+    borderRadius: 18,
+    backgroundColor: palette.panel,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    padding: 18,
+  },
+  summaryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
+    alignItems: 'center',
+    marginBottom: 10,
   },
-  headerInfo: {
-    flex: 1,
-  },
-  eyebrow: {
-    fontSize: 12,
+  summaryTitle: {
+    color: palette.text,
+    fontSize: 16,
     fontWeight: '700',
-    color: colors.accent,
-    marginBottom: spacing.sm,
   },
-  tripTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  tripMeta: {
-    marginTop: 6,
+  summaryMeta: {
+    color: palette.textMuted,
     fontSize: 13,
-    lineHeight: 20,
-    color: colors.textSecondary,
   },
-  fieldLabel: {
-    fontSize: 13,
+  summaryEmpty: {
+    color: palette.textMuted,
+    fontSize: 14,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: palette.line,
+  },
+  summaryName: {
+    color: palette.text,
+    fontSize: 15,
+  },
+  summaryAmount: {
+    color: palette.teal,
+    fontSize: 15,
     fontWeight: '700',
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
+  },
+  summaryWarning: {
+    color: palette.red,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 10,
+  },
+  optionalCard: {
+    borderRadius: 18,
+    backgroundColor: palette.panel,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    padding: 18,
+    gap: 12,
+  },
+  optionalTitle: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '700',
   },
   chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
+    gap: 10,
   },
-  chip: {
-    maxWidth: '100%',
-    backgroundColor: '#F8FAFC',
-    borderRadius: radius.pill,
+  memberChip: {
+    maxWidth: 220,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: palette.cardBorder,
+    backgroundColor: palette.panelSoft,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  chipSelected: {
-    backgroundColor: '#EEF4FF',
-    borderColor: '#C7DAFF',
+  memberChipCompact: {
+    paddingVertical: 9,
   },
-  chipText: {
-    fontSize: 14,
+  memberChipSelected: {
+    borderColor: palette.teal,
+    backgroundColor: palette.tealSoft,
+  },
+  memberChipText: {
+    color: palette.text,
+    fontSize: 13,
+  },
+  memberChipTextSelected: {
+    color: palette.teal,
     fontWeight: '700',
-    color: colors.textSecondary,
   },
-  chipTextSelected: {
-    color: colors.accent,
-  },
-  optionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  optionCard: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: radius.lg,
+  notesInput: {
+    minHeight: 90,
+    borderRadius: 14,
+    backgroundColor: palette.panelSoft,
     borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-  },
-  optionCardSelected: {
-    backgroundColor: '#EEF4FF',
-    borderColor: '#C7DAFF',
-  },
-  optionText: {
+    borderColor: palette.cardBorder,
+    color: palette.text,
     fontSize: 14,
-    fontWeight: '700',
-    color: colors.textSecondary,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    textAlignVertical: 'top',
   },
-  optionTextSelected: {
-    color: colors.accent,
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: palette.modalOverlay,
   },
-  customList: {
-    marginTop: spacing.md,
-    gap: spacing.sm,
+  modalCard: {
+    maxHeight: '84%',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    backgroundColor: palette.screen,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 28,
   },
-  customRow: {
+  modalHeader: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
   },
-  amountInput: {
-    width: 110,
-    textAlign: 'right',
-  },
-  amountFieldWrap: {
-    width: 110,
-  },
-  customHint: {
-    color: colors.textSecondary,
-    fontWeight: '700',
-  },
-  customHintError: {
-    color: colors.danger,
-  },
-  previewHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  previewTitle: {
+  modalAction: {
+    color: palette.teal,
     fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
+    fontWeight: '600',
   },
-  previewPill: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  previewPillText: {
-    fontSize: 12,
+  modalTitle: {
+    color: palette.text,
+    fontSize: 18,
     fontWeight: '700',
-    color: colors.textSecondary,
   },
-  previewList: {
-    gap: spacing.sm,
+  modalHeading: {
+    color: palette.text,
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 18,
   },
-  previewRow: {
+  modalLead: {
+    color: palette.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 22,
+  },
+  modePill: {
+    flex: 1,
+    height: 56,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    backgroundColor: palette.panelSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modePillSelected: {
+    backgroundColor: palette.tealSoft,
+    borderColor: palette.teal,
+  },
+  modePillText: {
+    color: palette.text,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  modePillTextSelected: {
+    color: palette.teal,
+  },
+  modalList: {
+    paddingTop: 18,
+    gap: 10,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.line,
+  },
+  memberLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: palette.panelSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+  },
+  avatarText: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  memberName: {
+    flex: 1,
+    color: palette.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  checkCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    borderColor: palette.teal,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkCircleSelected: {
+    backgroundColor: palette.teal,
+  },
+  customSplitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  customAmountInput: {
+    width: 96,
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.cardBorder,
+    backgroundColor: palette.panelSoft,
+    color: palette.text,
+    textAlign: 'right',
+    paddingHorizontal: 12,
+    fontSize: 15,
+  },
+  customAmountInputMuted: {
+    opacity: 0.65,
+  },
+  modalFooter: {
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: palette.line,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
   },
-  previewName: {
-    flex: 1,
-    fontSize: 14,
+  modalFooterValue: {
+    color: palette.text,
+    fontSize: 17,
     fontWeight: '700',
-    color: colors.textPrimary,
   },
-  previewAmount: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: colors.accent,
+  modalFooterMeta: {
+    color: palette.textMuted,
+    fontSize: 13,
+    marginTop: 2,
   },
-  actions: {
-    gap: spacing.sm,
+  modalFooterWarning: {
+    color: palette.orange,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
+import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -206,16 +207,6 @@ export default function TripCreateScreen({ navigation }: Props) {
         }),
       });
 
-      let createdTrip = created.trip;
-      try {
-        const cover = await ensureTripCoverFromDestination(created.trip.id);
-        if (cover.image_url) {
-          createdTrip = { ...createdTrip, image_url: cover.image_url };
-        }
-      } catch (coverError) {
-        console.log('Destination cover generation failed', coverError);
-      }
-
       const destinationOption: DestinationOption = {
         id: selectedDestination.id,
         name: selectedDestination.name,
@@ -227,9 +218,19 @@ export default function TripCreateScreen({ navigation }: Props) {
       setBestMatchRange(travelRange);
       setDestinationOptions([destinationOption]);
       setSelectedDestinationId(destinationOption.id);
-      setCurrentTrip(createdTrip);
+      setCurrentTrip(created.trip);
       setTripLead(crew[0] ?? null);
       navigation.navigate('TripOverview');
+
+      ensureTripCoverFromDestination(created.trip.id)
+        .then((cover) => {
+          if (cover.image_url) {
+            setCurrentTrip({ ...created.trip, image_url: cover.image_url });
+          }
+        })
+        .catch((coverError) => {
+          console.log('Destination cover generation failed', coverError);
+        });
     } catch (error: any) {
       console.log('Create trip failed', error);
       Alert.alert('Trip creation failed', error?.message || 'Could not create the trip right now.');
@@ -434,6 +435,7 @@ export default function TripCreateScreen({ navigation }: Props) {
           <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
         </Pressable>
       </View>
+      <AppFooter />
     </View>
   );
 }
@@ -446,7 +448,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 140,
+    paddingBottom: 220,
   },
   header: {
     flexDirection: 'row',
@@ -772,10 +774,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: 84,
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 28,
+    paddingBottom: 16,
     backgroundColor: colors.background,
   },
   ctaButton: {
