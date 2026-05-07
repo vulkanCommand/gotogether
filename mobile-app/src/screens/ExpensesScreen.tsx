@@ -56,6 +56,16 @@ const palette = {
   white: '#FFFFFF',
 };
 
+// Extend the BalanceLine type locally for ease of reference.  This matches the
+// definition in utils/expenseCalculations.ts but avoids an additional import.
+type BalanceLine = {
+  fromMemberId: string;
+  fromMemberName: string;
+  toMemberId: string;
+  toMemberName: string;
+  amount: number;
+};
+
 const groupIcons = ['document-text-outline', 'home-outline', 'airplane-outline', 'wallet-outline'];
 const groupIconColors = ['#134E7A', '#145C43', '#A44B12', '#7A1748'];
 
@@ -76,6 +86,16 @@ export default function ExpensesScreen({ navigation }: Props) {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [settling, setSettling] = useState(false);
+
+  // Show a modal to choose which person to settle with.  When visible the user
+  // selects from one of the current balance lines, then chooses the payment
+  // method.
+  const [showSettleModal, setShowSettleModal] = useState(false);
+  const [selectedSettleLine, setSelectedSettleLine] = useState<BalanceLine | null>(null);
+
+  // Search modal state to allow filtering groups when tapping the search icon.
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const refreshGroups = useCallback(async () => {
     try {
@@ -284,18 +304,64 @@ export default function ExpensesScreen({ navigation }: Props) {
       Alert.alert('Nothing to settle', 'You are already settled in this group.');
       return;
     }
+    // Instead of paying everyone at once, allow the user to select a specific
+    // balance line.  Opening the settle modal presents a list of members the
+    // user either owes or is owed by.
+    setShowSettleModal(true);
+  };
 
-    Alert.alert('Settle up', 'How was this paid?', [
-      { text: 'Cash', onPress: () => void createSettlement('Cash') },
-      { text: 'Card', onPress: () => void createSettlement('Card') },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  // Create a single settlement for a specific balance line.  This mirrors the
+  // existing createSettlement implementation but only applies to one line.
+  const createSingleSettlement = async (line: BalanceLine, method: 'Cash' | 'Card') => {
+    if (!selectedSection?.trip.id || !selectedGroup || settling) {
+      return;
+    }
+    try {
+      setSettling(true);
+      // Determine whether the current user is the debtor or creditor.
+      const userKey = String(user?.id ?? '');
+      const userOwes = line.fromMemberId === userKey;
+      const payerId = userOwes ? Number(line.fromMemberId) : Number(line.toMemberId);
+      const receiverId = userOwes ? line.toMemberId : line.fromMemberId;
+      const receiverName = userOwes ? line.toMemberName : line.fromMemberName;
+      const payerName = userOwes ? line.fromMemberName : line.toMemberName;
+
+      await createTripExpense(selectedSection.trip.id, {
+        title: userOwes ? `Settlement to ${receiverName}` : `Settlement from ${payerName}`,
+        amount: line.amount,
+        paidByUserId: payerId,
+        expenseGroupId: selectedGroup.id,
+        linkedEventId: '',
+        splitMethod: `Settlement - ${method}`,
+        notes: `Settled by ${method.toLowerCase()}`,
+        splitPreview: [
+          {
+            memberId: String(receiverId),
+            memberName: receiverName,
+            amount: line.amount,
+          },
+        ],
+      });
+      await refreshGroups();
+      Alert.alert('Settled', `Balance with ${receiverName} cleared using ${method}.`);
+    } catch (error: any) {
+      Alert.alert('Settle up failed', error?.message || 'Could not settle this balance.');
+    } finally {
+      setSettling(false);
+    }
   };
 
   const renderOverview = () => (
     <>
       <View style={styles.topRow}>
-        <Pressable style={styles.circleButton} onPress={() => void refreshGroups()}>
+        <Pressable
+          style={styles.circleButton}
+          onPress={() => {
+            // Open a search modal when tapping the search icon instead of refreshing
+            setSearchQuery('');
+            setShowSearchModal(true);
+          }}
+        >
           <Ionicons name="search-outline" size={24} color={palette.text} />
         </Pressable>
         <Pressable onPress={() => setShowGroupModal(true)}>
@@ -342,12 +408,8 @@ export default function ExpensesScreen({ navigation }: Props) {
                 )}
               </View>
               <View style={styles.groupRight}>
-                <Text style={[styles.groupBalanceLabel, isPositive ? styles.positiveText : styles.negativeText]}>
-                  {isPositive ? 'you are owed' : 'you owe'}
-                </Text>
-                <Text style={[styles.groupBalanceAmount, isPositive ? styles.positiveText : styles.negativeText]}>
-                  {formatMoney(isPositive ? groupSummary.currentUserIsOwed : groupSummary.currentUserOwes)}
-                </Text>
+                <Text style={styles.groupBalanceLabel}>Total spent</Text>
+                <Text style={styles.groupBalanceAmount}>{formatMoney(groupSummary.totalSpent)}</Text>
               </View>
             </Pressable>
           );
@@ -373,7 +435,7 @@ export default function ExpensesScreen({ navigation }: Props) {
 
     return (
       <>
-        <View style={[styles.hero, { paddingTop: Math.max(insets.top, 14) + 8 }]}> 
+        <View style={[styles.hero, { paddingTop: Math.max(insets.top, 14) + 8 }]}>
           <View style={styles.heroActionsRow}>
             <Pressable style={styles.heroIconButton} onPress={() => setSelectedGroupId(null)}>
               <Ionicons name="chevron-back" size={24} color={palette.white} />
@@ -503,6 +565,115 @@ export default function ExpensesScreen({ navigation }: Props) {
           </View>
         </View>
       </Modal>
+
+      {/* Modal to choose which balance line to settle.  Lists all balances
+          involving the current user.  Once a line is selected, the user is
+          prompted to choose the payment method. */}
+      <Modal
+        visible={showSettleModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSettleModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.settleModalCard}>
+            <Text style={styles.modalTitle}>Select person to settle with</Text>
+            {selectedGroupSummary?.currentUserBalanceLines?.map((line) => {
+              const userKey = String(user?.id ?? '');
+              const userOwes = line.fromMemberId === userKey;
+              const personName = userOwes ? line.toMemberName : line.fromMemberName;
+              const descriptor = userOwes
+                ? `You owe ${formatMoney(line.amount)} to ${personName}`
+                : `${personName} owes you ${formatMoney(line.amount)}`;
+              return (
+                <Pressable
+                  key={`${line.fromMemberId}-${line.toMemberId}`}
+                  onPress={() => {
+                    setShowSettleModal(false);
+                    setSelectedSettleLine(line);
+                    Alert.alert(
+                      `Settle with ${personName}`,
+                      'How was this paid?',
+                      [
+                        { text: 'Cash', onPress: () => void createSingleSettlement(line, 'Cash') },
+                        { text: 'Card', onPress: () => void createSingleSettlement(line, 'Card') },
+                        { text: 'Cancel', style: 'cancel' },
+                      ]
+                    );
+                  }}
+                  style={styles.settleRow}
+                >
+                  <Text style={styles.settleRowText}>{descriptor}</Text>
+                </Pressable>
+              );
+            })}
+            {(!selectedGroupSummary || selectedGroupSummary.currentUserBalanceLines.length === 0) ? (
+              <Text style={styles.emptyText}>No balances to settle.</Text>
+            ) : null}
+            <Pressable style={styles.modalSecondaryButton} onPress={() => setShowSettleModal(false)}>
+              <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal for searching expense groups.  Provides a text input and shows
+          filtered results across all groups. */}
+      <Modal
+        visible={showSearchModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSearchModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.searchModalCard}>
+            <Text style={styles.modalTitle}>Search groups</Text>
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search by group or trip"
+              placeholderTextColor={palette.textMuted}
+              style={styles.modalInput}
+            />
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingVertical: 8 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {allGroups
+                .filter((group) => {
+                  const trip = tripSections.find((sec) => sec.groups.some((g) => g.id === group.id))?.trip;
+                  const query = searchQuery.trim().toLowerCase();
+                  if (!query) return true;
+                  const groupName = getExpenseGroupDisplayName(group.name, trip?.name).toLowerCase();
+                  return groupName.includes(query);
+                })
+                .map((group) => {
+                  const section = tripSections.find((sec) => sec.groups.some((g) => g.id === group.id));
+                  if (!section) return null;
+                  const groupSummary = calculateExpenseGroupSummary(group, crew, user?.id);
+                  return (
+                    <Pressable
+                      key={group.id}
+                      onPress={() => {
+                        // Open this group in the detail view.
+                        setShowSearchModal(false);
+                        openGroup(section.trip, group);
+                      }}
+                      style={styles.searchRow}
+                    >
+                      <Text style={styles.searchRowText}>{getExpenseGroupDisplayName(group.name, section.trip.name)}</Text>
+                      <Text style={styles.searchRowSubtext}>{formatMoney(groupSummary.totalSpent)}</Text>
+                    </Pressable>
+                  );
+                })}
+            </ScrollView>
+            <Pressable style={styles.modalSecondaryButton} onPress={() => setShowSearchModal(false)}>
+              <Text style={styles.modalSecondaryButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -511,7 +682,7 @@ function GroupAvatar({ index }: { index: number }) {
   const icon = groupIcons[index % groupIcons.length] as keyof typeof Ionicons.glyphMap;
   const color = groupIconColors[index % groupIconColors.length];
   return (
-    <View style={[styles.groupAvatar, { backgroundColor: color }]}> 
+    <View style={[styles.groupAvatar, { backgroundColor: color }]}>
       <Ionicons name={icon} size={22} color={palette.white} />
     </View>
   );
@@ -906,5 +1077,47 @@ const styles = StyleSheet.create({
     color: palette.white,
     fontSize: 14,
     fontWeight: '700',
+  },
+
+  // Additional styles for settle and search modals
+  settleModalCard: {
+    width: '88%',
+    borderRadius: 16,
+    backgroundColor: palette.panel,
+    padding: 20,
+    maxHeight: '70%',
+  },
+  settleRow: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.line,
+  },
+  settleRowText: {
+    fontSize: 15,
+    color: palette.text,
+  },
+  searchModalCard: {
+    width: '90%',
+    borderRadius: 16,
+    backgroundColor: palette.panel,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  searchRow: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.line,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  searchRowText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: palette.text,
+  },
+  searchRowSubtext: {
+    fontSize: 14,
+    color: palette.textMuted,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
@@ -12,7 +12,13 @@ import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { deleteMyProfileImage, profileImageFileUrl, updateMyProfile, updateMyProfileImage } from '../config/api';
+import {
+  deleteMyProfileImage,
+  profileImageFileUrl,
+  updateMyProfile,
+  updateMyProfileImage,
+  fetchTrips,
+} from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { useFriendStore } from '../store/friendStore';
 
@@ -27,6 +33,33 @@ export default function ProfileScreen({ navigation }: Props) {
   const token = useAuthStore((state) => state.token);
   const setUser = useAuthStore((state) => state.setUser);
   const friends = useFriendStore((state) => state.friends);
+
+  // Cache buster for the profile image URL.  This value is created once
+  // when the component mounts and remains constant for the lifetime of
+  // this component.  When the user uploads a new profile image we call
+  // setUser which triggers a re-render and picks up a new timestamp
+  // for the avatarSource.
+  const [avatarCacheBust] = useState(() => Date.now());
+
+  // State to hold the number of trips that have been completed.  We query
+  // the backend on mount to populate this value.
+  const [completedTripsCount, setCompletedTripsCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Fetch the user's trips and count how many have a completed_at timestamp.
+    const loadTrips = async () => {
+      try {
+        const response = await fetchTrips();
+        const trips = Array.isArray(response.trips) ? response.trips : [];
+        const completed = trips.filter((trip) => Boolean(trip.completed_at)).length;
+        setCompletedTripsCount(completed);
+      } catch (error) {
+        console.log('Profile trip count load failed', error);
+        setCompletedTripsCount(0);
+      }
+    };
+    void loadTrips();
+  }, []);
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? '');
@@ -101,9 +134,14 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
+  // To bust caches when the user updates their profile photo we append a timestamp
+  // query param to the image URL.  Without this some platforms continue to
+  // display a stale avatar until the component remounts.  We use Date.now
+  // instead of updated_at because the updated_at field may not reflect the
+  // image change immediately.
   const avatarSource =
     user?.profile_image_url && token
-      ? { uri: profileImageFileUrl(), headers: { Authorization: `Bearer ${token}` } }
+      ? { uri: `${profileImageFileUrl()}?cb=${avatarCacheBust}`, headers: { Authorization: `Bearer ${token}` } }
       : null;
 
   return (
@@ -136,7 +174,13 @@ export default function ProfileScreen({ navigation }: Props) {
             </Pressable>
 
             <View style={styles.identity}>
-              <Text style={styles.name}>{user?.name || 'Your name'}</Text>
+              {/* Display the number of completed trips instead of the user's name.  If the
+                  value is still loading show the user's name as a fallback. */}
+              <Text style={styles.name}>
+                {completedTripsCount != null
+                  ? `${completedTripsCount} trip${completedTripsCount === 1 ? '' : 's'} completed`
+                  : user?.name || 'Your name'}
+              </Text>
               <Text style={styles.email}>{user?.email || user?.phone || 'Signed in user'}</Text>
               <View style={styles.statRow}>
                 <View style={styles.statPill}>

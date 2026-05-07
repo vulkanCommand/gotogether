@@ -172,8 +172,16 @@ export const calculateExpenseGroupSummary = (
     .filter((line) => line.toMemberId === currentUserKey)
     .reduce((sum, line) => sum + line.amount, 0);
 
+  // Exclude settlement expenses from the total spent.  Settlement expenses
+  // represent transfers between members to clear balances and should not
+  // inflate the total amount of money spent on the trip.  We identify
+  // settlements by checking the split method string.
+  const nonSettlementExpenses = group.expenses.filter(
+    (expense) => !(expense.splitMethod || '').toLowerCase().includes('settlement')
+  );
+
   return {
-    totalSpent: toMoneyNumber(group.expenses.reduce((sum, expense) => sum + expense.amount, 0)),
+    totalSpent: toMoneyNumber(nonSettlementExpenses.reduce((sum, expense) => sum + expense.amount, 0)),
     currentUserOwes: toMoneyNumber(currentUserOwes),
     currentUserIsOwed: toMoneyNumber(currentUserIsOwed),
     netBalance: toMoneyNumber(currentUserIsOwed - currentUserOwes),

@@ -113,16 +113,19 @@ export default function HomeScreen({ navigation }: Props) {
   const fallbackActivityItems = useMemo(() => {
     return primaryTripItinerary
       .flatMap((day) =>
-        day.events.map((event) => ({
-          id: `${day.id}-${event.id}`,
-          title:
-            isCompletedEvent(event)
-              ? 'Event completed'
-              : event.status === 'active'
-                ? 'Event in progress'
-                : 'Upcoming event',
-          body: `${event.title} • ${day.title} • ${event.time}`,
-        }))
+        day.events.map((event) => {
+          // Use the actual event title for completed events rather than a generic label.
+          const statusLabel = isCompletedEvent(event)
+            ? `${event.title} completed`
+            : event.status === 'active'
+              ? `${event.title} in progress`
+              : `${event.title} upcoming`;
+          return {
+            id: `${day.id}-${event.id}`,
+            title: statusLabel,
+            body: `${event.title} • ${day.title} • ${event.time}`,
+          };
+        })
       )
       .slice(0, 3);
   }, [primaryTripItinerary]);

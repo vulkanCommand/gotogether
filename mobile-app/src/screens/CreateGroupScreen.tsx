@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View, Linking } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -132,13 +132,15 @@ export default function CreateGroupScreen({ navigation }: Props) {
 
     try {
       setInviting(true);
-      await sendSMSInvite({
-        phone: normalizedInvitePhone,
-        name: search.trim(),
-      });
-      Alert.alert('Invite sent', `We sent an SMS invite to ${formatPhoneForDisplay(normalizedInvitePhone)}.`);
+      // Use the device SMS composer directly.  On some deployments the
+      // backend provider for SMS is not configured, so attempting to send
+      // invites via the API fails.  Using a deep link into the default
+      // messenger app bypasses that requirement and provides a better UX.
+      const smsUrl = `sms:${normalizedInvitePhone}`;
+      await Linking.openURL(smsUrl);
+      Alert.alert('Invite', `Use your messaging app to send an invite to ${formatPhoneForDisplay(normalizedInvitePhone)}.`);
     } catch (error: any) {
-      Alert.alert('Invite failed', error?.message || 'Could not send the SMS invite right now.');
+      Alert.alert('Invite failed', error?.message || 'Could not open the SMS composer right now.');
     } finally {
       setInviting(false);
     }
@@ -206,6 +208,10 @@ export default function CreateGroupScreen({ navigation }: Props) {
             placeholderTextColor={colors.textMuted}
             style={styles.searchInput}
           />
+          {/* small refresh button to re-sync contacts and friends */}
+          <Pressable onPress={() => void refreshFriends()} style={styles.refreshButton} hitSlop={8}>
+            <Ionicons name="refresh" size={18} color={colors.textMuted} />
+          </Pressable>
         </View>
 
         {syncingFriends ? <Text style={styles.syncingText}>Syncing contacts and friends...</Text> : null}
@@ -253,13 +259,13 @@ export default function CreateGroupScreen({ navigation }: Props) {
                     onPress={async () => {
                       try {
                         setInviting(true);
-                        await sendSMSInvite({
-                          phone: contact.invitePhone,
-                          name: contact.name,
-                        });
-                        Alert.alert('Invite sent', `We sent an SMS invite to ${formatPhoneForDisplay(contact.invitePhone)}.`);
+                        // Open SMS composer for the selected contact instead of calling the backend.  This
+                        // avoids the “sms provider is not configured” error.
+                        const smsUrl = `sms:${contact.invitePhone}`;
+                        await Linking.openURL(smsUrl);
+                        Alert.alert('Invite', `Use your messaging app to send an invite to ${formatPhoneForDisplay(contact.invitePhone)}.`);
                       } catch (error: any) {
-                        Alert.alert('Invite failed', error?.message || 'Could not send the SMS invite right now.');
+                        Alert.alert('Invite failed', error?.message || 'Could not open the SMS composer right now.');
                       } finally {
                         setInviting(false);
                       }
@@ -399,6 +405,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textPrimary,
     paddingVertical: 0,
+  },
+  refreshButton: {
+    marginLeft: 4,
   },
   list: {
     gap: 8,

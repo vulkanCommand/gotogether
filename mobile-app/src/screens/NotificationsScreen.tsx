@@ -1,10 +1,10 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
 
 import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
-import PrimaryButton from '../components/PrimaryButton';
 import SectionTitle from '../components/SectionTitle';
 import {
   ApiNotification,
@@ -16,20 +16,19 @@ import {
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 
-type NotificationTab = 'Pending tasks' | 'Alerts';
+// We removed the concept of "Pending tasks" since trip completion no longer
+// requires votes. All notifications shown here are alerts, and tasks are no
+// longer surfaced.  A small X icon toggles the ability to clear all alerts.
 
 export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
-  const [activeTab, setActiveTab] = useState<NotificationTab>('Pending tasks');
-  const [loading, setLoading] = useState(false);
+  // Show or hide the "clear all" button.  Initially hidden until the user taps the X.
+  const [showClearAll, setShowClearAll] = useState(false);
   const [acceptingId, setAcceptingId] = useState<number | null>(null);
   const hasLoadedRef = useRef(false);
 
-  const loadNotifications = useCallback(async (showSpinner = false) => {
+  const loadNotifications = useCallback(async () => {
     try {
-      if (showSpinner) {
-        setLoading(true);
-      }
       const response = await fetchNotifications();
       setNotifications(response.notifications);
       hasLoadedRef.current = true;
@@ -38,28 +37,20 @@ export default function NotificationsScreen() {
       if (!hasLoadedRef.current) {
         setNotifications([]);
       }
-    } finally {
-      if (showSpinner) {
-        setLoading(false);
-      }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadNotifications(!hasLoadedRef.current);
+      loadNotifications();
     }, [loadNotifications])
   );
 
-  const pendingTasks = useMemo(
-    () => notifications.filter((item) => item.requiresAction && !item.actionCompletedAt),
-    [notifications]
-  );
+  // Filter only alerts; tasks requiring action are no longer displayed.
   const alerts = useMemo(
     () => notifications.filter((item) => !item.requiresAction || item.actionCompletedAt),
     [notifications]
   );
-  const visibleNotifications = activeTab === 'Pending tasks' ? pendingTasks : alerts;
 
   const clearOne = async (notification: ApiNotification) => {
     if (notification.requiresAction && !notification.actionCompletedAt) {
@@ -96,7 +87,8 @@ export default function NotificationsScreen() {
   const clearAll = async () => {
     try {
       await clearAllNotifications();
-      setNotifications((items) => items.filter((item) => item.requiresAction && !item.actionCompletedAt));
+      setNotifications([]);
+      setShowClearAll(false);
     } catch (error: any) {
       Alert.alert('Clear failed', error?.message || 'Could not clear notifications');
     }
@@ -104,71 +96,61 @@ export default function NotificationsScreen() {
 
   return (
     <Screen showFooter showBackButton>
-      <SectionTitle title="Notifications" subtitle="Trip updates and pending confirmations." />
+      <SectionTitle title="Notifications" subtitle="Trip updates" />
 
-      <View style={styles.toggleRow}>
-        {(['Pending tasks', 'Alerts'] as NotificationTab[]).map((tab) => {
-          const selected = activeTab === tab;
-          const count = tab === 'Pending tasks' ? pendingTasks.length : alerts.length;
-          return (
-            <Pressable key={tab} style={[styles.toggle, selected && styles.toggleSelected]} onPress={() => setActiveTab(tab)}>
-              <Text style={[styles.toggleText, selected && styles.toggleTextSelected]}>{tab}</Text>
-              <Text style={[styles.toggleCount, selected && styles.toggleTextSelected]}>{count}</Text>
-            </Pressable>
-          );
-        })}
+      {/* Clear toggle row: tap the X to reveal or hide the clear-all button */}
+      <View style={styles.headerRow}>
+        <Pressable onPress={() => setShowClearAll((value) => !value)} style={styles.clearToggle}>
+          <Text style={styles.clearToggleText}>{showClearAll ? '×' : '×'}</Text>
+        </Pressable>
+        {showClearAll ? (
+          <Pressable onPress={clearAll} style={styles.clearAllButton}>
+            <Text style={styles.clearAllButtonText}>Clear all</Text>
+          </Pressable>
+        ) : null}
       </View>
 
-      {loading ? (
+      {alerts.length === 0 ? (
         <AppCard>
-          <ActivityIndicator color={colors.accent} />
-        </AppCard>
-      ) : null}
-
-      {activeTab === 'Alerts' ? (
-        <PrimaryButton title="Clear all alerts" variant="secondary" onPress={clearAll} />
-      ) : null}
-
-      {visibleNotifications.length === 0 ? (
-        <AppCard>
-          <Text style={styles.emptyTitle}>
-            {activeTab === 'Pending tasks' ? 'No pending tasks' : 'No alerts'}
-          </Text>
-          <Text style={styles.emptyText}>
-            {activeTab === 'Pending tasks'
-              ? 'Trip completion confirmations will wait here.'
-              : 'Regular trip activity will show here.'}
-          </Text>
+          <Text style={styles.emptyTitle}>No alerts</Text>
+          <Text style={styles.emptyText}>Regular trip activity will show here.</Text>
         </AppCard>
       ) : (
-        visibleNotifications.map((notification) => (
-          <AppCard key={notification.id}>
-            <Text style={styles.kind}>{notification.kind}</Text>
-            <Text style={styles.title}>{notification.title}</Text>
-            <Text style={styles.body}>{notification.body}</Text>
-            {notification.requiresAction && !notification.actionCompletedAt ? (
-              <View style={styles.actionDetail}>
-                <Text style={styles.actionLabel}>{notification.actionLabel || 'Pending confirmation'}</Text>
-                <Text style={styles.actionTarget}>{notification.targetTitle || notification.body}</Text>
-              </View>
-            ) : null}
-            {notification.requiresAction && !notification.actionCompletedAt ? (
-              <Pressable
-                style={[styles.acceptButton, acceptingId === notification.id && styles.buttonDisabled]}
-                onPress={() => acceptOne(notification)}
-                disabled={acceptingId === notification.id}
-              >
-                <Text style={styles.acceptButtonText}>
-                  {acceptingId === notification.id ? 'Accepting...' : notification.actionLabel || 'Accept'}
-                </Text>
+        alerts.map((notification) => {
+          // Use targetTitle when available to prepend the event name to the title.  This
+          // avoids every notification showing as “Event completed” without context.
+          const displayTitle = notification.targetTitle
+            ? `${notification.targetTitle} ${notification.title.toLowerCase()}`
+            : notification.title;
+
+          /**
+           * Render a red delete action when swiping the notification card.  The
+           * clearOne callback is invoked when the user taps the red action.  We
+           * also clear the item immediately when the swipeable view is fully
+           * opened for a fast gesture.
+           */
+          const renderRightActions = () => (
+            <View style={styles.swipeActionWrap}>
+              <Pressable style={styles.swipeActionButton} onPress={() => clearOne(notification)}>
+                <Text style={styles.swipeActionText}>Clear</Text>
               </Pressable>
-            ) : (
-              <Pressable style={styles.clearButton} onPress={() => clearOne(notification)}>
-                <Text style={styles.clearButtonText}>Clear</Text>
-              </Pressable>
-            )}
-          </AppCard>
-        ))
+            </View>
+          );
+
+          return (
+            <Swipeable
+              key={notification.id}
+              renderRightActions={renderRightActions}
+              onSwipeableOpen={() => clearOne(notification)}
+            >
+              <AppCard>
+                <Text style={styles.kind}>{notification.kind}</Text>
+                <Text style={styles.title}>{displayTitle}</Text>
+                <Text style={styles.body}>{notification.body}</Text>
+              </AppCard>
+            </Swipeable>
+          );
+        })
       )}
     </Screen>
   );
@@ -284,5 +266,59 @@ const styles = StyleSheet.create({
   emptyText: {
     marginTop: 8,
     color: colors.textSecondary,
+  },
+
+  // Additional styles for the simplified notifications UI
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  clearToggle: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  clearToggleText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textSecondary,
+  },
+  clearAllButton: {
+    marginLeft: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: '#EEF4FF',
+    borderColor: '#C7DAFF',
+    borderWidth: 1,
+  },
+  clearAllButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+
+  // Styles for swipe-to-clear actions.  The wrap provides a consistent
+  // background for the red action button; the button itself is padded and
+  // centered to align with the card height.
+  swipeActionWrap: {
+    justifyContent: 'center',
+  },
+  swipeActionButton: {
+    backgroundColor: '#EF4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+  },
+  swipeActionText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
   },
 });

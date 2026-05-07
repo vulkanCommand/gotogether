@@ -70,6 +70,8 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [showSplitModal, setShowSplitModal] = useState(false);
+  // show group picker modal for selecting an expense group from all available groups
+  const [showGroupPicker, setShowGroupPicker] = useState(false);
   const [showPayerModal, setShowPayerModal] = useState(false);
 
   useEffect(() => {
@@ -170,21 +172,24 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
     });
   };
 
+  /**
+   * Open a modal to choose which expense group this expense belongs to.
+   * Previously this used a simple Alert which truncated long lists and
+   * provided no scrolling. Using our own modal makes the list scrollable
+   * and more user friendly on mobile devices.
+   */
   const openGroupPicker = () => {
-    Alert.alert(
-      'Expense group',
-      'Choose where this expense belongs.',
-      expenseGroups
-        .map((group) => ({
-          text: getExpenseGroupDisplayName(group.name, currentTrip?.name),
-          onPress: () => setExpenseGroupId(group.id),
-        }))
-        .concat([{ text: 'Cancel', style: 'cancel' } as any])
-    );
+    setShowGroupPicker(true);
   };
 
   const handleSave = async () => {
-    if (!currentTrip?.id) {
+    // Determine the tripId based on the selected group.  In earlier versions the
+    // AddExpense screen always used the currently active trip.  If the user
+    // chooses a group from a different trip the group has a tripId field.  We
+    // fall back to currentTrip.id for backwards compatibility.
+    const selectedGroupObj = expenseGroups.find((g) => g.id === expenseGroupId);
+    const tripIdForExpense = selectedGroupObj?.tripId ?? currentTrip?.id;
+    if (!tripIdForExpense) {
       Alert.alert('No trip selected', 'Open a trip before adding an expense.');
       return;
     }
@@ -208,8 +213,8 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
       };
 
       const response = editingExpenseId
-        ? await updateTripExpense(currentTrip.id, editingExpenseId, payload)
-        : await createTripExpense(currentTrip.id, payload);
+        ? await updateTripExpense(tripIdForExpense, editingExpenseId, payload)
+        : await createTripExpense(tripIdForExpense, payload);
 
       const savedExpense = {
         id: response.expense.id,
@@ -245,10 +250,11 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
     <View style={styles.screen}>
       <KeyboardAvoidingView
         style={styles.screen}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        // Use height behavior on Android to ensure the view resizes when the keyboard appears.
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
       >
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + 8 }]}> 
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + 8 }]}>
           <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
             <Text style={styles.headerActionText}>✕</Text>
           </Pressable>
@@ -410,9 +416,19 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
         </View>
       </Modal>
 
-      <Modal visible={showSplitModal} transparent animationType="slide" onRequestClose={() => setShowSplitModal(false)}>
+      <Modal
+        visible={showSplitModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSplitModal(false)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          {/* Wrap the split modal in a KeyboardAvoidingView so that custom split inputs are not hidden by the soft keyboard. */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+            style={styles.modalCard}
+          >
             <View style={styles.modalHeader}>
               <Pressable onPress={() => setShowSplitModal(false)}>
                 <Text style={styles.modalAction}>Cancel</Text>
@@ -445,7 +461,11 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
               </Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalList}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.modalList}
+              keyboardShouldPersistTaps="handled"
+            >
               {memberOptions.map((member) => {
                 const selected = selectedParticipantIds.includes(member.id);
                 return (
@@ -499,6 +519,52 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
                 <Text style={styles.modalFooterWarning}>Needs {formatMoney(amountValue)}</Text>
               ) : null}
             </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Expense group picker modal */}
+      <Modal
+        visible={showGroupPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowGroupPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Pressable onPress={() => setShowGroupPicker(false)}>
+                <Text style={styles.modalAction}>Cancel</Text>
+              </Pressable>
+              <Text style={styles.modalTitle}>Select group</Text>
+              <Pressable onPress={() => setShowGroupPicker(false)}>
+                <Text style={styles.modalAction}>Done</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.modalLead}>Choose where this expense belongs.</Text>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalList}>
+              {expenseGroups.map((group) => {
+                const selected = group.id === expenseGroupId;
+                return (
+                  <Pressable
+                    key={group.id}
+                    style={styles.memberRow}
+                    onPress={() => {
+                      setExpenseGroupId(group.id);
+                      setShowGroupPicker(false);
+                    }}
+                  >
+                    <View style={styles.memberLeft}>
+                      <View style={styles.avatarCircle}>
+                        <Text style={styles.avatarText}>{getInitials(getExpenseGroupDisplayName(group.name, currentTrip?.name).slice(0, 2))}</Text>
+                      </View>
+                      <Text style={styles.memberName}>{getExpenseGroupDisplayName(group.name, currentTrip?.name)}</Text>
+                    </View>
+                    <SelectionCheck selected={selected} />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>
