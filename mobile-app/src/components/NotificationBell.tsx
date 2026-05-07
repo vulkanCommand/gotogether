@@ -13,7 +13,7 @@ export default function NotificationBell() {
     try {
       const response = await fetchNotifications();
       const items = Array.isArray(response.notifications) ? response.notifications : [];
-      setHasNotifications(items.length > 0);
+      setHasNotifications(items.some((item) => !item.readAt));
     } catch (error) {
       console.log('Notification bell refresh failed', error);
     }

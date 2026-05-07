@@ -1,5 +1,7 @@
 package models
 
+import "encoding/json"
+
 type ItineraryEventPayload struct {
 	ID               string   `json:"id"`
 	DayID            string   `json:"dayId,omitempty"`
@@ -89,18 +91,21 @@ type CreateExpenseGroupRequest struct {
 }
 
 type NotificationResponse struct {
-	ID                int    `json:"id"`
-	TripID            int    `json:"tripId"`
-	Title             string `json:"title"`
-	Body              string `json:"body"`
-	Kind              string `json:"kind"`
-	RequiresAction    bool   `json:"requiresAction"`
-	ActionType        string `json:"actionType"`
-	TargetID          int    `json:"targetId"`
-	ActionLabel       string `json:"actionLabel"`
-	TargetTitle       string `json:"targetTitle"`
-	ActionCompletedAt string `json:"actionCompletedAt"`
-	CreatedAt         string `json:"createdAt"`
+	ID                int             `json:"id"`
+	TripID            int             `json:"tripId"`
+	Title             string          `json:"title"`
+	Body              string          `json:"body"`
+	Type              string          `json:"type"`
+	Kind              string          `json:"kind"`
+	RequiresAction    bool            `json:"requiresAction"`
+	ActionType        string          `json:"actionType"`
+	TargetID          int             `json:"targetId"`
+	ActionLabel       string          `json:"actionLabel"`
+	TargetTitle       string          `json:"targetTitle"`
+	ActionCompletedAt string          `json:"actionCompletedAt"`
+	ReadAt            string          `json:"readAt"`
+	Data              json.RawMessage `json:"data,omitempty"`
+	CreatedAt         string          `json:"createdAt"`
 }
 
 type TripMemberSetupRequest struct {

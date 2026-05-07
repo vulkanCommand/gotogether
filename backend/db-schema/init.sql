@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS user_push_tokens (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expo_push_token TEXT NOT NULL UNIQUE,
     platform TEXT NOT NULL DEFAULT 'expo',
+    device_id TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -185,11 +186,14 @@ CREATE TABLE IF NOT EXISTS notifications (
     trip_id INTEGER REFERENCES trips(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'activity',
     kind TEXT NOT NULL DEFAULT 'activity',
     requires_action BOOLEAN NOT NULL DEFAULT FALSE,
     action_type TEXT,
     target_id INTEGER,
     actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    data JSONB,
+    read_at TIMESTAMP,
     action_completed_at TIMESTAMP,
     cleared_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

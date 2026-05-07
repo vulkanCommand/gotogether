@@ -114,6 +114,7 @@ export type ApiNotification = {
   tripId: number;
   title: string;
   body: string;
+  type: string;
   kind: string;
   requiresAction: boolean;
   actionType: string;
@@ -121,8 +122,12 @@ export type ApiNotification = {
   actionLabel?: string;
   targetTitle?: string;
   actionCompletedAt: string;
+  readAt: string;
+  data?: Record<string, any> | null;
   createdAt: string;
 };
+
+export type ApiActivityItem = ApiNotification;
 
 export type ApiPlaceResult = {
   id: string;
@@ -292,14 +297,14 @@ export async function deleteMyAccount() {
   });
 }
 
-export async function registerPushToken(payload: { token: string; platform: string }) {
-  return apiRequest<{ saved: boolean }>('/api/me/push-token', {
+export async function registerPushToken(payload: { expo_push_token: string; platform: string; device_id?: string }) {
+  return apiRequest<{ saved: boolean }>('/api/push-token', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
 }
 
-export async function unregisterPushToken(payload: { token: string }) {
+export async function unregisterPushToken(payload: { token?: string; expo_push_token?: string }) {
   return apiRequest<{ removed: boolean }>('/api/me/push-token', {
     method: 'DELETE',
     body: JSON.stringify(payload),
@@ -377,6 +382,22 @@ export async function saveTripSetupStatus(
 
 export async function fetchNotifications() {
   return apiRequest<{ notifications: ApiNotification[] }>('/api/notifications');
+}
+
+export async function fetchRecentActivity() {
+  return apiRequest<{ activities: ApiActivityItem[] }>('/api/activity/recent');
+}
+
+export async function markNotificationRead(notificationId: number) {
+  return apiRequest<{ read: boolean; notification?: ApiNotification }>(`/api/notifications/${notificationId}/read`, {
+    method: 'POST',
+  });
+}
+
+export async function markAllNotificationsRead() {
+  return apiRequest<{ read: boolean }>('/api/notifications/read-all', {
+    method: 'POST',
+  });
 }
 
 export async function clearNotification(notificationId: number) {

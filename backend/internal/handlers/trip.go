@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -114,18 +115,25 @@ func CreateTrip(c *gin.Context) {
 	}
 
 	addedMembers := map[int]bool{userID: true}
+	newlyInsertedMemberIDs := make([]int, 0)
 	for _, memberID := range req.MemberIDs {
 		if memberID <= 0 || addedMembers[memberID] {
 			continue
 		}
 		addedMembers[memberID] = true
-		if _, err := tx.Exec(`
+		var insertedUserID int
+		err := tx.QueryRow(`
 			INSERT INTO trip_members (trip_id, user_id, role)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (trip_id, user_id) DO NOTHING
-		`, trip.ID, memberID, "member"); err != nil {
+			RETURNING user_id
+		`, trip.ID, memberID, "member").Scan(&insertedUserID)
+		if err != nil && !sqlErrNoRows(err) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add trip member", "details": err.Error()})
 			return
+		}
+		if err == nil && insertedUserID > 0 && insertedUserID != userID {
+			newlyInsertedMemberIDs = append(newlyInsertedMemberIDs, insertedUserID)
 		}
 	}
 
@@ -158,6 +166,10 @@ func CreateTrip(c *gin.Context) {
 
 	if !commitOrRespond(c, tx) {
 		return
+	}
+
+	for _, addedUserID := range newlyInsertedMemberIDs {
+		NotifyTripMemberAdded(context.Background(), trip.ID, userID, addedUserID)
 	}
 
 	refreshTripCoverInBackground(trip.ID, userID, false)

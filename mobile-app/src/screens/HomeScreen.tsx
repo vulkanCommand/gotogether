@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { useAuthStore } from '../store/authStore';
 import { ItineraryDay, isCompletedEvent, useTripStore } from '../store/tripStore';
-import { ApiNotification, ApiTrip, apiRequest, fetchNotifications, fetchTripDetails, fetchTrips, tripCoverFileUrl } from '../config/api';
+import { ApiActivityItem, ApiNotification, ApiTrip, apiRequest, fetchNotifications, fetchRecentActivity, fetchTripDetails, fetchTrips, tripCoverFileUrl } from '../config/api';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { prototypeImages } from '../utils/prototypeAssets';
@@ -213,7 +213,8 @@ export default function HomeScreen({ navigation }: Props) {
   const setTripLead = useTripStore((state) => state.setTripLead);
 
   const [trips, setTrips] = useState<ApiTrip[]>([]);
-  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [activities, setActivities] = useState<ApiActivityItem[]>([]);
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
   const [primaryTripItinerary, setPrimaryTripItinerary] = useState<ItineraryDay[]>([]);
   const [loading, setLoading] = useState(true);
   const hasLoadedRef = useRef(false);
@@ -224,12 +225,21 @@ export default function HomeScreen({ navigation }: Props) {
         setLoading(true);
       }
 
-      const [tripResponse, notificationResponse] = await Promise.all([fetchTrips(), fetchNotifications()]);
+      const [tripResponse, activityResponse, notificationResponse] = await Promise.all([
+        fetchTrips(),
+        fetchRecentActivity(),
+        fetchNotifications(),
+      ]);
       const nextTrips = Array.isArray(tripResponse.trips) ? tripResponse.trips : [];
       const nextPrimaryTrip = pickPrimaryTrip(nextTrips);
 
       setTrips(nextTrips);
-      setNotifications(Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : []);
+      setActivities(Array.isArray(activityResponse.activities) ? activityResponse.activities : []);
+      setHasUnreadNotifications(
+        Array.isArray(notificationResponse.notifications)
+          ? notificationResponse.notifications.some((item) => !item.readAt)
+          : false
+      );
 
       if (nextPrimaryTrip?.id) {
         try {
@@ -248,7 +258,8 @@ export default function HomeScreen({ navigation }: Props) {
       console.log('Home load failed', error);
       if (!hasLoadedRef.current) {
         setTrips([]);
-        setNotifications([]);
+        setActivities([]);
+        setHasUnreadNotifications(false);
         setPrimaryTripItinerary([]);
       }
     } finally {
@@ -304,11 +315,11 @@ export default function HomeScreen({ navigation }: Props) {
 
   const activityItems = useMemo(
     () =>
-      notifications
+      activities
         .filter((item) => !item.requiresAction)
         .slice(0, 3)
         .map(normalizeActivityNotification),
-    [notifications]
+    [activities]
   );
 
   const fallbackActivityItems = useMemo(() => {
@@ -406,7 +417,7 @@ export default function HomeScreen({ navigation }: Props) {
 
             <Pressable onPress={() => navigation.navigate('Notifications')} style={styles.headerButton}>
               <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
-              {notifications.length > 0 ? <View style={styles.dot} /> : null}
+              {hasUnreadNotifications ? <View style={styles.dot} /> : null}
             </Pressable>
           </View>
         </View>
