@@ -38,7 +38,7 @@ export type RootStackParamList = {
   TripOverview: undefined;
   TripSetup: undefined;
   Itinerary: undefined;
-  AddExpense: { groupId?: number; eventId?: string; expenseId?: string } | undefined;
+  AddExpense: { tripId?: number; groupId?: number; eventId?: string; expenseId?: string } | undefined;
   TripCompletion: undefined;
   Settings: undefined;
   Notifications: undefined;

@@ -38,12 +38,60 @@ const toMoneyNumber = (value: number | undefined | null) => roundCurrency(Number
 
 export const formatMoney = (value: number) => `$${toMoneyNumber(value).toFixed(2)}`;
 
+export const isSettlementExpense = (expense: Pick<ExpenseItem, 'splitMethod'>) =>
+  (expense.splitMethod || '').toLowerCase().includes('settlement');
+
+export const getExpenseImpactAmount = (expense: ExpenseItem, currentUserId?: number | string | null) => {
+  if (currentUserId == null) {
+    return 0;
+  }
+
+  const userKey = String(currentUserId);
+  const userSplit = expense.splitPreview.find((split) => String(split.memberId) === userKey);
+  const paidAmount = expense.paidByUserId != null && String(expense.paidByUserId) === userKey ? expense.amount : 0;
+  const owedAmount = userSplit?.amount || 0;
+
+  return toMoneyNumber(paidAmount - owedAmount);
+};
+
 export const getExpenseGroupDisplayName = (groupName: string, tripName?: string | null) => {
   const normalized = groupName.trim().toLowerCase();
   if (normalized === 'trip expenses' && tripName?.trim()) {
     return tripName.trim();
   }
   return groupName;
+};
+
+export const getBalanceDisplay = (netBalance: number) => {
+  const amount = Math.abs(toMoneyNumber(netBalance));
+
+  if (amount <= 0.009) {
+    return {
+      amount,
+      label: 'settled up',
+      headline: 'You are settled up',
+      isPositive: true,
+      isSettled: true,
+    };
+  }
+
+  if (netBalance > 0) {
+    return {
+      amount,
+      label: 'you are owed',
+      headline: 'You are owed',
+      isPositive: true,
+      isSettled: false,
+    };
+  }
+
+  return {
+    amount,
+    label: 'you owe',
+    headline: 'You owe',
+    isPositive: false,
+    isSettled: false,
+  };
 };
 
 const buildMemberNameMap = (group: ExpenseGroup, crew: CrewMember[]) => {
@@ -81,6 +129,7 @@ const calculateNetByMember = (group: ExpenseGroup, crew: CrewMember[]) => {
 
   group.expenses.forEach((expense) => {
     const payerId = expense.paidByUserId ? String(expense.paidByUserId) : '';
+
     if (payerId) {
       paidByMember.set(payerId, toMoneyNumber((paidByMember.get(payerId) || 0) + expense.amount));
       if (!memberNameMap.has(payerId)) {
@@ -100,6 +149,7 @@ const calculateNetByMember = (group: ExpenseGroup, crew: CrewMember[]) => {
   const memberTotals: MemberTotals[] = Array.from(memberNameMap.entries()).map(([memberId, memberName]) => {
     const paid = toMoneyNumber(paidByMember.get(memberId) || 0);
     const owed = toMoneyNumber(owedByMember.get(memberId) || 0);
+
     return {
       memberId,
       memberName,
@@ -116,6 +166,7 @@ const settleMemberBalances = (memberTotals: MemberTotals[]): BalanceLine[] => {
   const creditors = memberTotals
     .filter((member) => member.net > 0.009)
     .map((member) => ({ ...member, remaining: member.net }));
+
   const debtors = memberTotals
     .filter((member) => member.net < -0.009)
     .map((member) => ({ ...member, remaining: Math.abs(member.net) }));
@@ -145,6 +196,7 @@ const settleMemberBalances = (memberTotals: MemberTotals[]): BalanceLine[] => {
     if (creditor.remaining <= 0.009) {
       creditorIndex += 1;
     }
+
     if (debtor.remaining <= 0.009) {
       debtorIndex += 1;
     }
@@ -161,6 +213,7 @@ export const calculateExpenseGroupSummary = (
   const memberTotals = calculateNetByMember(group, crew);
   const balanceLines = settleMemberBalances(memberTotals);
   const currentUserKey = currentUserId != null ? String(currentUserId) : '';
+
   const currentUserBalanceLines = currentUserKey
     ? balanceLines.filter((line) => line.fromMemberId === currentUserKey || line.toMemberId === currentUserKey)
     : [];
@@ -168,17 +221,12 @@ export const calculateExpenseGroupSummary = (
   const currentUserOwes = currentUserBalanceLines
     .filter((line) => line.fromMemberId === currentUserKey)
     .reduce((sum, line) => sum + line.amount, 0);
+
   const currentUserIsOwed = currentUserBalanceLines
     .filter((line) => line.toMemberId === currentUserKey)
     .reduce((sum, line) => sum + line.amount, 0);
 
-  // Exclude settlement expenses from the total spent.  Settlement expenses
-  // represent transfers between members to clear balances and should not
-  // inflate the total amount of money spent on the trip.  We identify
-  // settlements by checking the split method string.
-  const nonSettlementExpenses = group.expenses.filter(
-    (expense) => !(expense.splitMethod || '').toLowerCase().includes('settlement')
-  );
+  const nonSettlementExpenses = group.expenses.filter((expense) => !isSettlementExpense(expense));
 
   return {
     totalSpent: toMoneyNumber(nonSettlementExpenses.reduce((sum, expense) => sum + expense.amount, 0)),
@@ -224,10 +272,12 @@ export const groupExpensesByMonth = (expenses: ExpenseItem[]): ExpenseMonthGroup
     const key = `${safeDate.getFullYear()}-${safeDate.getMonth()}`;
     const label = safeDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     const existing = groups.get(key);
+
     if (existing) {
       existing.expenses.push(expense);
       return;
     }
+
     groups.set(key, {
       key,
       label,
@@ -242,29 +292,42 @@ export const groupExpensesByMonth = (expenses: ExpenseItem[]): ExpenseMonthGroup
   });
 };
 
-export const getExpenseImpactLabel = (
-  expense: ExpenseItem,
-  currentUserId?: number | string | null
-) => {
+export const getExpenseImpactLabel = (expense: ExpenseItem, currentUserId?: number | string | null) => {
   if (currentUserId == null) {
     return '';
   }
+
+  const net = getExpenseImpactAmount(expense, currentUserId);
+
+  if (isSettlementExpense(expense)) {
+    if (net > 0.009) {
+      return `You settled ${formatMoney(net)}`;
+    }
+
+    if (net < -0.009) {
+      return `${expense.paidBy} settled ${formatMoney(Math.abs(net))}`;
+    }
+
+    return 'Settlement recorded';
+  }
+
   const userKey = String(currentUserId);
   const userSplit = expense.splitPreview.find((split) => String(split.memberId) === userKey);
-  const paidAmount = expense.paidByUserId != null && String(expense.paidByUserId) === userKey ? expense.amount : 0;
   const owedAmount = userSplit?.amount || 0;
-  const net = toMoneyNumber(paidAmount - owedAmount);
 
   if (net > 0.009) {
-    return `You paid ${formatMoney(net)} more than your share`;
+    return `You are owed ${formatMoney(net)} from this expense`;
   }
+
   if (net < -0.009) {
     return `Your share is ${formatMoney(Math.abs(net))}`;
   }
+
   if (owedAmount > 0) {
     return 'You are settled on this one';
   }
-  return '';
+
+  return `${expense.paidBy} paid ${formatMoney(expense.amount)}`;
 };
 
 export const buildEqualSplitPreview = (
@@ -273,6 +336,7 @@ export const buildEqualSplitPreview = (
   amount: number
 ): ExpenseSplit[] => {
   const activeMembers = members.filter((member) => selectedIds.includes(member.id));
+
   if (activeMembers.length === 0) {
     return [];
   }

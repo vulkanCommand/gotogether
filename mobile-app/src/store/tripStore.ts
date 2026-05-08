@@ -353,7 +353,12 @@ export const useTripStore = create<TripStore>((set, get) => ({
     return buildDefaultNextUp();
   },
 
-  totalExpenseAmount: () => get().expenses.reduce((sum, expense) => sum + expense.amount, 0),
+  totalExpenseAmount: () =>
+    get().expenses.reduce(
+      (sum, expense) =>
+        (expense.splitMethod || '').toLowerCase().includes('settlement') ? sum : sum + expense.amount,
+      0
+    ),
 
   hydratePlannerDefaults: (payload) =>
     set((state) => ({

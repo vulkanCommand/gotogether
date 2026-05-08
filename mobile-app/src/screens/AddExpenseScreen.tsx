@@ -159,6 +159,11 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
   const paidByLabel = String(user?.id) === String(paidByUserId) ? 'you' : paidByName;
   const splitLabel = splitMethod === 'Equal split' ? 'equally' : 'custom';
   const perPersonLabel = splitPreview.length > 0 ? formatMoney(amountValue / splitPreview.length) : '$0.00';
+  const payerSharesThisExpense = splitPreview.some((split) => Number(split.memberId) === paidByUserId);
+  const splitExplanation =
+    amountValue > 0 && splitPreview.length > 0
+      ? `${paidByName} paid ${formatMoney(amountValue)}. ${splitPreview.length} ${splitPreview.length === 1 ? 'person is' : 'people are'} sharing this expense${payerSharesThisExpense ? '' : ', but the payer is not included in the share'}.`
+      : 'Enter the amount and choose who should share this expense.';
 
   const toggleParticipant = (memberId: string) => {
     setSelectedParticipantIds((current) => {
@@ -188,7 +193,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
     // chooses a group from a different trip the group has a tripId field.  We
     // fall back to currentTrip.id for backwards compatibility.
     const selectedGroupObj = expenseGroups.find((g) => g.id === expenseGroupId);
-    const tripIdForExpense = selectedGroupObj?.tripId ?? currentTrip?.id;
+    const tripIdForExpense = route.params?.tripId ?? selectedGroupObj?.tripId ?? currentTrip?.id;
     if (!tripIdForExpense) {
       Alert.alert('No trip selected', 'Open a trip before adding an expense.');
       return;
@@ -272,7 +277,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
           contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 20) + 28 }]}
         >
           <View style={styles.contextRow}>
-            <Text style={styles.contextLabel}>With you and:</Text>
+            <Text style={styles.contextLabel}>Expense group</Text>
             <Pressable style={styles.groupPill} onPress={openGroupPicker}>
               <Ionicons name="people-outline" size={15} color={palette.text} />
               <Text style={styles.groupPillText} numberOfLines={1}>
@@ -327,6 +332,8 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
               <Text style={styles.summaryTitle}>Split summary</Text>
               <Text style={styles.summaryMeta}>{splitPreview.length} people</Text>
             </View>
+
+            <Text style={styles.summaryExplanation}>{splitExplanation}</Text>
 
             {splitPreview.length === 0 ? (
               <Text style={styles.summaryEmpty}>Choose people who are part of this expense.</Text>
@@ -771,6 +778,11 @@ const styles = StyleSheet.create({
   summaryEmpty: {
     color: palette.textMuted,
     fontSize: 14,
+  },
+  summaryExplanation: {
+    color: palette.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
   },
   summaryRow: {
     flexDirection: 'row',
