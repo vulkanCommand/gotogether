@@ -15,11 +15,15 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import GTCard from '../components/GTCard';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { ExpenseSplit, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
 import { createTripExpense, updateTripExpense } from '../config/api';
+import { invalidateTripCaches } from '../services/resourceCache';
 import { buildEqualSplitPreview, formatMoney, getExpenseGroupDisplayName } from '../utils/expenseCalculations';
+import { colors } from '../theme/colors';
+import { shadows, spacing, typography } from '../theme/spacing';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddExpense'>;
 type SplitMode = 'Equal split' | 'Custom split';
@@ -27,20 +31,20 @@ type SplitMode = 'Equal split' | 'Custom split';
 const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 const palette = {
-  screen: '#F3F6FB',
-  panel: '#FFFFFF',
-  panelSoft: '#F8FAFD',
-  cardBorder: '#DEE7F2',
-  heroText: '#0F172A',
-  text: '#0F172A',
-  textMuted: '#667085',
-  line: '#DEE7F2',
-  teal: '#2563EB',
-  tealSoft: '#E7F0FF',
-  orange: '#EA580C',
-  red: '#DC4C3E',
-  white: '#FFFFFF',
-  modalOverlay: 'rgba(15, 23, 42, 0.25)',
+  screen: colors.background,
+  panel: colors.surface,
+  panelSoft: colors.surfaceMuted,
+  cardBorder: colors.border,
+  heroText: colors.textPrimary,
+  text: colors.textPrimary,
+  textMuted: colors.textSecondary,
+  line: colors.border,
+  teal: colors.accent,
+  tealSoft: colors.accentSoft,
+  orange: colors.warning,
+  red: colors.danger,
+  white: colors.white,
+  modalOverlay: colors.overlay,
 };
 
 export default function AddExpenseScreen({ navigation, route }: Props) {
@@ -243,7 +247,11 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
         addExpense(savedExpense);
       }
 
-      navigation.navigate('MainTabs', { screen: 'Expenses' });
+      await invalidateTripCaches(tripIdForExpense);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'MainTabs', params: { screen: 'Expenses' } }],
+      });
     } catch (error: any) {
       Alert.alert('Save failed', error?.message || 'Could not save expense');
     } finally {
@@ -260,11 +268,11 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
       >
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + 8 }]}>
-          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-            <Text style={styles.headerActionText}>✕</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close add expense" onPress={() => navigation.goBack()} hitSlop={8}>
+            <Ionicons name="close" size={22} color={palette.text} />
           </Pressable>
           <Text style={styles.headerTitle}>{editingExpenseId ? 'Edit an expense' : 'Add an expense'}</Text>
-          <Pressable onPress={handleSave} disabled={!canSave || saving} hitSlop={8}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Save expense" onPress={handleSave} disabled={!canSave || saving} hitSlop={8}>
             <Text style={[styles.headerSaveText, (!canSave || saving) && styles.headerSaveTextDisabled]}>
               {saving ? 'Saving' : 'Save'}
             </Text>
@@ -287,7 +295,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             </Pressable>
           </View>
 
-          <View style={styles.formCard}>
+          <GTCard style={styles.formCard}>
             <View style={styles.editorRow}>
               <View style={styles.leadingIconBox}>
                 <Ionicons name="receipt-outline" size={22} color={palette.teal} />
@@ -325,9 +333,9 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
                 <Text style={styles.inlineChipText}>{splitLabel}</Text>
               </Pressable>
             </View>
-          </View>
+          </GTCard>
 
-          <View style={styles.summaryCard}>
+          <GTCard style={styles.summaryCard}>
             <View style={styles.summaryHeader}>
               <Text style={styles.summaryTitle}>Split summary</Text>
               <Text style={styles.summaryMeta}>{splitPreview.length} people</Text>
@@ -349,27 +357,27 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
             {splitMethod === 'Custom split' && !customValid ? (
               <Text style={styles.summaryWarning}>Custom split must total {formatMoney(amountValue)}.</Text>
             ) : null}
-          </View>
+          </GTCard>
 
           {eventOptions.length > 0 ? (
-            <View style={styles.optionalCard}>
+            <GTCard style={styles.optionalCard}>
               <Text style={styles.optionalTitle}>Link to itinerary</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                 <MemberChip label="None" selected={!linkedEventId} onPress={() => setLinkedEventId('')} compact />
                 {eventOptions.map((event) => (
                   <MemberChip
                     key={event.id}
-                    label={`${event.meta} · ${event.label}`}
+                    label={`${event.meta} - ${event.label}`}
                     selected={linkedEventId === event.id}
                     onPress={() => setLinkedEventId(event.id)}
                     compact
                   />
                 ))}
               </ScrollView>
-            </View>
+            </GTCard>
           ) : null}
 
-          <View style={styles.optionalCard}>
+          <GTCard style={styles.optionalCard}>
             <Text style={styles.optionalTitle}>Notes (optional)</Text>
             <TextInput
               value={notes}
@@ -379,7 +387,7 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
               multiline
               style={styles.notesInput}
             />
-          </View>
+          </GTCard>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -629,22 +637,19 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
   },
   headerActionText: {
-    color: palette.text,
-    fontSize: 18,
-    fontWeight: '700',
     minWidth: 44,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     color: palette.heroText,
-    fontSize: 21,
+    fontSize: 20,
     fontWeight: '700',
   },
   headerSaveText: {
     color: palette.teal,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
     minWidth: 44,
     textAlign: 'right',
   },
@@ -653,7 +658,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    gap: 18,
+    gap: spacing.md,
   },
   contextRow: {
     flexDirection: 'row',
@@ -684,17 +689,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   formCard: {
-    backgroundColor: palette.panel,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: palette.cardBorder,
-    padding: 18,
-    gap: 18,
+    gap: 16,
   },
   editorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 14,
   },
   leadingIconBox: {
     width: 52,
@@ -708,8 +708,8 @@ const styles = StyleSheet.create({
   },
   currencySymbol: {
     color: palette.teal,
-    fontSize: 30,
-    fontWeight: '700',
+    fontSize: 28,
+    fontWeight: '600',
   },
   editorInput: {
     flex: 1,
@@ -717,7 +717,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: palette.teal,
     color: palette.text,
-    fontSize: 17,
+    fontSize: 16,
     paddingVertical: 0,
   },
   amountInput: {
@@ -726,7 +726,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: palette.line,
     color: palette.text,
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '600',
     paddingVertical: 0,
   },
@@ -754,11 +754,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   summaryCard: {
-    borderRadius: 18,
-    backgroundColor: palette.panel,
-    borderWidth: 1,
-    borderColor: palette.cardBorder,
-    padding: 18,
   },
   summaryHeader: {
     flexDirection: 'row',
@@ -769,7 +764,7 @@ const styles = StyleSheet.create({
   summaryTitle: {
     color: palette.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   summaryMeta: {
     color: palette.textMuted,
@@ -799,7 +794,7 @@ const styles = StyleSheet.create({
   summaryAmount: {
     color: palette.teal,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   summaryWarning: {
     color: palette.red,
@@ -808,17 +803,12 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   optionalCard: {
-    borderRadius: 18,
-    backgroundColor: palette.panel,
-    borderWidth: 1,
-    borderColor: palette.cardBorder,
-    padding: 18,
     gap: 12,
   },
   optionalTitle: {
     color: palette.text,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   chipRow: {
     gap: 10,
@@ -845,7 +835,7 @@ const styles = StyleSheet.create({
   },
   memberChipTextSelected: {
     color: palette.teal,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   notesInput: {
     minHeight: 90,
@@ -872,6 +862,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 28,
+    ...shadows.floating,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -891,7 +882,7 @@ const styles = StyleSheet.create({
   modalHeading: {
     color: palette.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     textAlign: 'center',
     marginTop: 18,
   },
@@ -922,8 +913,8 @@ const styles = StyleSheet.create({
   },
   modePillText: {
     color: palette.text,
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '600',
   },
   modePillTextSelected: {
     color: palette.teal,
@@ -960,7 +951,7 @@ const styles = StyleSheet.create({
   avatarText: {
     color: palette.text,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   memberName: {
     flex: 1,
@@ -1012,7 +1003,7 @@ const styles = StyleSheet.create({
   modalFooterValue: {
     color: palette.text,
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modalFooterMeta: {
     color: palette.textMuted,
@@ -1022,6 +1013,6 @@ const styles = StyleSheet.create({
   modalFooterWarning: {
     color: palette.orange,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
 });

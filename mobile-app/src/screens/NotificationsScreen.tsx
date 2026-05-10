@@ -1,13 +1,16 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 
 import Screen from '../components/Screen';
-import AppCard from '../components/AppCard';
-import SectionTitle from '../components/SectionTitle';
+import GTBadge from '../components/GTBadge';
+import GTCard from '../components/GTCard';
+import GTEmptyState from '../components/GTEmptyState';
+import GTSectionHeader from '../components/GTSectionHeader';
 import {
   ApiNotification,
+  clearAllNotifications,
   fetchNotifications,
   fetchTripDetails,
   markAllNotificationsRead,
@@ -16,103 +19,17 @@ import {
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
+import { formatNotificationDisplay } from '../utils/notificationDisplay';
 import { mapApiMembersToCrew } from '../utils/tripFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Notifications'>;
-
-type DisplayNotification = {
-  title: string;
-  body: string;
-};
-
-function cleanText(value: string) {
-  return value.replace(/\s+/g, ' ').replace(/[.]+$/g, '').trim();
-}
-
-function getNotificationTimestamp(notification: ApiNotification) {
-  return notification.createdAt || '';
-}
-
-function formatActivityTimestamp(value?: string) {
-  if (!value) {
-    return '';
-  }
-
-  const parsedDate = new Date(value);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return '';
-  }
-
-  const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
-  const day = String(parsedDate.getDate()).padStart(2, '0');
-  const year = parsedDate.getFullYear();
-  let hours = parsedDate.getHours();
-  const minutes = String(parsedDate.getMinutes()).padStart(2, '0');
-  const period = hours >= 12 ? 'PM' : 'AM';
-
-  hours = hours % 12;
-  hours = hours === 0 ? 12 : hours;
-
-  return `${month}/${day}/${year} ${hours}:${minutes}${period}`;
-}
-
-function appendTimestamp(body: string, value?: string) {
-  const timestamp = formatActivityTimestamp(value);
-  return timestamp ? `${body} ${timestamp}` : body;
-}
-
-function extractEventNameFromTargetTitle(targetTitle?: string) {
-  if (!targetTitle) {
-    return '';
-  }
-
-  const parts = targetTitle
-    .split('-')
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  return parts[parts.length - 1] || targetTitle.trim();
-}
-
-function normalizeNotificationDisplay(notification: ApiNotification): DisplayNotification {
-  const rawTitle = cleanText(String(notification.title || ''));
-  const rawBody = cleanText(String(notification.body || ''));
-  const targetEventName = extractEventNameFromTargetTitle(notification.targetTitle);
-  const timestampValue = getNotificationTimestamp(notification);
-  const type = String((notification.data as any)?.type || notification.type || notification.kind || '').toLowerCase();
-
-  if (type === 'trip_added') {
-    return {
-      title: rawTitle || 'You were added to a trip',
-      body: appendTimestamp(rawBody || 'A trip invite is waiting for you', timestampValue),
-    };
-  }
-
-  const titleLower = rawTitle.toLowerCase();
-  const bodyLower = rawBody.toLowerCase();
-  const isEventCompleted =
-    titleLower.includes('event completed') ||
-    (bodyLower.includes(' marked ') && bodyLower.includes(' complete')) ||
-    (bodyLower.includes(' marked ') && bodyLower.includes(' completed')) ||
-    bodyLower.includes(' was completed') ||
-    bodyLower.endsWith(' completed');
-
-  if (isEventCompleted) {
-    return {
-      title: `${targetEventName || 'Event'} Event Completed`,
-      body: appendTimestamp(rawBody || 'Someone marked as completed', timestampValue),
-    };
-  }
-
-  return {
-    title: rawTitle || 'Trip activity',
-    body: appendTimestamp(rawBody || 'New activity was added', timestampValue),
-  };
-}
+type FilterKey = 'all' | 'trips' | 'expenses' | 'unread';
 
 export default function NotificationsScreen({ navigation }: Props) {
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const hasLoadedRef = useRef(false);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
   const setCrew = useTripStore((state) => state.setCrew);
@@ -128,6 +45,8 @@ export default function NotificationsScreen({ navigation }: Props) {
       if (!hasLoadedRef.current) {
         setNotifications([]);
       }
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
@@ -139,13 +58,37 @@ export default function NotificationsScreen({ navigation }: Props) {
 
   const unreadCount = useMemo(() => notifications.filter((item) => !item.readAt).length, [notifications]);
 
-  const openTripFromNotification = async (tripId: number) => {
+  const filteredNotifications = useMemo(() => {
+    return notifications.filter((notification) => {
+      if (activeFilter === 'unread') {
+        return !notification.readAt;
+      }
+
+      if (activeFilter === 'all') {
+        return true;
+      }
+
+      return formatNotificationDisplay(notification).category === activeFilter;
+    });
+  }, [activeFilter, notifications]);
+
+  const openTripFromNotification = async (tripId: number, destination?: 'TripOverview' | 'Itinerary' | 'Expenses') => {
     const details = await fetchTripDetails(tripId);
     const crew = mapApiMembersToCrew(details.members);
 
     setCurrentTrip(details.trip);
     setCrew(crew);
     setTripLead(crew.find((member) => member.role === 'lead') ?? crew[0] ?? null);
+
+    if (destination === 'Itinerary') {
+      navigation.navigate('Itinerary');
+      return;
+    }
+
+    if (destination === 'Expenses') {
+      navigation.navigate('MainTabs', { screen: 'Expenses' });
+      return;
+    }
 
     navigation.navigate(details.trip.completed_at ? 'TripCompletion' : 'TripOverview');
   };
@@ -159,10 +102,21 @@ export default function NotificationsScreen({ navigation }: Props) {
         );
       }
 
-      const type = String((notification.data as any)?.type || notification.type || notification.kind || '').trim();
+      const type = String((notification.data as any)?.type || notification.type || notification.kind || '').trim().toLowerCase();
       const tripId = Number((notification.data as any)?.tripId ?? notification.tripId ?? 0);
-      if (type === 'trip_added' && Number.isFinite(tripId) && tripId > 0) {
-        await openTripFromNotification(tripId);
+
+      if (Number.isFinite(tripId) && tripId > 0) {
+        if (type.includes('expense') || type.includes('settlement')) {
+          await openTripFromNotification(tripId, 'Expenses');
+          return;
+        }
+
+        if (type.includes('itinerary')) {
+          await openTripFromNotification(tripId, 'Itinerary');
+          return;
+        }
+
+        await openTripFromNotification(tripId, 'TripOverview');
       }
     } catch (error: any) {
       Alert.alert('Open failed', error?.message || 'Could not open notification');
@@ -179,38 +133,120 @@ export default function NotificationsScreen({ navigation }: Props) {
     }
   };
 
+  const handleClearAll = async () => {
+    Alert.alert(
+      'Clear all notifications?',
+      'This removes notifications from this screen, but does not delete your trips or expenses.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear all',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearAllNotifications();
+              setNotifications([]);
+            } catch (error: any) {
+              Alert.alert('Clear all failed', error?.message || 'Could not clear notifications');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <Screen showFooter showBackButton>
-      <SectionTitle title="Notifications" subtitle="Trip updates and activity." />
+      <GTSectionHeader
+        title="Notifications"
+        subtitle="Trip updates, expense movement, and crew activity."
+        actionLabel={unreadCount > 0 ? 'Mark all read' : notifications.length > 0 ? 'Clear all' : undefined}
+        onPressAction={unreadCount > 0 ? handleMarkAllRead : notifications.length > 0 ? handleClearAll : undefined}
+      />
 
-      <View style={styles.headerRow}>
-        <Text style={styles.countText}>{unreadCount} unread</Text>
-        <Pressable onPress={handleMarkAllRead} style={styles.markAllButton}>
-          <Text style={styles.markAllButtonText}>Mark all read</Text>
+      {unreadCount > 0 && notifications.length > 0 ? (
+        <Pressable style={styles.clearAllLink} onPress={handleClearAll}>
+          <Text style={styles.clearAllLinkText}>Clear all</Text>
         </Pressable>
+      ) : null}
+
+      <View style={styles.summaryRow}>
+        <GTCard style={styles.summaryCard}>
+          <Text style={styles.summaryValue}>{unreadCount}</Text>
+          <Text style={styles.summaryLabel}>Unread</Text>
+        </GTCard>
+        <GTCard style={styles.summaryCard}>
+          <Text style={styles.summaryValue}>{notifications.length}</Text>
+          <Text style={styles.summaryLabel}>Total updates</Text>
+        </GTCard>
       </View>
 
-      {notifications.length === 0 ? (
-        <AppCard>
-          <Text style={styles.emptyTitle}>Nothing new yet</Text>
-          <Text style={styles.emptyText}>Trip updates will land here as your crew starts moving.</Text>
-        </AppCard>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {[
+          { key: 'all', label: 'All' },
+          { key: 'trips', label: 'Trips' },
+          { key: 'expenses', label: 'Expenses' },
+          { key: 'unread', label: 'Unread' },
+        ].map((filter) => (
+          <Pressable
+            key={filter.key}
+            style={[styles.filterChip, activeFilter === filter.key && styles.filterChipActive]}
+            onPress={() => setActiveFilter(filter.key as FilterKey)}
+          >
+            <Text style={[styles.filterChipText, activeFilter === filter.key && styles.filterChipTextActive]}>
+              {filter.label}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      {filteredNotifications.length === 0 ? (
+        <GTEmptyState
+          icon="notifications-off-outline"
+          title="Nothing new yet"
+          body="Trip updates will land here as your crew starts moving."
+          actionLabel="Open trips"
+          onPressAction={() => navigation.navigate('MainTabs', { screen: 'Trips' })}
+        />
       ) : (
-        <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
-          {notifications.map((notification) => {
-            const display = normalizeNotificationDisplay(notification);
+        <ScrollView
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                void loadNotifications();
+              }}
+              tintColor={colors.accent}
+            />
+          }
+        >
+          {filteredNotifications.map((notification) => {
+            const display = formatNotificationDisplay(notification);
             const unread = !notification.readAt;
+            const tone =
+              display.category === 'expenses'
+                ? display.type.includes('settlement')
+                  ? 'green'
+                  : 'orange'
+                : display.category === 'trips'
+                  ? display.type.includes('itinerary')
+                    ? 'green'
+                    : 'blue'
+                  : 'neutral';
 
             return (
-              <Pressable key={notification.id} onPress={() => handleNotificationPress(notification)}>
-                <AppCard style={unread ? styles.unreadCard : undefined}>
+              <Pressable key={notification.id} onPress={() => void handleNotificationPress(notification)}>
+                <GTCard style={[styles.notificationCard, unread && styles.unreadCard]}>
                   <View style={styles.cardHeader}>
-                    <Text style={styles.kind}>{notification.type || notification.kind}</Text>
+                    <GTBadge label={display.category === 'other' ? 'Update' : display.category} tone={tone} />
                     {unread ? <View style={styles.unreadDot} /> : null}
                   </View>
                   <Text style={styles.title}>{display.title}</Text>
                   <Text style={styles.body}>{display.body}</Text>
-                </AppCard>
+                </GTCard>
               </Pressable>
             );
           })}
@@ -221,62 +257,80 @@ export default function NotificationsScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
+  clearAllLink: {
+    alignSelf: 'flex-end',
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
   },
-  countText: {
-    color: colors.textSecondary,
-    fontSize: 14,
+  clearAllLinkText: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  summaryCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 82,
+  },
+  summaryValue: {
+    color: colors.textPrimary,
+    fontSize: 21,
     fontWeight: '700',
   },
-  markAllButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+  summaryLabel: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  filterRow: {
+    gap: spacing.sm,
+    paddingVertical: 4,
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    minHeight: 40,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  markAllButtonText: {
-    color: colors.accentStrong,
-    fontWeight: '700',
+  filterChipActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  filterChipText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
   },
   listContent: {
-    gap: spacing.md,
-    paddingBottom: spacing.xl,
+    gap: spacing.sm,
+    paddingBottom: footerScrollPadding,
+  },
+  notificationCard: {
+    gap: spacing.sm,
+    minHeight: 96,
+    padding: 16,
   },
   unreadCard: {
     borderColor: '#C7DAFF',
     backgroundColor: '#F8FBFF',
   },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: colors.textPrimary,
-  },
-  emptyText: {
-    marginTop: spacing.xs,
-    color: colors.textSecondary,
-    lineHeight: 20,
-  },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  kind: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: '#EEF4FF',
-    color: colors.accent,
-    fontWeight: '800',
-    fontSize: 12,
-    textTransform: 'capitalize',
   },
   unreadDot: {
     width: 10,
@@ -285,14 +339,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   title: {
-    marginTop: spacing.sm,
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   body: {
-    marginTop: 6,
     color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '400',
     lineHeight: 20,
   },
 });

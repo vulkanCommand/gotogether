@@ -5,14 +5,13 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
 import { useFriendStore } from '../store/friendStore';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { fetchFriends, sendSMSInvite, syncDeviceContacts } from '../config/api';
+import { fetchFriends, syncDeviceContacts } from '../config/api';
 import { collectDeviceContactLookupPayload, DeviceInviteContact } from '../utils/contacts';
 import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
 
@@ -34,19 +33,36 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const refreshFriends = useCallback(async () => {
     try {
       setSyncingFriends(true);
-      const contacts = await collectDeviceContactLookupPayload();
-      setDeviceContacts(contacts.contacts);
-      if (contacts.granted) {
-        await syncDeviceContacts({
-          emails: contacts.emails,
-          phones: contacts.phones,
-        });
-      }
-
       const response = await fetchFriends();
       setFriends(response.friends);
     } catch (error) {
-      console.log('Auto friend sync failed', error);
+      console.log('Friend refresh failed', error);
+    } finally {
+      setSyncingFriends(false);
+    }
+  }, [setFriends]);
+
+  const syncContactsFromDevice = useCallback(async () => {
+    try {
+      setSyncingFriends(true);
+      const contacts = await collectDeviceContactLookupPayload();
+      setDeviceContacts(contacts.contacts);
+      if (!contacts.granted) {
+        Alert.alert(
+          'Contacts permission not granted',
+          'You can still invite manually with a phone number, or enable Contacts in Settings when you want to sync friends.'
+        );
+        return;
+      }
+
+      await syncDeviceContacts({
+        emails: contacts.emails,
+        phones: contacts.phones,
+      });
+      const response = await fetchFriends();
+      setFriends(response.friends);
+    } catch (error) {
+      console.log('Device contact sync failed', error);
     } finally {
       setSyncingFriends(false);
     }
@@ -209,12 +225,12 @@ export default function CreateGroupScreen({ navigation }: Props) {
             style={styles.searchInput}
           />
           {/* small refresh button to re-sync contacts and friends */}
-          <Pressable onPress={() => void refreshFriends()} style={styles.refreshButton} hitSlop={8}>
-            <Ionicons name="refresh" size={18} color={colors.textMuted} />
+          <Pressable onPress={() => void syncContactsFromDevice()} style={styles.refreshButton} hitSlop={8}>
+            <Ionicons name="people-outline" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
 
-        {syncingFriends ? <Text style={styles.syncingText}>Syncing contacts and friends...</Text> : null}
+        {syncingFriends ? <Text style={styles.syncingText}>Checking contacts and refreshing friends...</Text> : null}
 
         <View style={styles.list}>
           {filteredFriends.map((friend) => {
@@ -303,13 +319,12 @@ export default function CreateGroupScreen({ navigation }: Props) {
       </ScrollView>
 
       {selectedIds.length > 0 ? (
-        <View style={[styles.footer, { bottom: 68 + Math.max(insets.bottom, 12) - 12 }]}>
+        <View style={[styles.footer, { bottom: Math.max(insets.bottom, 12) }]}>
           <Pressable onPress={handleContinue} style={styles.ctaButton}>
             <Text style={styles.ctaText}>Create Group ({selectedIds.length + 1} members)</Text>
           </Pressable>
         </View>
       ) : null}
-      <AppFooter />
     </View>
   );
 }
@@ -322,7 +337,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 220,
+    paddingBottom: 132,
   },
   header: {
     flexDirection: 'row',
@@ -342,7 +357,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   selectedRow: {
@@ -370,7 +385,7 @@ const styles = StyleSheet.create({
   selectedAvatarText: {
     color: colors.accentStrong,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   removeButton: {
     position: 'absolute',
@@ -452,7 +467,7 @@ const styles = StyleSheet.create({
   },
   friendAvatarText: {
     color: colors.accentStrong,
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 14,
   },
   friendName: {
@@ -489,7 +504,7 @@ const styles = StyleSheet.create({
   inlineInviteButtonText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   checkCircle: {
     width: 20,
@@ -554,6 +569,6 @@ const styles = StyleSheet.create({
   ctaText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

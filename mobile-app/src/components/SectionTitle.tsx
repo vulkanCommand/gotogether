@@ -33,10 +33,10 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontSize: 32,
-    fontWeight: '900',
+    fontSize: 22,
+    fontWeight: '600',
     color: colors.textPrimary,
-    letterSpacing: -1.1,
+    letterSpacing: -0.4,
   },
   subtitle: {
     fontSize: 14,

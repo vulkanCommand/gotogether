@@ -1,11 +1,11 @@
 import React, { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View, KeyboardAvoidingView, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { colors } from '../theme/colors';
-import { spacing } from '../theme/spacing';
+import { colors, gradients } from '../theme/colors';
+import { footerScrollPadding, shadows, spacing } from '../theme/spacing';
 import AppFooter from './AppFooter';
 
 type Props = {
@@ -17,10 +17,11 @@ type Props = {
 
 export default function Screen({ children, scroll = true, showFooter = false, showBackButton = false }: Props) {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
 
   const header = showBackButton ? (
     <View style={styles.headerRow}>
-      <Pressable onPress={() => navigation.goBack()} style={styles.backButton}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={() => navigation.goBack()} style={styles.backButton}>
         <Ionicons name="arrow-back" size={18} color={colors.textPrimary} />
       </Pressable>
     </View>
@@ -38,10 +39,13 @@ export default function Screen({ children, scroll = true, showFooter = false, sh
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.bottom, 8) : 0}
     >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          showFooter && styles.scrollContentWithFooter,
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
@@ -54,7 +58,7 @@ export default function Screen({ children, scroll = true, showFooter = false, sh
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.bottom, 8) : 0}
     >
       <View style={styles.staticContent}>
         {header}
@@ -66,7 +70,7 @@ export default function Screen({ children, scroll = true, showFooter = false, sh
   return (
     <SafeAreaView style={styles.safe}>
       <LinearGradient
-        colors={['#F8FBFF', colors.background, colors.backgroundAccent]}
+        colors={[...gradients.appBackground]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.backdrop}
@@ -90,6 +94,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxxl,
     gap: spacing.md,
   },
+  scrollContentWithFooter: {
+    paddingBottom: footerScrollPadding,
+  },
   staticContent: {
     flex: 1,
     padding: spacing.lg,
@@ -106,5 +113,6 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadows.soft,
   },
 });

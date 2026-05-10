@@ -33,29 +33,45 @@ function AuthBootstrap() {
   const clearSession = useAuthStore((state) => state.clearSession);
   const setAuthChecked = useAuthStore((state) => state.setAuthChecked);
   const setUser = useAuthStore((state) => state.setUser);
+  const cachedUser = useAuthStore((state) => state.user);
 
   useEffect(() => {
     const unsubscribe = onIdTokenChanged(firebaseAuth, async (user) => {
-      try {
-        if (!user) {
-          clearSession();
-          return;
-        }
+      if (!user) {
+        clearSession();
+        setAuthChecked(true);
+        return;
+      }
 
+      try {
         const freshToken = await getIdToken(user);
         setSession(freshToken);
-        const response = await syncAuthenticatedUser();
-        setUser(response.user);
+        setAuthChecked(true);
+
+        syncAuthenticatedUser()
+          .then((response) => {
+            setUser(response.user);
+          })
+          .catch((error) => {
+            console.log('Profile sync failed', error);
+
+            if (!useAuthStore.getState().user && !cachedUser) {
+              clearSession();
+            }
+          });
       } catch (error) {
         console.log('Auth bootstrap failed', error);
-        clearSession();
-      } finally {
+
+        if (!useAuthStore.getState().user && !cachedUser) {
+          clearSession();
+        }
+
         setAuthChecked(true);
       }
     });
 
     return unsubscribe;
-  }, [clearSession, setAuthChecked, setSession, setUser]);
+  }, [cachedUser, clearSession, setAuthChecked, setSession, setUser]);
 
   return null;
 }

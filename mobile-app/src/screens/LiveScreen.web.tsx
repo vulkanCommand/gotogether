@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: colors.textPrimary,
     fontSize: 30,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   headerSubtitle: {
     marginTop: 4,
@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
   heroTitle: {
     color: colors.textPrimary,
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: '600',
     textAlign: 'center',
   },
   heroText: {
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   tripName: {
     color: colors.textPrimary,
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   tripMeta: {
     marginTop: 6,
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
   eventTitle: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   eventMeta: {
     marginTop: 6,

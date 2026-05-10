@@ -6,19 +6,22 @@ import { radius, shadows, spacing } from '../theme/spacing';
 type Props = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
+  padded?: boolean;
 };
 
-export default function AppCard({ children, style }: Props) {
-  return <View style={[styles.card, style]}>{children}</View>;
+export default function GTCard({ children, style, padded = true }: Props) {
+  return <View style={[styles.card, padded && styles.padded, style]}>{children}</View>;
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    padding: 18,
     borderWidth: 1,
     borderColor: colors.border,
     ...shadows.card,
+  },
+  padded: {
+    padding: spacing.lg,
   },
 });

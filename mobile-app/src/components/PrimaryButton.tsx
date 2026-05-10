@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { radius, shadows, spacing } from '../theme/spacing';
 
 type Props = {
   title: string;
@@ -44,7 +44,7 @@ const styles = StyleSheet.create({
   wrap: {
     borderRadius: radius.lg,
     overflow: 'hidden',
-    boxShadow: `0px 16px 30px ${colors.shadowStrong}`,
+    ...shadows.soft,
   },
   pressed: {
     opacity: 0.96,
@@ -56,7 +56,7 @@ const styles = StyleSheet.create({
   },
   button: {
     borderRadius: radius.lg,
-    minHeight: 56,
+    minHeight: 52,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
@@ -69,12 +69,11 @@ const styles = StyleSheet.create({
   primaryText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '900',
-    letterSpacing: 0.3,
+    fontWeight: '600',
   },
   secondaryButton: {
     borderRadius: radius.lg,
-    minHeight: 56,
+    minHeight: 52,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
@@ -86,7 +85,6 @@ const styles = StyleSheet.create({
   secondaryText: {
     color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+    fontWeight: '600',
   },
 });

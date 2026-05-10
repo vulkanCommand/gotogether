@@ -7,20 +7,26 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import GTCard from '../components/GTCard';
+import GTSectionHeader from '../components/GTSectionHeader';
 import TextField from '../components/TextField';
 import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
 import {
   deleteMyProfileImage,
+  fetchExpenseGroups,
   fetchTrips,
+  ApiTrip,
   profileImageFileUrl,
   updateMyProfile,
   updateMyProfileImage,
 } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { useFriendStore } from '../store/friendStore';
+import { calculateOverallExpenseSummary, formatMoney, getBalanceDisplay } from '../utils/expenseCalculations';
+import { cacheKeys, readCachedValue, writeCachedValue } from '../services/resourceCache';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Profile'>,
@@ -39,6 +45,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [name, setName] = useState(user?.name ?? '');
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [totalTripsCount, setTotalTripsCount] = useState<number | null>(null);
+  const [expenseSummaryLabel, setExpenseSummaryLabel] = useState('No expense activity yet');
   const [saving, setSaving] = useState(false);
   const [avatarVersion, setAvatarVersion] = useState(() => Date.now());
 
@@ -50,17 +57,38 @@ export default function ProfileScreen({ navigation }: Props) {
   useEffect(() => {
     const loadTripCount = async () => {
       try {
+        const cachedTrips = await readCachedValue<ApiTrip[]>(cacheKeys.trips);
+
+        if (cachedTrips?.value) {
+          setTotalTripsCount(cachedTrips.value.length);
+        }
+
         const response = await fetchTrips();
         const trips = Array.isArray(response.trips) ? response.trips : [];
+        await writeCachedValue(cacheKeys.trips, trips);
         setTotalTripsCount(trips.length);
+
+        if (trips.length > 0 && user?.id) {
+          const groups = (
+            await Promise.all(trips.map(async (trip) => (await fetchExpenseGroups(trip.id)).groups ?? []))
+          ).flat();
+          const summary = calculateOverallExpenseSummary(groups, [], user.id);
+          const display = getBalanceDisplay(summary.netBalance);
+          setExpenseSummaryLabel(
+            display.isSettled ? 'Settled up across your trips' : `${display.label} ${formatMoney(display.amount)}`
+          );
+        } else {
+          setExpenseSummaryLabel('No expense activity yet');
+        }
       } catch (error) {
         console.log('Profile trip count load failed', error);
         setTotalTripsCount(0);
+        setExpenseSummaryLabel('No expense activity yet');
       }
     };
 
     void loadTripCount();
-  }, []);
+  }, [user?.id]);
 
   const displayName = user?.name?.trim() || user?.username?.trim() || 'Traveler';
   const displayPhone = user?.phone?.trim() || 'Phone not set';
@@ -168,7 +196,7 @@ export default function ProfileScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <View style={styles.heroCard}>
+        <GTCard style={styles.heroCard}>
           <View style={styles.heroHeader}>
             <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
               {avatarSource ? (
@@ -212,32 +240,23 @@ export default function ProfileScreen({ navigation }: Props) {
               </Pressable>
             ) : null}
           </View>
-        </View>
+        </GTCard>
 
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryPill}>
-            <Ionicons name="people-outline" size={16} color={colors.accentStrong} />
-            <Text style={styles.summaryPillText}>{connectedFriendsLabel}</Text>
-          </View>
+        <GTCard style={styles.expenseSummaryCard}>
+          <Text style={styles.cardTitle}>Money snapshot</Text>
+          <Text style={styles.expenseSummaryText}>{expenseSummaryLabel}</Text>
+          <Pressable style={styles.expenseSummaryLink} onPress={() => navigation.navigate('MainTabs', { screen: 'Expenses' })}>
+            <Text style={styles.expenseSummaryLinkText}>Open Expenses</Text>
+          </Pressable>
+        </GTCard>
 
-          <View style={styles.summaryPill}>
-            <Ionicons name="airplane-outline" size={16} color={colors.accentStrong} />
-            <Text style={styles.summaryPillText}>{totalTripsLabel}</Text>
-          </View>
-        </View>
-
-        <View style={styles.detailsCard}>
-          <View style={styles.detailHeader}>
-            <View>
-              <Text style={styles.cardTitle}>Details</Text>
-              <Text style={styles.cardSubtitle}>Only the essentials.</Text>
-            </View>
-
-            <Pressable style={styles.editButton} onPress={() => setEditing((value) => !value)}>
-              <Ionicons name={editing ? 'close-outline' : 'create-outline'} size={16} color={colors.accentStrong} />
-              <Text style={styles.editButtonText}>{editing ? 'Cancel' : 'Edit'}</Text>
-            </Pressable>
-          </View>
+        <GTCard style={styles.detailsCard}>
+          <GTSectionHeader
+            title="Details"
+            subtitle="Only the essentials."
+            actionLabel={editing ? 'Cancel' : 'Edit'}
+            onPressAction={() => setEditing((value) => !value)}
+          />
 
           {editing ? (
             <>
@@ -254,7 +273,7 @@ export default function ProfileScreen({ navigation }: Props) {
               <DetailRow icon="call-outline" label="Phone number" value={displayPhone} />
             </>
           )}
-        </View>
+        </GTCard>
       </ScrollView>
     </View>
   );
@@ -282,7 +301,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 120,
+    paddingBottom: footerScrollPadding,
     gap: spacing.lg,
   },
   topRow: {
@@ -296,9 +315,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: colors.textPrimary,
-    fontSize: 34,
-    fontWeight: '900',
-    letterSpacing: -1,
+    fontSize: 30,
+    fontWeight: '700',
+    letterSpacing: -0.6,
   },
   headerSubtitle: {
     marginTop: 4,
@@ -325,15 +344,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   heroCard: {
-    borderRadius: 30,
+    borderRadius: radius.xl,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 18,
-    shadowColor: colors.shadowStrong,
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 12 },
   },
   heroHeader: {
     flexDirection: 'row',
@@ -358,7 +373,7 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: 34,
-    fontWeight: '900',
+    fontWeight: '700',
     color: colors.accentStrong,
   },
   cameraBadge: {
@@ -379,15 +394,15 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '700',
     color: colors.textPrimary,
     letterSpacing: -0.4,
   },
   phone: {
     marginTop: 5,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.textSecondary,
-    fontWeight: '600',
+    fontWeight: '400',
   },
   metricGrid: {
     flexDirection: 'row',
@@ -400,19 +415,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   metricValue: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   metricLabel: {
     marginTop: 2,
     color: colors.textSecondary,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
@@ -436,7 +451,7 @@ const styles = StyleSheet.create({
   },
   photoButtonText: {
     color: colors.accentStrong,
-    fontWeight: '900',
+    fontWeight: '600',
     fontSize: 14,
   },
   removeButton: {
@@ -453,42 +468,31 @@ const styles = StyleSheet.create({
   },
   removeButtonText: {
     color: colors.danger,
-    fontWeight: '900',
+    fontWeight: '600',
     fontSize: 14,
   },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  summaryPill: {
-    flex: 1,
-    borderRadius: 22,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 13,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  summaryPillText: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
   detailsCard: {
-    borderRadius: 30,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
     padding: 18,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
+  },
+  expenseSummaryCard: {
+    minHeight: 92,
+    gap: 6,
+    justifyContent: 'space-between',
+  },
+  expenseSummaryText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 20,
+  },
+  expenseSummaryLink: {
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+  },
+  expenseSummaryLinkText: {
+    color: colors.accentStrong,
+    fontSize: 14,
+    fontWeight: '600',
   },
   detailHeader: {
     flexDirection: 'row',
@@ -498,10 +502,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   cardTitle: {
-    fontSize: 22,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '600',
     color: colors.textPrimary,
-    letterSpacing: -0.4,
+    letterSpacing: -0.2,
   },
   cardSubtitle: {
     marginTop: 3,
@@ -520,7 +524,7 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: colors.accentStrong,
-    fontWeight: '900',
+    fontWeight: '600',
     fontSize: 13,
   },
   detailRow: {
@@ -544,7 +548,7 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: colors.textSecondary,
     marginBottom: 4,
     textTransform: 'uppercase',
@@ -552,7 +556,7 @@ const styles = StyleSheet.create({
   },
   detailValue: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
     lineHeight: 23,
   },
@@ -574,6 +578,6 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
   },
 });

@@ -3,8 +3,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 
 import { colors } from '../theme/colors';
+import { radius, shadows } from '../theme/spacing';
 
 const tabs = [
   { name: 'Home', icon: 'home-outline' },
@@ -70,6 +72,7 @@ export default function AppFooter() {
   }, [navigationState]);
 
   const goToTab = (tabName: TabName) => {
+    Haptics.selectionAsync().catch(() => undefined);
     navigation.navigate('MainTabs', {
       screen: tabName,
     });
@@ -80,8 +83,8 @@ export default function AppFooter() {
       style={[
         styles.footer,
         {
-          height: 68 + Math.max(insets.bottom, 12),
-          paddingBottom: Math.max(insets.bottom, 12),
+          height: 58 + Math.max(insets.bottom, 10),
+          paddingBottom: Math.max(insets.bottom, 8),
         },
       ]}
     >
@@ -89,8 +92,16 @@ export default function AppFooter() {
         const selected = activeTab === tab.name;
 
         return (
-          <Pressable key={tab.name} style={styles.tab} onPress={() => goToTab(tab.name)}>
-            <Ionicons name={tab.icon} size={26} color={selected ? colors.accent : colors.tabInactive} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={tab.name}
+            key={tab.name}
+            style={[styles.tab, selected && styles.tabSelected]}
+            onPress={() => goToTab(tab.name)}
+          >
+            <View style={[styles.iconWrap, selected && styles.iconWrapSelected]}>
+              <Ionicons name={tab.icon} size={20} color={selected ? colors.white : colors.tabInactive} />
+            </View>
             <Text style={[styles.label, selected && styles.labelSelected]}>{tab.name}</Text>
           </Pressable>
         );
@@ -102,22 +113,45 @@ export default function AppFooter() {
 const styles = StyleSheet.create({
   footer: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.floating,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    gap: 3,
+    borderRadius: radius.md,
+    minHeight: 40,
+    paddingVertical: 0,
+  },
+  tabSelected: {
+    backgroundColor: '#F5F8FF',
+  },
+  iconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconWrapSelected: {
+    backgroundColor: colors.accent,
   },
   label: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 10.5,
+    fontWeight: '600',
     color: colors.tabInactive,
+    lineHeight: 12,
   },
   labelSelected: {
     color: colors.accent,

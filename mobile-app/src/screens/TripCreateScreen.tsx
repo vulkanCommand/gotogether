@@ -4,7 +4,6 @@ import { CommonActions } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
-import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -12,6 +11,7 @@ import { DestinationOption, useTripStore } from '../store/tripStore';
 import { ApiTrip, apiRequest, ensureTripCoverFromDestination } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { formatTripDate } from '../utils/tripFlow';
+import { cacheKeys, invalidateCacheKey } from '../services/resourceCache';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCreate'>;
 
@@ -275,6 +275,7 @@ export default function TripCreateScreen({ navigation }: Props) {
       setSelectedDestinationId(destinationOption.id);
       setCurrentTrip(createdTripWithCover);
       setTripLead(crew[0] ?? null);
+      await Promise.all([invalidateCacheKey(cacheKeys.home), invalidateCacheKey(cacheKeys.trips)]);
 
       goToTripOverviewAfterCreate();
     } catch (error: any) {
@@ -543,7 +544,6 @@ export default function TripCreateScreen({ navigation }: Props) {
         </Pressable>
       </View>
 
-      <AppFooter />
     </View>
   );
 }
@@ -556,7 +556,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 220,
+    paddingBottom: 140,
   },
   header: {
     flexDirection: 'row',
@@ -576,7 +576,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   stepper: {
@@ -612,7 +612,7 @@ const styles = StyleSheet.create({
   stepperMarkerText: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   stepperMarkerTextActive: {
     color: '#FFFFFF',
@@ -641,7 +641,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   sectionMeta: {
@@ -658,7 +658,7 @@ const styles = StyleSheet.create({
   monthTitle: {
     color: colors.textPrimary,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   monthButton: {
     width: 38,
@@ -746,7 +746,7 @@ const styles = StyleSheet.create({
   summaryTitle: {
     marginTop: 8,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   summaryMeta: {
@@ -802,7 +802,7 @@ const styles = StyleSheet.create({
   destinationPreviewTitle: {
     color: colors.textPrimary,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   destinationPreviewMeta: {
     marginTop: 3,
@@ -824,7 +824,7 @@ const styles = StyleSheet.create({
   reviewValue: {
     marginTop: 6,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   reviewMeta: {
@@ -857,6 +857,6 @@ const styles = StyleSheet.create({
   ctaText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

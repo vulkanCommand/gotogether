@@ -68,7 +68,7 @@ export default function CompleteProfileScreen({ navigation }: Props) {
         updatedUser = imageResponse.user;
       }
       setUser(updatedUser);
-      navigation.replace('PermissionsSetup');
+      navigation.replace('MainTabs');
     } catch (error: any) {
       console.log('Profile update failed', error);
       Alert.alert('Save failed', error?.message || 'Could not save profile');
@@ -120,7 +120,7 @@ const styles = StyleSheet.create({
   },
   phoneLabel: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.accent,
     marginTop: spacing.sm,
     marginBottom: spacing.md,
@@ -142,6 +142,6 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: colors.accent,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

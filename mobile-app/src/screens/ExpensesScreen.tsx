@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +21,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { CurrentTrip, ExpenseGroup, ExpenseItem, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
+import { footerScrollPadding } from '../theme/spacing';
+import { CACHE_TTLS, cacheKeys, fetchWithCache, invalidateTripCaches, isCacheFresh, readCachedValue, writeCachedValue } from '../services/resourceCache';
 import { createExpenseGroup, createTripExpense, deleteTripExpense, fetchExpenseGroups, fetchTripDetails, fetchTrips } from '../config/api';
 import {
   calculateExpenseGroupSummary,
@@ -41,6 +45,8 @@ type TripSection = {
   trip: CurrentTrip;
   groups: ExpenseGroup[];
 };
+
+const EXPENSE_SECTIONS_CACHE_KEY = 'expenses:sections';
 
 const palette = {
   screen: '#F3F6FB',
@@ -105,49 +111,93 @@ export default function ExpensesScreen({ navigation }: Props) {
   const [showSettleModal, setShowSettleModal] = useState(false);
   const [selectedSettleLine, setSelectedSettleLine] = useState<BalanceLine | null>(null);
   const [settlementAmount, setSettlementAmount] = useState('');
+  const settlementSubmittingRef = useRef(false);
 
   // Search modal state to allow filtering groups when tapping the search icon.
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const hasLoadedRef = useRef(false);
+  const lastFetchedRef = useRef(0);
 
-  const refreshGroups = useCallback(async () => {
+  const applySections = useCallback((sections: TripSection[]) => {
+    setTripSections(sections);
+
+    const activeTripId = currentTrip?.id ?? sections[0]?.trip.id ?? null;
+    const activeGroups = sections.find((section) => section.trip.id === activeTripId)?.groups ?? [];
+
+    setExpenseGroups(activeGroups);
+    setExpenses(activeGroups.flatMap((group) => group.expenses ?? []));
+  }, [currentTrip?.id, setExpenseGroups, setExpenses]);
+
+  const refreshGroups = useCallback(async (showSpinner = false, force = false) => {
+    const cachedSections = await readCachedValue<TripSection[]>(EXPENSE_SECTIONS_CACHE_KEY);
+
+    if (cachedSections && !hasLoadedRef.current) {
+      applySections(cachedSections.value);
+      hasLoadedRef.current = true;
+      lastFetchedRef.current = cachedSections.updatedAt;
+      setLoading(false);
+    }
+
     try {
-      setLoading(true);
-      const tripData = await fetchTrips();
-      const trips = Array.isArray(tripData.trips) ? tripData.trips : [];
+      if (showSpinner && !hasLoadedRef.current) {
+        setLoading(true);
+      }
+
+      const tripsResponse = await fetchWithCache(
+        cacheKeys.trips,
+        CACHE_TTLS.trips,
+        async () => {
+          const tripData = await fetchTrips();
+          return Array.isArray(tripData.trips) ? (tripData.trips as CurrentTrip[]) : [];
+        },
+        { force }
+      );
+
+      const trips = tripsResponse.data;
       const sections = await Promise.all(
         trips.map(async (trip) => {
-          const groupData = await fetchExpenseGroups(trip.id);
+          const groupData = await fetchWithCache(
+            cacheKeys.expenseGroups(trip.id),
+            CACHE_TTLS.expenseGroups,
+            async () => {
+              const response = await fetchExpenseGroups(trip.id);
+              return (response.groups ?? []) as ExpenseGroup[];
+            },
+            { force }
+          );
+
           return {
             trip: trip as CurrentTrip,
-            groups: (groupData.groups ?? []) as ExpenseGroup[],
+            groups: groupData.data,
           };
         })
       );
 
-      setTripSections(sections);
-
-      const activeTripId = currentTrip?.id ?? sections[0]?.trip.id ?? null;
-      const activeGroups = sections.find((section) => section.trip.id === activeTripId)?.groups ?? [];
-      setExpenseGroups(activeGroups);
-      setExpenses(activeGroups.flatMap((group) => group.expenses ?? []));
+      applySections(sections);
+      await writeCachedValue(EXPENSE_SECTIONS_CACHE_KEY, sections);
+      hasLoadedRef.current = true;
+      lastFetchedRef.current = Date.now();
     } catch (error) {
       console.log('Fetch expense groups failed', error);
-      setTripSections([]);
-      setExpenseGroups([]);
-      setExpenses([]);
+      if (!hasLoadedRef.current) {
+        setTripSections([]);
+        setExpenseGroups([]);
+        setExpenses([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, [currentTrip?.id, setExpenseGroups, setExpenses]);
+  }, [applySections, setExpenseGroups, setExpenses]);
 
   useEffect(() => {
-    void refreshGroups();
+    void refreshGroups(true);
   }, [refreshGroups]);
 
   useFocusEffect(
     useCallback(() => {
-      void refreshGroups();
+      const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.expenseGroups;
+      void refreshGroups(false, !hasLoadedRef.current ? false : stale);
     }, [refreshGroups])
   );
 
@@ -238,7 +288,8 @@ export default function ExpensesScreen({ navigation }: Props) {
         onPress: async () => {
           try {
             await deleteTripExpense(selectedSection.trip.id, expense.id);
-            await refreshGroups();
+            await invalidateTripCaches(selectedSection.trip.id);
+            await refreshGroups(false, true);
           } catch (error: any) {
             Alert.alert('Delete failed', error?.message || 'Could not delete expense');
           }
@@ -262,58 +313,10 @@ export default function ExpensesScreen({ navigation }: Props) {
       await createExpenseGroup(tripForGroup.id, { name: newGroupName.trim() });
       setNewGroupName('');
       setShowGroupModal(false);
-      await refreshGroups();
+      await invalidateTripCaches(tripForGroup.id);
+      await refreshGroups(false, true);
     } catch (error: any) {
       Alert.alert('Group failed', error?.message || 'Could not create expense group');
-    }
-  };
-
-  const createSettlement = async (method: 'Cash' | 'Card') => {
-    if (!selectedSection?.trip.id || !selectedGroup || !selectedGroupSummary || settling) {
-      return;
-    }
-
-    const lines = selectedGroupSummary.currentUserBalanceLines;
-    if (lines.length === 0) {
-      Alert.alert('Nothing to settle', 'You are already settled in this group.');
-      return;
-    }
-
-    try {
-      setSettling(true);
-      const userKey = String(user?.id ?? '');
-
-      for (const line of lines) {
-        const userOwes = line.fromMemberId === userKey;
-        const payerId = Number(userOwes ? line.fromMemberId : line.toMemberId);
-        const receiverId = userOwes ? line.toMemberId : line.fromMemberId;
-        const receiverName = userOwes ? line.toMemberName : line.fromMemberName;
-        const payerName = userOwes ? line.fromMemberName : line.toMemberName;
-
-        await createTripExpense(selectedSection.trip.id, {
-          title: userOwes ? `Settlement to ${receiverName}` : `Settlement from ${payerName}`,
-          amount: line.amount,
-          paidByUserId: payerId,
-          expenseGroupId: selectedGroup.id,
-          linkedEventId: '',
-          splitMethod: `Settlement - ${method}`,
-          notes: `Settled by ${method.toLowerCase()}`,
-          splitPreview: [
-            {
-              memberId: String(receiverId),
-              memberName: receiverName,
-              amount: line.amount,
-            },
-          ],
-        });
-      }
-
-      await refreshGroups();
-      Alert.alert('Settled', `Balance cleared using ${method}.`);
-    } catch (error: any) {
-      Alert.alert('Settle up failed', error?.message || 'Could not settle this balance.');
-    } finally {
-      setSettling(false);
     }
   };
 
@@ -344,7 +347,7 @@ export default function ExpensesScreen({ navigation }: Props) {
   };
 
   const createSingleSettlement = async (line: BalanceLine, method: 'Cash' | 'Card') => {
-    if (!selectedSection?.trip.id || !selectedGroup || settling) {
+    if (!selectedSection?.trip.id || !selectedGroup || settling || settlementSubmittingRef.current) {
       return;
     }
 
@@ -360,44 +363,47 @@ export default function ExpensesScreen({ navigation }: Props) {
     }
 
     try {
+      settlementSubmittingRef.current = true;
       setSettling(true);
-      const userKey = String(user?.id ?? '');
-      const userOwes = line.fromMemberId === userKey;
-      const payerId = userOwes ? Number(line.fromMemberId) : Number(line.toMemberId);
-      const receiverId = userOwes ? line.toMemberId : line.fromMemberId;
-      const receiverName = userOwes ? line.toMemberName : line.fromMemberName;
-      const payerName = userOwes ? line.fromMemberName : line.toMemberName;
+      const debtorId = Number(line.fromMemberId);
+      const creditorId = Number(line.toMemberId);
+      const debtorName = line.fromMemberName;
+      const creditorName = line.toMemberName;
       const paymentAmount = Math.round((enteredAmount + Number.EPSILON) * 100) / 100;
 
+      // Settlements must always flow from the debtor to the creditor so they
+      // reduce the existing balance instead of creating a new debt in reverse.
       await createTripExpense(selectedSection.trip.id, {
-        title: userOwes ? `Settlement to ${receiverName}` : `Settlement from ${payerName}`,
+        title: `Settlement to ${creditorName}`,
         amount: paymentAmount,
-        paidByUserId: payerId,
+        paidByUserId: debtorId,
         expenseGroupId: selectedGroup.id,
         linkedEventId: '',
         splitMethod: `Settlement - ${method}`,
         notes: `Settled ${formatMoney(paymentAmount)} by ${method.toLowerCase()}`,
         splitPreview: [
           {
-            memberId: String(receiverId),
-            memberName: receiverName,
+            memberId: String(creditorId),
+            memberName: creditorName,
             amount: paymentAmount,
           },
         ],
       });
 
-      await refreshGroups();
+      await invalidateTripCaches(selectedSection.trip.id);
+      await refreshGroups(false, true);
       const remaining = Math.max(0, Math.round((line.amount - paymentAmount + Number.EPSILON) * 100) / 100);
       closeSettleModal();
       Alert.alert(
         'Settlement recorded',
         remaining > 0.009
-          ? `${formatMoney(paymentAmount)} settled. Remaining with ${receiverName}: ${formatMoney(remaining)}.`
-          : `Balance with ${receiverName} cleared using ${method}.`
+          ? `${formatMoney(paymentAmount)} settled. Remaining balance between ${debtorName} and ${creditorName}: ${formatMoney(remaining)}.`
+          : `Balance between ${debtorName} and ${creditorName} cleared using ${method}.`
       );
     } catch (error: any) {
       Alert.alert('Settle up failed', error?.message || 'Could not settle this balance.');
     } finally {
+      settlementSubmittingRef.current = false;
       setSettling(false);
     }
   };
@@ -598,7 +604,7 @@ export default function ExpensesScreen({ navigation }: Props) {
     <View style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 96 }}
+        contentContainerStyle={{ paddingBottom: footerScrollPadding + 28 }}
       >
         {selectedGroup ? renderDetail() : <View style={[styles.content, { paddingTop: Math.max(insets.top, 22) + 8 }]}>{renderOverview()}</View>}
       </ScrollView>
@@ -606,7 +612,7 @@ export default function ExpensesScreen({ navigation }: Props) {
       {(!selectedGroup || selectedSection) && (
         <View pointerEvents="box-none" style={styles.floatingActionWrap}>
           <Pressable style={[styles.floatingAction, { bottom: Math.max(insets.bottom, 18) + 8 }]} onPress={openAddExpense}>
-            <Ionicons name="receipt-outline" size={22} color={palette.white} />
+            <Ionicons name="receipt-outline" size={20} color={palette.white} />
             <Text style={styles.floatingActionText}>Add expense</Text>
           </Pressable>
         </View>
@@ -638,95 +644,121 @@ export default function ExpensesScreen({ navigation }: Props) {
 
       <Modal visible={showSettleModal} transparent animationType="fade" onRequestClose={closeSettleModal}>
         <View style={styles.modalOverlay}>
-          <View style={styles.settleModalCard}>
-            <Text style={styles.modalTitle}>Settle up</Text>
-            <Text style={styles.modalSubtitle}>
-              Choose one person, enter how much is being paid, then select cash or card.
-            </Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.settleKeyboardWrap}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.bottom, 16) : 0}
+          >
+            <View style={styles.settleModalCard}>
+              <View style={styles.settleHeaderRow}>
+                <Text style={styles.modalTitle}>Settle up</Text>
+                <Pressable
+                  onPress={closeSettleModal}
+                  style={styles.settleCloseButton}
+                  disabled={settling}
+                >
+                  <Ionicons name="close" size={18} color={palette.text} />
+                </Pressable>
+              </View>
+              <Text style={styles.modalSubtitle}>
+                Choose one person, enter how much is being paid, then select cash or card.
+              </Text>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.settleListContent}>
-              {selectedGroupSummary?.currentUserBalanceLines?.map((line) => {
-                const userKey = String(user?.id ?? '');
-                const userOwes = line.fromMemberId === userKey;
-                const personName = userOwes ? line.toMemberName : line.fromMemberName;
-                const descriptor = userOwes
-                  ? `You owe ${formatMoney(line.amount)} to ${personName}`
-                  : `${personName} owes you ${formatMoney(line.amount)}`;
-                const selected = selectedSettleLine === line;
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.settleListContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              >
+                {selectedGroupSummary?.currentUserBalanceLines?.map((line) => {
+                  const userKey = String(user?.id ?? '');
+                  const userOwes = line.fromMemberId === userKey;
+                  const personName = userOwes ? line.toMemberName : line.fromMemberName;
+                  const descriptor = userOwes
+                    ? `You owe ${formatMoney(line.amount)} to ${personName}`
+                    : `${personName} owes you ${formatMoney(line.amount)}`;
+                  const selected = selectedSettleLine === line;
 
-                return (
-                  <Pressable
-                    key={`${line.fromMemberId}-${line.toMemberId}`}
-                    onPress={() => selectSettleLine(line)}
-                    style={[styles.settleRow, selected && styles.settleRowSelected]}
-                  >
-                    <View style={styles.settleRowCopy}>
-                      <Text style={styles.settleRowText}>{personName}</Text>
-                      <Text style={styles.settleRowSubtext}>{descriptor}</Text>
+                  return (
+                    <Pressable
+                      key={`${line.fromMemberId}-${line.toMemberId}`}
+                      onPress={() => selectSettleLine(line)}
+                      style={[styles.settleRow, selected && styles.settleRowSelected]}
+                    >
+                      <View style={styles.settleRowCopy}>
+                        <Text style={styles.settleRowText}>{personName}</Text>
+                        <Text style={styles.settleRowSubtext}>{descriptor}</Text>
+                      </View>
+                      <Text style={[styles.settleRowAmount, userOwes ? styles.negativeText : styles.positiveText]}>
+                        {formatMoney(line.amount)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+
+                {(!selectedGroupSummary || selectedGroupSummary.currentUserBalanceLines.length === 0) ? (
+                  <Text style={styles.emptyText}>No balances to settle.</Text>
+                ) : null}
+
+                {selectedSettleLine ? (() => {
+                  const userKey = String(user?.id ?? '');
+                  const userOwes = selectedSettleLine.fromMemberId === userKey;
+                  const personName = userOwes ? selectedSettleLine.toMemberName : selectedSettleLine.fromMemberName;
+                  const enteredAmount = parseCurrencyInput(settlementAmount);
+                  const canSubmitSettlement =
+                    enteredAmount > 0 &&
+                    enteredAmount - selectedSettleLine.amount <= 0.01 &&
+                    !settling &&
+                    !settlementSubmittingRef.current;
+                  const remainingAmount = Math.max(
+                    0,
+                    Math.round((selectedSettleLine.amount - enteredAmount + Number.EPSILON) * 100) / 100
+                  );
+
+                  return (
+                    <View style={styles.settlePaymentCard}>
+                      <Text style={styles.settlePaymentTitle}>Amount to settle with {personName}</Text>
+                      <TextInput
+                        value={settlementAmount}
+                        onChangeText={setSettlementAmount}
+                        placeholder="0.00"
+                        placeholderTextColor={palette.textMuted}
+                        keyboardType="decimal-pad"
+                        returnKeyType="done"
+                        style={styles.modalInput}
+                      />
+                      <Text style={styles.settlePaymentMeta}>
+                        {remainingAmount > 0.009
+                          ? `Remaining after this payment: ${formatMoney(remainingAmount)}`
+                          : 'This clears the balance with this person.'}
+                      </Text>
+
+                      <View style={styles.paymentMethodRow}>
+                        <Pressable
+                          style={[styles.modalPrimaryButton, !canSubmitSettlement && styles.settleButtonDisabled]}
+                          onPress={() => void createSingleSettlement(selectedSettleLine, 'Cash')}
+                          disabled={!canSubmitSettlement}
+                        >
+                          <Text style={styles.modalPrimaryButtonText}>Cash</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.modalPrimaryButton, !canSubmitSettlement && styles.settleButtonDisabled]}
+                          onPress={() => void createSingleSettlement(selectedSettleLine, 'Card')}
+                          disabled={!canSubmitSettlement}
+                        >
+                          <Text style={styles.modalPrimaryButtonText}>Card</Text>
+                        </Pressable>
+                      </View>
                     </View>
-                    <Text style={[styles.settleRowAmount, userOwes ? styles.negativeText : styles.positiveText]}>
-                      {formatMoney(line.amount)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+                  );
+                })() : null}
 
-              {(!selectedGroupSummary || selectedGroupSummary.currentUserBalanceLines.length === 0) ? (
-                <Text style={styles.emptyText}>No balances to settle.</Text>
-              ) : null}
-            </ScrollView>
-
-            {selectedSettleLine ? (() => {
-              const userKey = String(user?.id ?? '');
-              const userOwes = selectedSettleLine.fromMemberId === userKey;
-              const personName = userOwes ? selectedSettleLine.toMemberName : selectedSettleLine.fromMemberName;
-              const enteredAmount = parseCurrencyInput(settlementAmount);
-              const remainingAmount = Math.max(
-                0,
-                Math.round((selectedSettleLine.amount - enteredAmount + Number.EPSILON) * 100) / 100
-              );
-
-              return (
-                <View style={styles.settlePaymentCard}>
-                  <Text style={styles.settlePaymentTitle}>Amount to settle with {personName}</Text>
-                  <TextInput
-                    value={settlementAmount}
-                    onChangeText={setSettlementAmount}
-                    placeholder="0.00"
-                    placeholderTextColor={palette.textMuted}
-                    keyboardType="decimal-pad"
-                    style={styles.modalInput}
-                  />
-                  <Text style={styles.settlePaymentMeta}>
-                    {remainingAmount > 0.009
-                      ? `Remaining after this payment: ${formatMoney(remainingAmount)}`
-                      : 'This clears the balance with this person.'}
-                  </Text>
-
-                  <View style={styles.paymentMethodRow}>
-                    <Pressable
-                      style={[styles.modalPrimaryButton, settling && styles.settleButtonDisabled]}
-                      onPress={() => void createSingleSettlement(selectedSettleLine, 'Cash')}
-                      disabled={settling}
-                    >
-                      <Text style={styles.modalPrimaryButtonText}>Cash</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.modalPrimaryButton, settling && styles.settleButtonDisabled]}
-                      onPress={() => void createSingleSettlement(selectedSettleLine, 'Card')}
-                      disabled={settling}
-                    >
-                      <Text style={styles.modalPrimaryButtonText}>Card</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            })() : null}
-
-            <Pressable style={styles.modalSecondaryButton} onPress={closeSettleModal} disabled={settling}>
-              <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
-            </Pressable>
-          </View>
+                <Pressable style={styles.modalSecondaryButton} onPress={closeSettleModal} disabled={settling}>
+                  <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -856,8 +888,8 @@ const styles = StyleSheet.create({
   },
   createGroupText: {
     color: palette.teal,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   overallHeaderRow: {
     flexDirection: 'row',
@@ -877,15 +909,15 @@ const styles = StyleSheet.create({
   },
   overallBalanceAmount: {
     color: palette.text,
-    fontSize: 28,
-    fontWeight: '900',
+    fontSize: 26,
+    fontWeight: '700',
     letterSpacing: -0.4,
   },
   overallBalanceLabel: {
     marginTop: 3,
     color: palette.textMuted,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     textTransform: 'lowercase',
   },
   positiveText: {
@@ -900,7 +932,7 @@ const styles = StyleSheet.create({
   groupRow: {
     flexDirection: 'row',
     gap: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: palette.line,
   },
@@ -918,8 +950,8 @@ const styles = StyleSheet.create({
   },
   groupName: {
     color: palette.text,
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   groupSubline: {
     color: palette.textMuted,
@@ -939,7 +971,7 @@ const styles = StyleSheet.create({
   },
   groupBalanceAmount: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     textAlign: 'right',
   },
   emptyCard: {
@@ -954,7 +986,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: palette.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   emptyText: {
     color: palette.textMuted,
@@ -982,9 +1014,9 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: palette.white,
-    fontSize: 32,
-    fontWeight: '800',
-    lineHeight: 38,
+    fontSize: 28,
+    fontWeight: '700',
+    lineHeight: 34,
   },
   heroMemberPill: {
     marginTop: 14,
@@ -1002,7 +1034,7 @@ const styles = StyleSheet.create({
   heroMemberText: {
     color: palette.white,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   detailBody: {
     paddingHorizontal: 20,
@@ -1010,9 +1042,9 @@ const styles = StyleSheet.create({
   },
   detailHeadline: {
     color: palette.text,
-    fontSize: 19,
-    fontWeight: '700',
-    lineHeight: 30,
+    fontSize: 18,
+    fontWeight: '600',
+    lineHeight: 28,
   },
   detailSummaryRow: {
     flexDirection: 'row',
@@ -1037,7 +1069,7 @@ const styles = StyleSheet.create({
   metricValue: {
     color: palette.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   settleButton: {
     marginTop: 16,
@@ -1053,7 +1085,7 @@ const styles = StyleSheet.create({
   settleButtonText: {
     color: palette.white,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   activitySection: {
     marginTop: 26,
@@ -1065,7 +1097,7 @@ const styles = StyleSheet.create({
   monthLabel: {
     color: palette.text,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   activityRow: {
     flexDirection: 'row',
@@ -1122,7 +1154,7 @@ const styles = StyleSheet.create({
   },
   activityAmount: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   activityTotalAmount: {
     marginTop: 3,
@@ -1139,15 +1171,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+    minHeight: 52,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     borderRadius: 999,
     backgroundColor: palette.teal,
   },
   floatingActionText: {
     color: palette.white,
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
@@ -1168,7 +1201,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     color: palette.text,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modalSubtitle: {
     color: palette.textMuted,
@@ -1212,7 +1245,7 @@ const styles = StyleSheet.create({
   modalPrimaryButtonText: {
     color: palette.white,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
 
   // Additional styles for settle and search modals
@@ -1221,12 +1254,34 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: palette.panel,
     padding: 20,
-    maxHeight: '86%',
+    maxHeight: '88%',
     gap: 12,
+  },
+  settleKeyboardWrap: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  settleCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.panelSoft,
+    borderWidth: 1,
+    borderColor: palette.border,
   },
   settleListContent: {
     gap: 8,
     paddingVertical: 4,
+    paddingBottom: 8,
   },
   settleRow: {
     flexDirection: 'row',
@@ -1249,7 +1304,7 @@ const styles = StyleSheet.create({
   },
   settleRowText: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: palette.text,
   },
   settleRowSubtext: {
@@ -1259,7 +1314,7 @@ const styles = StyleSheet.create({
   },
   settleRowAmount: {
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   settlePaymentCard: {
     borderRadius: 18,
@@ -1272,7 +1327,7 @@ const styles = StyleSheet.create({
   settlePaymentTitle: {
     color: palette.text,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   settlePaymentMeta: {
     color: palette.textMuted,
@@ -1300,7 +1355,7 @@ const styles = StyleSheet.create({
   },
   searchRowText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     color: palette.text,
   },
   searchRowSubtext: {

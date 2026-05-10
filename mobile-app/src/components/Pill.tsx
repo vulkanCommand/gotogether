@@ -46,7 +46,7 @@ const styles = StyleSheet.create({
   },
   text: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     letterSpacing: 0.2,
   },
 });

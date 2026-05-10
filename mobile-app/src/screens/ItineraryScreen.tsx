@@ -20,7 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
+import { CACHE_TTLS, cacheKeys, invalidateTripCaches, isCacheFresh, readCachedValue, writeCachedValue } from '../services/resourceCache';
 import { ItineraryDay, ItineraryEvent, isCompletedEvent, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -297,6 +298,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [locationResults, setLocationResults] = useState<ApiPlaceResult[]>([]);
   const [searchingLocations, setSearchingLocations] = useState(false);
   const hasFetchedRef = useRef(false);
+  const lastFetchedRef = useRef(0);
 
   const canManageItinerary = Boolean(
     currentTrip &&
@@ -306,13 +308,33 @@ export default function ItineraryScreen({ navigation }: Props) {
         currentTrip.created_by === Number(user?.id))
   );
 
-  const fetchItinerary = useCallback(async () => {
+  const fetchItinerary = useCallback(async (force = false) => {
     if (!currentTrip?.id) {
       return;
     }
 
+    const cacheKey = cacheKeys.itinerary(currentTrip.id);
+    const cached = await readCachedValue<ItineraryDay[]>(cacheKey);
+
+    if (cached && !hasFetchedRef.current) {
+      const cachedDays =
+        Array.isArray(cached.value) && cached.value.length > 0
+          ? sortDaysByDate(cached.value, currentTrip.start_date)
+          : buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
+      setItineraryDays(cachedDays);
+      hasFetchedRef.current = true;
+      lastFetchedRef.current = cached.updatedAt;
+      setLoading(false);
+    }
+
+    if (!force && cached && isCacheFresh(cached.updatedAt, CACHE_TTLS.itinerary)) {
+      return;
+    }
+
     try {
-      setLoading(true);
+      if (!hasFetchedRef.current) {
+        setLoading(true);
+      }
       const data = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
       let days = Array.isArray(data.days) && data.days.length > 0 ? sortDaysByDate(data.days, currentTrip.start_date) : [];
 
@@ -321,7 +343,9 @@ export default function ItineraryScreen({ navigation }: Props) {
       }
 
       setItineraryDays(days);
+      await writeCachedValue(cacheKey, days);
       hasFetchedRef.current = true;
+      lastFetchedRef.current = Date.now();
     } catch (error) {
       console.log('Fetch itinerary failed', error);
       if (!hasFetchedRef.current) {
@@ -339,7 +363,8 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      fetchItinerary();
+      const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.itinerary;
+      fetchItinerary(!hasFetchedRef.current ? false : stale);
     }, [fetchItinerary])
   );
 
@@ -499,9 +524,10 @@ export default function ItineraryScreen({ navigation }: Props) {
         });
       }
 
+      await invalidateTripCaches(currentTrip.id);
       setShowEventModal(false);
       resetEventForm();
-      await fetchItinerary();
+      await fetchItinerary(true);
     } catch (error: any) {
       Alert.alert('Save failed', error?.message || 'Could not save the event right now.');
     } finally {
@@ -523,7 +549,8 @@ export default function ItineraryScreen({ navigation }: Props) {
           try {
             setSaving(true);
             await deleteItineraryEvent(currentTrip.id, event.id);
-            await fetchItinerary();
+            await invalidateTripCaches(currentTrip.id);
+            await fetchItinerary(true);
           } catch (error: any) {
             Alert.alert('Delete failed', error?.message || 'Could not delete the event right now.');
           } finally {
@@ -577,6 +604,8 @@ export default function ItineraryScreen({ navigation }: Props) {
         ? mergeCompletedEventIntoDays(itineraryDays, response.days, event.id)
         : mergeCompletedEventIntoDays(itineraryDays, itineraryDays, event.id);
       setItineraryDays(completedDays);
+      await writeCachedValue(cacheKeys.itinerary(currentTrip.id), completedDays);
+      await invalidateTripCaches(currentTrip.id);
     } catch (error: any) {
       updateEventInDay(owningDay.id, event.id, { status: previousStatus, isCompleted: previousIsCompleted });
       Alert.alert('Update failed', error?.message || 'Could not update the event right now.');
@@ -863,7 +892,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 36,
+    paddingBottom: footerScrollPadding,
   },
   header: {
     flexDirection: 'row',
@@ -888,7 +917,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   subtitle: {
@@ -906,7 +935,7 @@ const styles = StyleSheet.create({
   },
   dayTabs: {
     gap: spacing.sm,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.md,
   },
   dayTab: {
     borderRadius: 16,
@@ -914,7 +943,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 48,
+    justifyContent: 'center',
     minWidth: 98,
   },
   dayTabSelected: {
@@ -924,7 +954,7 @@ const styles = StyleSheet.create({
   dayTabTitle: {
     color: colors.textPrimary,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   dayTabMeta: {
     marginTop: 2,
@@ -955,7 +985,7 @@ const styles = StyleSheet.create({
   addDayText: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   loadingBox: {
     marginBottom: spacing.md,
@@ -1003,14 +1033,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   eventCardDone: {
-    backgroundColor: '#F3F4F6',
-    borderColor: '#D1D5DB',
-    opacity: 0.88,
+    backgroundColor: '#F7F8FB',
+    borderColor: '#D7DEE9',
   },
   eventTime: {
     color: colors.accent,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   eventTimeDone: {
     color: colors.textMuted,
@@ -1043,8 +1072,8 @@ const styles = StyleSheet.create({
   },
   eventTitle: {
     color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '600',
   },
   eventTitleDone: {
     color: colors.textSecondary,
@@ -1059,17 +1088,17 @@ const styles = StyleSheet.create({
   completedTagText: {
     color: '#207245',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   eventLocation: {
     marginTop: 6,
     color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 14,
   },
   eventNotes: {
     marginTop: 6,
     color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 14,
     lineHeight: 18,
   },
   eventMetaDone: {
@@ -1092,7 +1121,7 @@ const styles = StyleSheet.create({
   eventActionText: {
     color: colors.textPrimary,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   eventDeleteChip: {
     borderColor: '#F3C9C4',
@@ -1101,19 +1130,19 @@ const styles = StyleSheet.create({
   eventDeleteText: {
     color: colors.danger,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   emptyState: {
     borderRadius: 18,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 20,
+    padding: 16,
   },
   emptyTitle: {
     color: colors.textPrimary,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   emptyCopy: {
     marginTop: 8,
@@ -1134,7 +1163,7 @@ const styles = StyleSheet.create({
   emptyAddButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modalBackdrop: {
     flex: 1,
@@ -1162,7 +1191,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
     marginBottom: spacing.md,
   },
@@ -1206,7 +1235,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: colors.textSecondary,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   timeEditorRow: {
     width: '100%',
@@ -1239,12 +1268,12 @@ const styles = StyleSheet.create({
   timeEditorValue: {
     color: colors.textPrimary,
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   timeEditorSeparator: {
     color: colors.textPrimary,
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: '600',
     marginTop: 6,
   },
   meridiemButton: {
@@ -1265,7 +1294,7 @@ const styles = StyleSheet.create({
   meridiemButtonText: {
     color: colors.textSecondary,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   meridiemButtonTextSelected: {
     color: colors.accent,
@@ -1280,7 +1309,7 @@ const styles = StyleSheet.create({
   timeDoneButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   locationStatusRow: {
     flexDirection: 'row',
@@ -1309,7 +1338,7 @@ const styles = StyleSheet.create({
   locationOptionTitle: {
     color: colors.textPrimary,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   locationOptionSubtitle: {
     marginTop: 4,
@@ -1330,15 +1359,15 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: spacing.md,
-    borderRadius: 20,
+    borderRadius: 18,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
+    minHeight: 50,
   },
   saveButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

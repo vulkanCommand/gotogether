@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -11,10 +10,12 @@ import {
   NativeSyntheticEvent,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -25,6 +26,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import GTBadge from '../components/GTBadge';
+import GTEmptyState from '../components/GTEmptyState';
+import GTLoadingSkeleton from '../components/GTLoadingSkeleton';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import {
   ApiTrip,
@@ -38,9 +42,10 @@ import {
 import { useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
 import { prototypeImages } from '../utils/prototypeAssets';
 import { formatTripRange, isTripCurrentSection, isTripUpcoming, mapApiMembersToCrew, tripTimelineStatus } from '../utils/tripFlow';
+import { CACHE_TTLS, cacheKeys, isCacheFresh, readCachedValue, writeCachedValue } from '../services/resourceCache';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Trips'>,
@@ -94,12 +99,14 @@ export default function TripsScreen({ navigation, route }: Props) {
 
   const pagerRef = useRef<FlatList<TripSection>>(null);
   const hasLoadedRef = useRef(false);
-  const screenWidth = Dimensions.get('window').width;
+  const lastFetchedRef = useRef(0);
+  const { width: screenWidth } = useWindowDimensions();
 
   const [trips, setTrips] = useState<ApiTrip[]>([]);
   const [loading, setLoading] = useState(true);
   const [showManageModal, setShowManageModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [editingTrip, setEditingTrip] = useState<ApiTrip | null>(null);
   const [tripName, setTripName] = useState('');
   const [tripDestination, setTripDestination] = useState('');
@@ -129,15 +136,34 @@ export default function TripsScreen({ navigation, route }: Props) {
     };
   }, [trips]);
 
-  const loadTrips = useCallback(async (showSpinner = false) => {
+  const loadTrips = useCallback(async (showSpinner = false, force = false) => {
+    const cachedTrips = await readCachedValue<ApiTrip[]>(cacheKeys.trips);
+
+    if (cachedTrips && !hasLoadedRef.current) {
+      setTrips(cachedTrips.value);
+      hasLoadedRef.current = true;
+      lastFetchedRef.current = cachedTrips.updatedAt;
+      setLoading(false);
+    }
+
+    const shouldFetch = force || !cachedTrips || !isCacheFresh(cachedTrips.updatedAt, CACHE_TTLS.trips);
+
+    if (!shouldFetch) {
+      setRefreshing(false);
+      return;
+    }
+
     try {
       if (showSpinner) {
         setLoading(true);
       }
 
       const response = await fetchTrips();
-      setTrips(Array.isArray(response.trips) ? response.trips : []);
+      const nextTrips = Array.isArray(response.trips) ? response.trips : [];
+      setTrips(nextTrips);
+      await writeCachedValue(cacheKeys.trips, nextTrips);
       hasLoadedRef.current = true;
+      lastFetchedRef.current = Date.now();
     } catch (error) {
       console.log('Trips fetch failed', error);
 
@@ -148,12 +174,14 @@ export default function TripsScreen({ navigation, route }: Props) {
       if (showSpinner) {
         setLoading(false);
       }
+      setRefreshing(false);
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadTrips(!hasLoadedRef.current);
+      const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.trips;
+      loadTrips(!hasLoadedRef.current, !hasLoadedRef.current ? false : stale);
     }, [loadTrips])
   );
 
@@ -348,7 +376,7 @@ export default function TripsScreen({ navigation, route }: Props) {
   };
 
   const renderTripCard = ({ item: trip, index }: { item: ApiTrip; index: number }) => (
-    <Pressable onPress={() => openTrip(trip)} style={styles.tripCard}>
+    <Pressable onPress={() => openTrip(trip)} style={({ pressed }) => [styles.tripCard, pressed && styles.tripCardPressed]}>
       <View style={styles.imageWrap}>
         <Image
           source={
@@ -364,9 +392,16 @@ export default function TripsScreen({ navigation, route }: Props) {
         />
 
         <View style={styles.statusWrap}>
-          <Text style={[styles.statusText, tripTimelineStatus(trip) === 'Active' && styles.statusTextActive]}>
-            {tripTimelineStatus(trip)}
-          </Text>
+          <GTBadge
+            label={tripTimelineStatus(trip)}
+            tone={
+              tripTimelineStatus(trip) === 'Active'
+                ? 'green'
+                : tripTimelineStatus(trip) === 'Upcoming'
+                  ? 'blue'
+                  : 'neutral'
+            }
+          />
         </View>
 
         {!trip.completed_at ? (
@@ -389,6 +424,37 @@ export default function TripsScreen({ navigation, route }: Props) {
         <Text style={styles.tripMeta}>
           {formatTripRange(trip.start_date, trip.end_date)} - {trip.members_count ?? 1} members
         </Text>
+        <View style={styles.tripFooterRow}>
+          <View style={styles.memberPreview}>
+            <View style={styles.memberAvatar}>
+              <Text style={styles.memberAvatarText}>{trip.name.slice(0, 1).toUpperCase()}</Text>
+            </View>
+            <Text style={styles.memberPreviewText}>{trip.members_count ?? 1} travelers</Text>
+          </View>
+
+          {(trip.setup_completed_count || trip.setup_pending_count) ? (
+            <View style={styles.progressMiniWrap}>
+              <View style={styles.progressMiniTrack}>
+                <View
+                  style={[
+                    styles.progressMiniFill,
+                    {
+                      width: `${Math.max(
+                        8,
+                        Math.min(
+                          100,
+                          (((trip.setup_completed_count ?? 0) /
+                            Math.max(1, (trip.setup_completed_count ?? 0) + (trip.setup_pending_count ?? 0))) *
+                            100)
+                        )
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          ) : null}
+        </View>
       </View>
     </Pressable>
   );
@@ -400,7 +466,9 @@ export default function TripsScreen({ navigation, route }: Props) {
       return (
         <View style={[styles.page, { width: screenWidth }]}>
           <View style={styles.loadingCard}>
-            <ActivityIndicator color={colors.accent} />
+            <GTLoadingSkeleton height={160} radius={24} />
+            <GTLoadingSkeleton height={20} width="72%" style={{ marginTop: 18 }} />
+            <GTLoadingSkeleton height={14} width="48%" style={{ marginTop: 10 }} />
           </View>
         </View>
       );
@@ -413,19 +481,23 @@ export default function TripsScreen({ navigation, route }: Props) {
           keyExtractor={(trip) => String(trip.id)}
           renderItem={renderTripCard}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.listContent, { paddingBottom: 108 + Math.max(insets.bottom, 12) }]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void loadTrips(false, true); }} tintColor={colors.accent} />}
+        contentContainerStyle={[styles.listContent, { paddingBottom: footerScrollPadding + Math.max(insets.bottom, 8) }]}
           ItemSeparatorComponent={() => <View style={styles.listGap} />}
           ListEmptyComponent={
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No {section.toLowerCase()} trips</Text>
-              <Text style={styles.emptyCopy}>
-                {section === 'Completed'
+            <GTEmptyState
+              icon={section === 'Completed' ? 'checkmark-done-outline' : section === 'Upcoming' ? 'calendar-outline' : 'airplane-outline'}
+              title={`No ${section.toLowerCase()} trips`}
+              body={
+                section === 'Completed'
                   ? 'Finished trips will live here once you wrap them up.'
                   : section === 'Upcoming'
                     ? 'Your next planned getaways will show up here.'
-                    : 'Trips happening now, or waiting to be wrapped up, will show here.'}
-              </Text>
-            </View>
+                    : 'Trips happening now, or waiting to be wrapped up, will show here.'
+              }
+              actionLabel={section !== 'Completed' ? 'Create trip' : undefined}
+              onPressAction={section !== 'Completed' ? () => navigation.navigate('CreateGroup') : undefined}
+            />
           }
         />
       </View>
@@ -572,10 +644,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   title: {
-    fontSize: 34,
-    fontWeight: '900',
+    fontSize: 30,
+    fontWeight: '700',
     color: colors.textPrimary,
-    letterSpacing: -1,
+    letterSpacing: -0.6,
   },
   subtitle: {
     marginTop: 6,
@@ -609,7 +681,7 @@ const styles = StyleSheet.create({
   sectionToggleText: {
     color: colors.textSecondary,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   sectionToggleTextActive: {
     color: '#FFFFFF',
@@ -624,13 +696,13 @@ const styles = StyleSheet.create({
     height: spacing.lg,
   },
   loadingCard: {
-    minHeight: 180,
+    minHeight: 220,
     borderRadius: 24,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    alignItems: 'center',
     justifyContent: 'center',
+    padding: 18,
   },
   tripCard: {
     borderRadius: 24,
@@ -643,6 +715,9 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 10 },
   },
+  tripCardPressed: {
+    transform: [{ scale: 0.992 }],
+  },
   imageWrap: {
     position: 'relative',
   },
@@ -654,18 +729,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 14,
     left: 14,
-    backgroundColor: 'rgba(255,255,255,0.94)',
-    borderRadius: radius.pill,
-    paddingHorizontal: 13,
-    paddingVertical: 8,
-  },
-  statusText: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  statusTextActive: {
-    color: colors.success,
   },
   manageHint: {
     position: 'absolute',
@@ -683,20 +746,64 @@ const styles = StyleSheet.create({
   },
   tripTitle: {
     color: colors.textPrimary,
-    fontSize: 19,
-    fontWeight: '900',
-    letterSpacing: -0.3,
+    fontSize: 18,
+    fontWeight: '600',
+    letterSpacing: -0.2,
   },
   tripDestination: {
     marginTop: 8,
     color: colors.textSecondary,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   tripMeta: {
     marginTop: 8,
     color: colors.textSecondary,
     fontSize: 13,
+  },
+  tripFooterRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  memberPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  memberAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberAvatarText: {
+    color: colors.accentStrong,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  memberPreviewText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  progressMiniWrap: {
+    minWidth: 74,
+  },
+  progressMiniTrack: {
+    height: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.backgroundAccent,
+    overflow: 'hidden',
+  },
+  progressMiniFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
   },
   emptyCard: {
     borderRadius: 24,
@@ -708,7 +815,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: colors.textPrimary,
     fontSize: 19,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   emptyCopy: {
     marginTop: 8,
@@ -741,7 +848,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   modalSubtitle: {
@@ -771,12 +878,12 @@ const styles = StyleSheet.create({
   dateButtonLabel: {
     color: colors.textSecondary,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   dateButtonValue: {
     color: colors.textPrimary,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   pickerWrap: {
     marginTop: spacing.sm,
@@ -791,7 +898,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: colors.textSecondary,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   inlinePickerDoneButton: {
     alignSelf: 'stretch',
@@ -804,7 +911,7 @@ const styles = StyleSheet.create({
   inlinePickerDoneText: {
     color: colors.accent,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   saveButton: {
     marginTop: spacing.md,
@@ -817,7 +924,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   deleteButton: {
     marginTop: spacing.sm,
@@ -833,6 +940,6 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     color: colors.danger,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

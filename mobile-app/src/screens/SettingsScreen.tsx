@@ -1,8 +1,13 @@
-import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { signOut } from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
+import * as Contacts from 'expo-contacts';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
 import NotificationBell from '../components/NotificationBell';
 import Screen from '../components/Screen';
@@ -23,24 +28,65 @@ export default function SettingsScreen({ navigation }: Props) {
   const clearSession = useAuthStore((state) => state.clearSession);
   const clearFriends = useFriendStore((state) => state.clearFriends);
   const resetTrip = useTripStore((state) => state.resetTrip);
+  const [permissionSummary, setPermissionSummary] = useState({
+    contacts: 'Unknown',
+    location: 'Unknown',
+    photos: 'Unknown',
+    notifications: 'Unknown',
+  });
+
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
+
+  const refreshPermissionStatus = useCallback(async () => {
+    try {
+      const [contacts, location, photos, notifications] = await Promise.all([
+        Contacts.getPermissionsAsync(),
+        Location.getForegroundPermissionsAsync(),
+        ImagePicker.getMediaLibraryPermissionsAsync(),
+        Notifications.getPermissionsAsync(),
+      ]);
+
+      setPermissionSummary({
+        contacts: formatPermissionStatus(contacts.status),
+        location: formatPermissionStatus(location.status),
+        photos: formatPermissionStatus(photos.status),
+        notifications: formatPermissionStatus(notifications.status),
+      });
+    } catch (error) {
+      console.log('Permission status load failed', error);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void refreshPermissionStatus();
+  }, [refreshPermissionStatus]);
 
   const handleSignOut = async () => {
-    const pushToken = await getStoredPushToken();
+    Alert.alert('Sign out', 'Sign out from this device?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: async () => {
+          const pushToken = await getStoredPushToken();
 
-    if (pushToken) {
-      try {
-        await unregisterPushToken({ token: pushToken });
-      } catch (error) {
-        console.log('Push unregister failed', error);
-      } finally {
-        await clearStoredPushToken();
-      }
-    }
+          if (pushToken) {
+            try {
+              await unregisterPushToken({ token: pushToken });
+            } catch (error) {
+              console.log('Push unregister failed', error);
+            } finally {
+              await clearStoredPushToken();
+            }
+          }
 
-    await signOut(firebaseAuth);
-    clearFriends();
-    resetTrip();
-    clearSession();
+          await signOut(firebaseAuth);
+          clearFriends();
+          resetTrip();
+          clearSession();
+        },
+      },
+    ]);
   };
 
   const handleDeleteAccount = async () => {
@@ -122,6 +168,64 @@ export default function SettingsScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Permissions</Text>
+
+          <SettingsRow
+            icon="people-outline"
+            title="Contacts"
+            subtitle={`Status: ${permissionSummary.contacts}`}
+            onPress={() => void Linking.openSettings()}
+          />
+          <SettingsRow
+            icon="location-outline"
+            title="Location"
+            subtitle={`Status: ${permissionSummary.location}`}
+            onPress={() => void Linking.openSettings()}
+          />
+          <SettingsRow
+            icon="image-outline"
+            title="Photos"
+            subtitle={`Status: ${permissionSummary.photos}`}
+            onPress={() => void Linking.openSettings()}
+          />
+          <SettingsRow
+            icon="notifications-circle-outline"
+            title="Push notifications"
+            subtitle={`Status: ${permissionSummary.notifications}`}
+            onPress={() => void Linking.openSettings()}
+          />
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Support and legal</Text>
+
+          <SettingsRow
+            icon="shield-checkmark-outline"
+            title="Privacy Policy"
+            subtitle="See how GoTogether handles your data."
+            onPress={() => void Linking.openURL('https://gotogether.app/privacy')}
+          />
+          <SettingsRow
+            icon="document-text-outline"
+            title="Terms of Service"
+            subtitle="Read the app terms and usage guidelines."
+            onPress={() => void Linking.openURL('https://gotogether.app/terms')}
+          />
+          <SettingsRow
+            icon="help-circle-outline"
+            title="Support"
+            subtitle="Get help, report bugs, or ask account questions."
+            onPress={() => void Linking.openURL('mailto:support@gotogether.app')}
+          />
+          <SettingsRow
+            icon="phone-portrait-outline"
+            title="App version"
+            subtitle={`Version ${appVersion}`}
+            onPress={() => undefined}
+          />
+        </View>
+
+        <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Session</Text>
 
           <SettingsRow
@@ -147,6 +251,19 @@ export default function SettingsScreen({ navigation }: Props) {
       </ScrollView>
     </Screen>
   );
+}
+
+function formatPermissionStatus(status?: string) {
+  switch (status) {
+    case 'granted':
+      return 'Granted';
+    case 'denied':
+      return 'Denied';
+    case 'undetermined':
+      return 'Not requested';
+    default:
+      return 'Unknown';
+  }
 }
 
 function SettingsRow({
@@ -191,10 +308,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    fontSize: 34,
-    fontWeight: '900',
+    fontSize: 30,
+    fontWeight: '700',
     color: colors.textPrimary,
-    letterSpacing: -1,
+    letterSpacing: -0.6,
   },
   subtitle: {
     marginTop: 5,
@@ -227,7 +344,7 @@ const styles = StyleSheet.create({
   profileAvatarText: {
     color: colors.accentStrong,
     fontSize: 24,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   profileCopy: {
     flex: 1,
@@ -235,7 +352,7 @@ const styles = StyleSheet.create({
   profileName: {
     color: colors.textPrimary,
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   profilePhone: {
     marginTop: 4,
@@ -253,7 +370,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     marginBottom: spacing.sm,
   },
   row: {
@@ -278,7 +395,7 @@ const styles = StyleSheet.create({
   rowTitle: {
     color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   rowSubtitle: {
     marginTop: 3,
@@ -305,6 +422,6 @@ const styles = StyleSheet.create({
   dangerTitle: {
     color: colors.danger,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
   },
 });
