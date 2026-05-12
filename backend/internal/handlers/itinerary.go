@@ -288,8 +288,18 @@ func CreateItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "New itinerary event", event.Title+" was added to the trip plan.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "New itinerary event", event.Title+" was added to the trip plan.", "itinerary", false)
+	actorName := "Someone"
+	if actorUser, err := loadUserByID(userID); err == nil {
+		if strings.TrimSpace(actorUser.Name) != "" {
+			actorName = strings.TrimSpace(actorUser.Name)
+		} else if strings.TrimSpace(actorUser.Username) != "" {
+			actorName = strings.TrimSpace(actorUser.Username)
+		}
+	}
+	notificationTitle := strings.TrimSpace(event.Title) + " added to events"
+	notificationBody := "Added by " + actorName
+	createUserNotification(userID, tripID, notificationTitle, notificationBody, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, notificationTitle, notificationBody, "itinerary", false)
 	c.JSON(http.StatusCreated, gin.H{"event": event})
 }
 

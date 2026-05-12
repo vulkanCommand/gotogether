@@ -154,6 +154,11 @@ export default function LiveScreen() {
     return null;
   }, [itineraryDays]);
 
+  const hasMappableDestination = useMemo(
+    () => shouldShowLocationIcon(activeDestination?.event.location, activeDestination?.event.locationIsMapped),
+    [activeDestination?.event.location, activeDestination?.event.locationIsMapped]
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -163,6 +168,12 @@ export default function LiveScreen() {
       if (!locationText) {
         setDestinationCoordinate(null);
         setDestinationStatus('No active event location yet.');
+        return;
+      }
+
+      if (!hasMappableDestination) {
+        setDestinationCoordinate(null);
+        setDestinationStatus('Could not map this event location yet.');
         return;
       }
 
@@ -182,12 +193,12 @@ export default function LiveScreen() {
           setDestinationStatus('');
         } else {
           setDestinationCoordinate(null);
-          setDestinationStatus('Could not map this event location yet.');
+          setDestinationStatus('');
         }
       } catch {
         if (!cancelled) {
           setDestinationCoordinate(null);
-          setDestinationStatus('Could not map this event location yet.');
+          setDestinationStatus('');
         }
       }
     };
@@ -197,7 +208,7 @@ export default function LiveScreen() {
     return () => {
       cancelled = true;
     };
-  }, [activeDestination?.event.location]);
+  }, [activeDestination?.event.location, hasMappableDestination]);
 
   const region = useMemo(() => {
     if (destinationCoordinate) {
@@ -363,7 +374,11 @@ export default function LiveScreen() {
                   )}
 
                   <Text style={styles.distanceText}>
-                    {selfDistance !== null ? `${formatMiles(selfDistance)} from you` : destinationStatus || 'Share your location to see your distance.'}
+                    {selfDistance !== null
+                      ? `${formatMiles(selfDistance)} from you`
+                      : hasMappableDestination
+                        ? 'Share your location to see your distance.'
+                        : destinationStatus || 'Share your location to see your distance.'}
                   </Text>
                 </>
               ) : (

@@ -434,33 +434,6 @@ export default function HomeScreen({ navigation }: Props) {
           </GTCard>
         </View>
 
-        <View style={styles.section}>
-          <GTSectionHeader
-            title="Upcoming trips"
-            subtitle={"What's coming next for your crew."}
-            actionLabel="See all"
-            onPressAction={() => navigation.navigate('Trips')}
-          />
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalList}>
-            {upcomingTrips.length > 0 ? (
-              upcomingTrips.map((trip) => (
-                <Pressable key={trip.id} onPress={() => openTrip(trip)} style={styles.upcomingCard}>
-                  <GTBadge label={tripTimelineStatus(trip)} tone="blue" />
-                  <Text style={styles.upcomingTitle}>{trip.name}</Text>
-                  <Text style={styles.upcomingMeta}>{formatTripRange(trip.start_date, trip.end_date)}</Text>
-                  <Text style={styles.upcomingSupport}>{trip.members_count ?? 1} travelers</Text>
-                </Pressable>
-              ))
-            ) : (
-              <GTCard style={styles.noUpcomingCard}>
-                <Text style={styles.upcomingTitle}>No upcoming trips yet</Text>
-                <Text style={styles.upcomingMeta}>Your next getaway will show up here once you plan it.</Text>
-              </GTCard>
-            )}
-          </ScrollView>
-        </View>
-
         {showNextEvent ? (
           <View style={styles.section}>
             <GTSectionHeader title="Next event" subtitle="Stay oriented during the trip." />
@@ -488,6 +461,33 @@ export default function HomeScreen({ navigation }: Props) {
             )}
           </View>
         ) : null}
+
+        <View style={styles.section}>
+          <GTSectionHeader
+            title="Upcoming trips"
+            subtitle={"What's coming next for your crew."}
+            actionLabel="See all"
+            onPressAction={() => navigation.navigate('Trips')}
+          />
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalList}>
+            {upcomingTrips.length > 0 ? (
+              upcomingTrips.map((trip) => (
+                <Pressable key={trip.id} onPress={() => openTrip(trip)} style={styles.upcomingCard}>
+                  <GTBadge label={tripTimelineStatus(trip)} tone="blue" />
+                  <Text style={styles.upcomingTitle}>{trip.name}</Text>
+                  <Text style={styles.upcomingMeta}>{formatTripRange(trip.start_date, trip.end_date)}</Text>
+                  <Text style={styles.upcomingSupport}>{trip.members_count ?? 1} travelers</Text>
+                </Pressable>
+              ))
+            ) : (
+              <GTCard style={styles.noUpcomingCard}>
+                <Text style={styles.upcomingTitle}>No upcoming trips yet</Text>
+                <Text style={styles.upcomingMeta}>Your next getaway will show up here once you plan it.</Text>
+              </GTCard>
+            )}
+          </ScrollView>
+        </View>
 
         <View style={styles.section}>
           <GTSectionHeader

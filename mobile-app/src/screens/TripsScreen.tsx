@@ -89,22 +89,6 @@ const getTripsForSection = (allTrips: ApiTrip[], section: TripSection) => {
   }
 };
 
-const getTripProgressPercent = (trip: ApiTrip) => {
-  if (trip.completed_at) {
-    return 100;
-  }
-
-  const completedCount = trip.setup_completed_count ?? 0;
-  const pendingCount = trip.setup_pending_count ?? 0;
-  const totalCount = completedCount + pendingCount;
-
-  if (totalCount <= 0) {
-    return 0;
-  }
-
-  return Math.min(100, Math.round((completedCount / totalCount) * 100));
-};
-
 export default function TripsScreen({ navigation, route }: Props) {
   const token = useAuthStore((state) => state.token);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
@@ -395,8 +379,6 @@ export default function TripsScreen({ navigation, route }: Props) {
   };
 
   const renderTripCard = ({ item: trip, index }: { item: ApiTrip; index: number }) => {
-    const tripProgressPercent = getTripProgressPercent(trip);
-
     return (
       <Pressable onPress={() => openTrip(trip)} style={({ pressed }) => [styles.tripCard, pressed && styles.tripCardPressed]}>
       <View style={styles.imageWrap}>
@@ -453,21 +435,6 @@ export default function TripsScreen({ navigation, route }: Props) {
             </View>
             <Text style={styles.memberPreviewText}>{trip.members_count ?? 1} travelers</Text>
           </View>
-
-          {(trip.completed_at || trip.setup_completed_count || trip.setup_pending_count) ? (
-            <View style={styles.progressMiniWrap}>
-              <View style={styles.progressMiniTrack}>
-                <View
-                  style={[
-                    styles.progressMiniFill,
-                    {
-                      width: `${tripProgressPercent <= 0 ? 0 : Math.max(8, Math.min(100, tripProgressPercent))}%`,
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-          ) : null}
         </View>
       </View>
     </Pressable>
@@ -805,20 +772,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '500',
-  },
-  progressMiniWrap: {
-    minWidth: 74,
-  },
-  progressMiniTrack: {
-    height: 8,
-    borderRadius: radius.pill,
-    backgroundColor: colors.backgroundAccent,
-    overflow: 'hidden',
-  },
-  progressMiniFill: {
-    height: '100%',
-    borderRadius: radius.pill,
-    backgroundColor: colors.accent,
   },
   emptyCard: {
     borderRadius: 24,
