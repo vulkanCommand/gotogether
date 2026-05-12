@@ -101,7 +101,12 @@ export default function LoginScreen({ navigation }: Props) {
         <LinearGradient colors={[colors.accent, colors.violet]} style={styles.hero}>
           <View style={styles.glowTop} />
           <View style={styles.glowBottom} />
-          <Pill label={confirmation ? 'Secure sign-in' : 'Trip access'} tone="accent" style={styles.heroPill} />
+          <Pill
+            label={confirmation ? 'Secure sign-in' : 'Trip access'}
+            tone="accent"
+            style={styles.heroPill}
+            textStyle={styles.heroPillText}
+          />
           <Text style={styles.heroTitle}>
             {confirmation ? 'Enter verification code' : 'Continue with phone'}
           </Text>
@@ -221,8 +226,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.14)',
   },
   heroPill: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderColor: 'rgba(255,255,255,0.34)',
+  },
+  heroPillText: {
+    color: 'rgba(255,255,255,0.96)',
   },
   heroTitle: {
     color: '#FFFFFF',

@@ -6,6 +6,7 @@ import { NavigatorScreenParams } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import AppFooter from '../components/AppFooter';
+import AppGuideModal from '../components/AppGuideModal';
 
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -56,42 +57,48 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabs() {
-  return (
-    <Tab.Navigator
-      tabBar={() => <AppFooter />}
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.tabInactive,
-        tabBarStyle: {
-          height: 84,
-          paddingTop: 10,
-          paddingBottom: 16,
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-        },
-        tabBarIcon: ({ color, size }) => {
-          const map: Record<string, keyof typeof Ionicons.glyphMap> = {
-            Home: 'home-outline',
-            Trips: 'airplane-outline',
-            Live: 'navigate-outline',
-            Expenses: 'wallet-outline',
-            Profile: 'person-outline',
-          };
+  const user = useAuthStore((state) => state.user);
 
-          return <Ionicons name={map[route.name]} size={size} color={color} />;
-        },
-        tabBarLabel: ({ color }) => (
-          <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{route.name}</Text>
-        ),
-      })}
-    >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Trips" component={TripsScreen} />
-      <Tab.Screen name="Live" component={LiveScreen} />
-      <Tab.Screen name="Expenses" component={ExpensesScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
-    </Tab.Navigator>
+  return (
+    <>
+      <Tab.Navigator
+        tabBar={() => <AppFooter />}
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarActiveTintColor: colors.accent,
+          tabBarInactiveTintColor: colors.tabInactive,
+          tabBarStyle: {
+            height: 84,
+            paddingTop: 10,
+            paddingBottom: 16,
+            backgroundColor: colors.surface,
+            borderTopColor: colors.border,
+          },
+          tabBarIcon: ({ color, size }) => {
+            const map: Record<string, keyof typeof Ionicons.glyphMap> = {
+              Home: 'home-outline',
+              Trips: 'airplane-outline',
+              Live: 'navigate-outline',
+              Expenses: 'wallet-outline',
+              Profile: 'person-outline',
+            };
+
+            return <Ionicons name={map[route.name]} size={size} color={color} />;
+          },
+          tabBarLabel: ({ color }) => (
+            <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{route.name}</Text>
+          ),
+        })}
+      >
+        <Tab.Screen name="Home" component={HomeScreen} />
+        <Tab.Screen name="Trips" component={TripsScreen} />
+        <Tab.Screen name="Live" component={LiveScreen} />
+        <Tab.Screen name="Expenses" component={ExpensesScreen} />
+        <Tab.Screen name="Profile" component={ProfileScreen} />
+      </Tab.Navigator>
+
+      <AppGuideModal enabled={Boolean(user?.profile_complete)} />
+    </>
   );
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -48,6 +48,8 @@ export default function ProfileScreen({ navigation }: Props) {
   const [expenseSummaryLabel, setExpenseSummaryLabel] = useState('No expense activity yet');
   const [saving, setSaving] = useState(false);
   const [avatarVersion, setAvatarVersion] = useState(() => Date.now());
+  const [photoActionsVisible, setPhotoActionsVisible] = useState(false);
+  const [photoPreviewVisible, setPhotoPreviewVisible] = useState(false);
 
   useEffect(() => {
     setName(user?.name ?? '');
@@ -176,6 +178,36 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
+  const openPhotoActions = () => {
+    setPhotoActionsVisible(true);
+  };
+
+  const openPhotoPreview = () => {
+    if (!avatarSource) {
+      return;
+    }
+
+    setPhotoActionsVisible(false);
+    setPhotoPreviewVisible(true);
+  };
+
+  const handleChangePhoto = () => {
+    setPhotoActionsVisible(false);
+    void pickProfileImage();
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoActionsVisible(false);
+    Alert.alert('Remove photo', 'Remove your current profile photo?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => void removeProfileImage(),
+      },
+    ]);
+  };
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -198,7 +230,7 @@ export default function ProfileScreen({ navigation }: Props) {
 
         <GTCard style={styles.heroCard}>
           <View style={styles.heroHeader}>
-            <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
+            <Pressable style={styles.avatarWrap} onPress={openPhotoActions}>
               {avatarSource ? (
                 <Image source={avatarSource} style={styles.avatarImage} />
               ) : (
@@ -225,20 +257,6 @@ export default function ProfileScreen({ navigation }: Props) {
                 </View>
               </View>
             </View>
-          </View>
-
-          <View style={styles.quickActions}>
-            <Pressable style={styles.photoButton} onPress={pickProfileImage}>
-              <Ionicons name="image-outline" size={17} color={colors.accentStrong} />
-              <Text style={styles.photoButtonText}>{avatarSource ? 'Change photo' : 'Upload photo'}</Text>
-            </Pressable>
-
-            {avatarSource ? (
-              <Pressable style={styles.removeButton} onPress={removeProfileImage}>
-                <Ionicons name="trash-outline" size={17} color={colors.danger} />
-                <Text style={styles.removeButtonText}>Remove</Text>
-              </Pressable>
-            ) : null}
           </View>
         </GTCard>
 
@@ -275,6 +293,46 @@ export default function ProfileScreen({ navigation }: Props) {
           )}
         </GTCard>
       </ScrollView>
+
+      <Modal transparent visible={photoActionsVisible} animationType="fade" onRequestClose={() => setPhotoActionsVisible(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setPhotoActionsVisible(false)}>
+          <View style={styles.modalCenter}>
+            <Pressable style={styles.actionModalCard} onPress={() => undefined}>
+              {avatarSource ? (
+                <Pressable style={styles.actionRow} onPress={openPhotoPreview}>
+                  <Text style={styles.actionRowPrimaryText}>View profile photo</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable style={styles.actionRow} onPress={handleChangePhoto}>
+                <Text style={styles.actionRowPrimaryText}>Change photo</Text>
+              </Pressable>
+
+              {avatarSource ? (
+                <Pressable style={styles.actionRow} onPress={handleRemovePhoto}>
+                  <Text style={styles.actionRowDangerText}>Remove photo</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable style={[styles.actionRow, styles.actionRowLast]} onPress={() => setPhotoActionsVisible(false)}>
+                <Text style={styles.actionRowCancelText}>Cancel</Text>
+              </Pressable>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal transparent visible={photoPreviewVisible} animationType="fade" onRequestClose={() => setPhotoPreviewVisible(false)}>
+        <View style={styles.previewBackdrop}>
+          <Pressable style={styles.previewCloseButton} onPress={() => setPhotoPreviewVisible(false)}>
+            <Ionicons name="close" size={22} color="#FFFFFF" />
+          </Pressable>
+
+          <View style={styles.previewContent}>
+            {avatarSource ? <Image source={avatarSource} style={styles.previewImage} resizeMode="contain" /> : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -431,46 +489,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  quickActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  photoButton: {
-    flex: 1,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  photoButtonText: {
-    color: colors.accentStrong,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  removeButton: {
-    borderRadius: radius.pill,
-    backgroundColor: '#FFF1F1',
-    borderWidth: 1,
-    borderColor: '#F8C7C7',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  removeButtonText: {
-    color: colors.danger,
-    fontWeight: '600',
-    fontSize: 14,
-  },
   detailsCard: {
     padding: 18,
   },
@@ -579,5 +597,77 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modalCenter: {
+    justifyContent: 'center',
+  },
+  actionModalCard: {
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  actionRow: {
+    minHeight: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+  },
+  actionRowLast: {
+    borderBottomWidth: 0,
+  },
+  actionRowPrimaryText: {
+    color: colors.accentStrong,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionRowDangerText: {
+    color: colors.danger,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionRowCancelText: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 32,
+  },
+  previewCloseButton: {
+    position: 'absolute',
+    top: 54,
+    right: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  previewContent: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewImage: {
+    width: '100%',
+    height: 360,
+    borderRadius: radius.xl,
   },
 });

@@ -150,19 +150,19 @@ export default function TripOverviewScreen({ navigation }: Props) {
     };
   }, [currentTrip?.id, currentTrip?.image_url, setCurrentTrip]);
 
+  const totalEvents = useMemo(
+    () => itineraryDays.reduce((sum, day) => sum + day.events.length, 0),
+    [itineraryDays]
+  );
+
   const milestones = useMemo<Milestone[]>(
     () => [
       { label: 'Dates', done: Boolean(currentTrip?.start_date && currentTrip?.end_date) },
       { label: 'Destination', done: Boolean(currentTrip?.destination) },
       { label: 'Lead', done: Boolean(tripLead?.name) },
-      { label: 'Itinerary', done: itineraryDays.length > 0 },
+      { label: 'Itinerary', done: totalEvents > 0 },
     ],
-    [currentTrip?.destination, currentTrip?.end_date, currentTrip?.start_date, itineraryDays.length, tripLead?.name]
-  );
-
-  const totalEvents = useMemo(
-    () => itineraryDays.reduce((sum, day) => sum + day.events.length, 0),
-    [itineraryDays]
+    [currentTrip?.destination, currentTrip?.end_date, currentTrip?.start_date, totalEvents, tripLead?.name]
   );
 
   const completedEvents = useMemo(
@@ -175,7 +175,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
   );
 
   const progressPercent = currentTrip?.completed_at ? 100 : totalEvents > 0 ? Math.round((completedEvents / totalEvents) * 100) : 0;
-  const itineraryReady = milestones[milestones.length - 1]?.done;
+  const itineraryReady = totalEvents > 0;
   const canFinishTrip = Boolean(currentTrip && !currentTrip.completed_at && progressPercent === 100 && totalEvents > 0);
 
   useEffect(() => {

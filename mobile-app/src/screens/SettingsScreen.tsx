@@ -20,6 +20,7 @@ import { useFriendStore } from '../store/friendStore';
 import { useTripStore } from '../store/tripStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
+import { clearAppGuideSeen } from '../services/appGuide';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
@@ -114,6 +115,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
               await deleteMyAccount();
               await signOut(firebaseAuth);
+              await clearAppGuideSeen();
               clearFriends();
               resetTrip();
               clearSession();

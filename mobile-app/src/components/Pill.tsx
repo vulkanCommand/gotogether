@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { StyleProp, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 
@@ -7,6 +7,7 @@ type Props = {
   label: string;
   tone?: 'neutral' | 'accent' | 'success' | 'danger';
   style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
 };
 
 const toneStyles = {
@@ -28,10 +29,10 @@ const toneStyles = {
   },
 };
 
-export default function Pill({ label, tone = 'neutral', style }: Props) {
+export default function Pill({ label, tone = 'neutral', style, textStyle }: Props) {
   return (
     <View style={[styles.wrap, toneStyles[tone].wrap, style]}>
-      <Text style={[styles.text, toneStyles[tone].text]}>{label}</Text>
+      <Text style={[styles.text, toneStyles[tone].text, textStyle]}>{label}</Text>
     </View>
   );
 }
