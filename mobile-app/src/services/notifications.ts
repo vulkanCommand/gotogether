@@ -48,17 +48,20 @@ export async function ensurePushRegistration(userId: number) {
   }
 
   const saved = await readStoredRegistration();
-  if (saved && registrationKey(saved.userId, saved.token) === registrationKey(userId, token)) {
-    return token;
-  }
 
+  // Always upsert the token on app start after login. This fixes TestFlight cases
+  // where the local app thinks the token was already registered, but the backend
+  // record was removed, replaced, or never saved after a deploy/database reset.
   await registerPushToken({
     expo_push_token: token,
     platform: Device.osName?.toLowerCase() || 'expo',
     device_id: Device.osInternalBuildId || Device.modelId || undefined,
   });
 
-  await writeStoredRegistration({ userId, token });
+  if (!saved || registrationKey(saved.userId, saved.token) !== registrationKey(userId, token)) {
+    await writeStoredRegistration({ userId, token });
+  }
+
   return token;
 }
 
@@ -89,21 +92,45 @@ async function openTripFromNotification(
   }
 }
 
+async function handleNotificationResponse(
+  navigationRef: NavigationContainerRefWithCurrent<RootStackParamList>,
+  response: Notifications.NotificationResponse
+) {
+  const data = response.notification.request.content.data || {};
+  const type = String(data.type || data.kind || '').trim();
+  const tripId = Number(data.tripId ?? data.tripID ?? data.trip_id ?? 0);
+
+  if (type === 'trip_added' && Number.isFinite(tripId) && tripId > 0) {
+    await openTripFromNotification(navigationRef, tripId);
+    return;
+  }
+
+  if (navigationRef.isReady()) {
+    navigationRef.navigate('Notifications');
+  }
+}
+
 export function attachNotificationNavigation(
   navigationRef: NavigationContainerRefWithCurrent<RootStackParamList>
 ) {
-  return Notifications.addNotificationResponseReceivedListener((response) => {
-    const data = response.notification.request.content.data || {};
-    const type = String(data.type || data.kind || '').trim();
-    const tripId = Number(data.tripId ?? data.tripID ?? data.trip_id ?? 0);
+  let active = true;
 
-    if (type === 'trip_added' && Number.isFinite(tripId) && tripId > 0) {
-      void openTripFromNotification(navigationRef, tripId);
-      return;
-    }
+  Notifications.getLastNotificationResponseAsync()
+    .then((response) => {
+      if (active && response) {
+        void handleNotificationResponse(navigationRef, response);
+      }
+    })
+    .catch(() => undefined);
 
-    if (navigationRef.isReady()) {
-      navigationRef.navigate('Notifications');
-    }
+  const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    void handleNotificationResponse(navigationRef, response);
   });
+
+  return {
+    remove() {
+      active = false;
+      subscription.remove();
+    },
+  };
 }

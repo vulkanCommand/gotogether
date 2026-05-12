@@ -87,6 +87,23 @@ const parseCurrencyInput = (value: string) => {
 const groupIcons = ['document-text-outline', 'home-outline', 'airplane-outline', 'wallet-outline'];
 const groupIconColors = ['#134E7A', '#145C43', '#A44B12', '#7A1748'];
 
+const toTimestamp = (value?: string | null) => {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getGroupLastActivityAt = (group: ExpenseGroup, trip: CurrentTrip) => {
+  const latestExpenseTimestamp = (group.expenses ?? []).reduce((latest, expense) => {
+    return Math.max(latest, toTimestamp(expense.createdAt));
+  }, 0);
+
+  return latestExpenseTimestamp || toTimestamp(group.createdAt) || toTimestamp(trip.end_date) || toTimestamp(trip.start_date);
+};
+
 export default function ExpensesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
@@ -202,6 +219,36 @@ export default function ExpensesScreen({ navigation }: Props) {
   );
 
   const allGroups = useMemo(() => tripSections.flatMap((section) => section.groups), [tripSections]);
+  const sortedOverviewGroups = useMemo(
+    () =>
+      tripSections
+        .flatMap((section, sectionIndex) =>
+          section.groups.map((group, groupIndex) => ({
+            group,
+            trip: section.trip,
+            lastActivityAt: getGroupLastActivityAt(group, section.trip),
+            stableIndex: sectionIndex * 1000 + groupIndex,
+          }))
+        )
+        .sort((left, right) => {
+          if (left.lastActivityAt !== right.lastActivityAt) {
+            return right.lastActivityAt - left.lastActivityAt;
+          }
+
+          const tripNameComparison = left.trip.name.localeCompare(right.trip.name);
+          if (tripNameComparison !== 0) {
+            return tripNameComparison;
+          }
+
+          const groupNameComparison = left.group.name.localeCompare(right.group.name);
+          if (groupNameComparison !== 0) {
+            return groupNameComparison;
+          }
+
+          return left.stableIndex - right.stableIndex;
+        }),
+    [tripSections]
+  );
   const overallSummary = useMemo(
     () => calculateOverallExpenseSummary(allGroups, crew, user?.id),
     [allGroups, crew, user?.id]
@@ -441,21 +488,16 @@ export default function ExpensesScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.groupList}>
-          {allGroups.map((group, index) => {
-            const section = tripSections.find((item) => item.groups.some((candidate) => candidate.id === group.id));
-            if (!section) {
-              return null;
-            }
-
+          {sortedOverviewGroups.map(({ group, trip }, index) => {
             const groupSummary = calculateExpenseGroupSummary(group, crew, user?.id);
             const previewLines = buildPreviewLines(groupSummary, user?.id);
             const groupDisplay = getBalanceDisplay(groupSummary.netBalance);
 
             return (
-              <Pressable key={group.id} style={styles.groupRow} onPress={() => openGroup(section.trip, group)}>
+              <Pressable key={group.id} style={styles.groupRow} onPress={() => openGroup(trip, group)}>
                 <GroupAvatar index={index} />
                 <View style={styles.groupCenter}>
-                  <Text style={styles.groupName}>{getExpenseGroupDisplayName(group.name, section.trip.name)}</Text>
+                  <Text style={styles.groupName}>{getExpenseGroupDisplayName(group.name, trip.name)}</Text>
                   {previewLines.length > 0 ? (
                     previewLines.map((line) => (
                       <Text key={line} style={styles.groupSubline} numberOfLines={1}>
@@ -476,7 +518,7 @@ export default function ExpensesScreen({ navigation }: Props) {
             );
           })}
 
-          {!loading && allGroups.length === 0 ? (
+          {!loading && sortedOverviewGroups.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>No expense groups yet</Text>
               <Text style={styles.emptyText}>Create a group and start adding trip expenses.</Text>
@@ -785,17 +827,14 @@ export default function ExpensesScreen({ navigation }: Props) {
               contentContainerStyle={{ paddingVertical: 8 }}
               keyboardShouldPersistTaps="handled"
             >
-              {allGroups
-                .filter((group) => {
-                  const trip = tripSections.find((sec) => sec.groups.some((g) => g.id === group.id))?.trip;
+              {sortedOverviewGroups
+                .filter(({ group, trip }) => {
                   const query = searchQuery.trim().toLowerCase();
                   if (!query) return true;
-                  const groupName = getExpenseGroupDisplayName(group.name, trip?.name).toLowerCase();
+                  const groupName = getExpenseGroupDisplayName(group.name, trip.name).toLowerCase();
                   return groupName.includes(query);
                 })
-                .map((group) => {
-                  const section = tripSections.find((sec) => sec.groups.some((g) => g.id === group.id));
-                  if (!section) return null;
+                .map(({ group, trip }) => {
                   const groupSummary = calculateExpenseGroupSummary(group, crew, user?.id);
                   const groupDisplay = getBalanceDisplay(groupSummary.netBalance);
                   return (
@@ -804,11 +843,11 @@ export default function ExpensesScreen({ navigation }: Props) {
                       onPress={() => {
                         // Open this group in the detail view.
                         setShowSearchModal(false);
-                        openGroup(section.trip, group);
+                        openGroup(trip, group);
                       }}
                       style={styles.searchRow}
                     >
-                      <Text style={styles.searchRowText}>{getExpenseGroupDisplayName(group.name, section.trip.name)}</Text>
+                      <Text style={styles.searchRowText}>{getExpenseGroupDisplayName(group.name, trip.name)}</Text>
                       <Text style={[styles.searchRowSubtext, groupDisplay.isPositive ? styles.positiveText : styles.negativeText]}>{groupDisplay.label} {formatMoney(groupDisplay.amount)}</Text>
                     </Pressable>
                   );

@@ -46,7 +46,7 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   Home: undefined;
-  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed' } | undefined;
+  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed'; refreshToken?: number } | undefined;
   Live: undefined;
   Expenses: undefined;
   Profile: undefined;

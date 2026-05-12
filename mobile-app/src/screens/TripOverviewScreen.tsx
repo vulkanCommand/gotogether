@@ -174,7 +174,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
     [itineraryDays]
   );
 
-  const progressPercent = totalEvents > 0 ? Math.round((completedEvents / totalEvents) * 100) : 0;
+  const progressPercent = currentTrip?.completed_at ? 100 : totalEvents > 0 ? Math.round((completedEvents / totalEvents) * 100) : 0;
   const itineraryReady = milestones[milestones.length - 1]?.done;
   const canFinishTrip = Boolean(currentTrip && !currentTrip.completed_at && progressPercent === 100 && totalEvents > 0);
 

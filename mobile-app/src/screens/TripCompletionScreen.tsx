@@ -32,6 +32,7 @@ import {
 } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
+import { invalidateTripCaches } from '../services/resourceCache';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCompletion'>;
 
@@ -238,10 +239,12 @@ export default function TripCompletionScreen({ navigation }: Props) {
       setCompleting(true);
       if (currentTrip?.id) {
         await completeTrip(currentTrip.id);
-        await refreshTripState();
+        await invalidateTripCaches(currentTrip.id);
+        setCurrentTrip({ ...currentTrip, completed_at: currentTrip.completed_at || new Date().toISOString() });
       }
+
       resetTrip();
-      navigation.navigate('MainTabs', { screen: 'Trips', params: { initialSection: 'Completed' } });
+      navigation.navigate('MainTabs', { screen: 'Trips', params: { initialSection: 'Completed', refreshToken: Date.now() } });
     } catch (error: any) {
       Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
     } finally {

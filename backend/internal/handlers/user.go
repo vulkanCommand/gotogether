@@ -100,7 +100,22 @@ func DeleteMe(c *gin.Context) {
 	}
 	defer rollbackQuietly(tx)
 
-	if _, err := tx.Exec(`DELETE FROM users WHERE id = $1`, userID); err != nil {
+	if _, err := tx.Exec(`
+		UPDATE users
+		SET
+			is_deleted = TRUE,
+			deleted_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP,
+			firebase_uid = CASE
+				WHEN COALESCE(firebase_uid, '') = '' THEN 'deleted:' || id::text
+				ELSE firebase_uid || ':deleted:' || id::text
+			END,
+			phone = '',
+			email = '',
+			username = '',
+			profile_image_url = ''
+		WHERE id = $1
+	`, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete account", "details": err.Error()})
 		return
 	}

@@ -15,7 +15,8 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gdkalyan.gotogether",
-      "buildNumber": "7",
+      "buildNumber": "10",
+      "icon": "./assets/icon.png",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,

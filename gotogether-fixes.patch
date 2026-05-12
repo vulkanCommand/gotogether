@@ -1,0 +1,268 @@
+--- /mnt/data/gotogether_orig/mobile-app/src/components/AppFooter.tsx	2026-05-11 02:47:31.563823330 +0000
++++ /mnt/data/gotogether_scan/mobile-app/src/components/AppFooter.tsx	2026-05-11 02:47:10.219819062 +0000
+@@ -83,19 +83,11 @@
+       style={[
+         styles.footer,
+         {
+-          height: 58 + Math.max(insets.bottom, 10),
++          marginBottom: Math.max(insets.bottom, 10),
+         },
+       ]}
+     >
+-      <View
+-        style={[
+-          styles.footerRow,
+-          {
+-            paddingTop: 2,
+-            paddingBottom: Math.max(insets.bottom - 2, 6),
+-          },
+-        ]}
+-      >
++      <View style={styles.footerRow}>
+         {tabs.map((tab) => {
+           const selected = activeTab === tab.name;
+ 
+@@ -123,11 +115,11 @@
+ 
+ const styles = StyleSheet.create({
+   footer: {
+-    marginHorizontal: 16,
+-    marginBottom: 8,
++    marginHorizontal: 24,
++    height: 72,
+     paddingHorizontal: 8,
+-    borderRadius: 24,
+-    backgroundColor: 'rgba(255,255,255,0.96)',
++    borderRadius: 28,
++    backgroundColor: 'rgba(255,255,255,0.97)',
+     borderWidth: 1,
+     borderColor: colors.border,
+     ...shadows.floating,
+@@ -142,22 +134,22 @@
+     flex: 1,
+     alignItems: 'center',
+     justifyContent: 'center',
+-    borderRadius: radius.md,
+-    height: 40,
++    borderRadius: radius.lg,
++    height: 56,
+   },
+   tabSelected: {
+     backgroundColor: '#F5F8FF',
+   },
+   tabStack: {
+-    minHeight: 34,
++    minHeight: 48,
+     alignItems: 'center',
+     justifyContent: 'center',
+     gap: 2,
+   },
+   iconWrap: {
+-    width: 30,
+-    height: 30,
+-    borderRadius: 15,
++    width: 34,
++    height: 34,
++    borderRadius: 17,
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+@@ -165,10 +157,10 @@
+     backgroundColor: colors.accent,
+   },
+   label: {
+-    fontSize: 10.5,
++    fontSize: 11,
+     fontWeight: '600',
+     color: colors.tabInactive,
+-    lineHeight: 11,
++    lineHeight: 12,
+     marginTop: 1,
+   },
+   labelSelected: {
+--- /mnt/data/gotogether_orig/mobile-app/src/screens/NotificationsScreen.tsx	2026-05-11 02:47:31.570008576 +0000
++++ /mnt/data/gotogether_scan/mobile-app/src/screens/NotificationsScreen.tsx	2026-05-11 02:47:10.219360060 +0000
+@@ -24,12 +24,9 @@
+ import { mapApiMembersToCrew } from '../utils/tripFlow';
+ 
+ type Props = NativeStackScreenProps<RootStackParamList, 'Notifications'>;
+-type FilterKey = 'all' | 'trips' | 'expenses' | 'unread';
+-
+ export default function NotificationsScreen({ navigation }: Props) {
+   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+   const [refreshing, setRefreshing] = useState(false);
+-  const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
+   const hasLoadedRef = useRef(false);
+   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
+   const setCrew = useTripStore((state) => state.setCrew);
+@@ -58,20 +55,6 @@
+ 
+   const unreadCount = useMemo(() => notifications.filter((item) => !item.readAt).length, [notifications]);
+ 
+-  const filteredNotifications = useMemo(() => {
+-    return notifications.filter((notification) => {
+-      if (activeFilter === 'unread') {
+-        return !notification.readAt;
+-      }
+-
+-      if (activeFilter === 'all') {
+-        return true;
+-      }
+-
+-      return formatNotificationDisplay(notification).category === activeFilter;
+-    });
+-  }, [activeFilter, notifications]);
+-
+   const openTripFromNotification = async (tripId: number, destination?: 'TripOverview' | 'Itinerary' | 'Expenses') => {
+     const details = await fetchTripDetails(tripId);
+     const crew = mapApiMembersToCrew(details.members);
+@@ -181,26 +164,7 @@
+         </GTCard>
+       </View>
+ 
+-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+-        {[
+-          { key: 'all', label: 'All' },
+-          { key: 'trips', label: 'Trips' },
+-          { key: 'expenses', label: 'Expenses' },
+-          { key: 'unread', label: 'Unread' },
+-        ].map((filter) => (
+-          <Pressable
+-            key={filter.key}
+-            style={[styles.filterChip, activeFilter === filter.key && styles.filterChipActive]}
+-            onPress={() => setActiveFilter(filter.key as FilterKey)}
+-          >
+-            <Text style={[styles.filterChipText, activeFilter === filter.key && styles.filterChipTextActive]}>
+-              {filter.label}
+-            </Text>
+-          </Pressable>
+-        ))}
+-      </ScrollView>
+-
+-      {filteredNotifications.length === 0 ? (
++      {notifications.length === 0 ? (
+         <GTEmptyState
+           icon="notifications-off-outline"
+           title="Nothing new yet"
+@@ -223,7 +187,7 @@
+             />
+           }
+         >
+-          {filteredNotifications.map((notification) => {
++          {notifications.map((notification) => {
+             const display = formatNotificationDisplay(notification);
+             const unread = !notification.readAt;
+             const tone =
+@@ -288,32 +252,6 @@
+     fontSize: 12,
+     fontWeight: '600',
+   },
+-  filterRow: {
+-    gap: spacing.sm,
+-    paddingVertical: 4,
+-  },
+-  filterChip: {
+-    paddingHorizontal: 14,
+-    minHeight: 40,
+-    borderRadius: radius.pill,
+-    borderWidth: 1,
+-    borderColor: colors.border,
+-    backgroundColor: colors.surface,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  filterChipActive: {
+-    backgroundColor: colors.accent,
+-    borderColor: colors.accent,
+-  },
+-  filterChipText: {
+-    color: colors.textPrimary,
+-    fontSize: 13,
+-    fontWeight: '600',
+-  },
+-  filterChipTextActive: {
+-    color: '#FFFFFF',
+-  },
+   listContent: {
+     gap: spacing.sm,
+     paddingBottom: footerScrollPadding,
+--- /mnt/data/gotogether_orig/mobile-app/src/navigation/AppNavigator.tsx	2026-05-11 02:47:31.565975723 +0000
++++ /mnt/data/gotogether_scan/mobile-app/src/navigation/AppNavigator.tsx	2026-05-11 02:47:26.600994378 +0000
+@@ -46,7 +46,7 @@
+ 
+ export type MainTabParamList = {
+   Home: undefined;
+-  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed' } | undefined;
++  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed'; refreshToken?: number } | undefined;
+   Live: undefined;
+   Expenses: undefined;
+   Profile: undefined;
+--- /mnt/data/gotogether_orig/mobile-app/src/screens/TripCompletionScreen.tsx	2026-05-11 02:47:31.570860795 +0000
++++ /mnt/data/gotogether_scan/mobile-app/src/screens/TripCompletionScreen.tsx	2026-05-11 02:47:10.220368218 +0000
+@@ -32,6 +32,7 @@
+ } from '../config/api';
+ import { useAuthStore } from '../store/authStore';
+ import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
++import { invalidateTripCaches } from '../services/resourceCache';
+ 
+ type Props = NativeStackScreenProps<RootStackParamList, 'TripCompletion'>;
+ 
+@@ -238,10 +239,12 @@
+       setCompleting(true);
+       if (currentTrip?.id) {
+         await completeTrip(currentTrip.id);
+-        await refreshTripState();
++        await invalidateTripCaches(currentTrip.id);
++        setCurrentTrip({ ...currentTrip, completed_at: currentTrip.completed_at || new Date().toISOString() });
+       }
++
+       resetTrip();
+-      navigation.navigate('MainTabs', { screen: 'Trips', params: { initialSection: 'Completed' } });
++      navigation.navigate('MainTabs', { screen: 'Trips', params: { initialSection: 'Completed', refreshToken: Date.now() } });
+     } catch (error: any) {
+       Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
+     } finally {
+--- /mnt/data/gotogether_orig/mobile-app/src/screens/TripsScreen.tsx	2026-05-11 02:47:31.571702920 +0000
++++ /mnt/data/gotogether_scan/mobile-app/src/screens/TripsScreen.tsx	2026-05-11 02:47:10.220731830 +0000
+@@ -196,9 +196,12 @@
+ 
+   useFocusEffect(
+     useCallback(() => {
++      const requestedSection = route.params?.initialSection;
++      const shouldForceRefresh = Boolean(requestedSection === 'Completed' || route.params?.refreshToken);
+       const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.trips;
+-      loadTrips(!hasLoadedRef.current, !hasLoadedRef.current ? false : stale);
+-    }, [loadTrips])
++
++      loadTrips(!hasLoadedRef.current, shouldForceRefresh || (!hasLoadedRef.current ? false : stale));
++    }, [loadTrips, route.params?.initialSection, route.params?.refreshToken])
+   );
+ 
+   const jumpToSection = async (section: TripSection) => {
+--- /mnt/data/gotogether_orig/mobile-app/src/services/notifications.ts	2026-05-11 02:47:31.571818873 +0000
++++ /mnt/data/gotogether_scan/mobile-app/src/services/notifications.ts	2026-05-11 02:47:10.221001870 +0000
+@@ -48,17 +48,20 @@
+   }
+ 
+   const saved = await readStoredRegistration();
+-  if (saved && registrationKey(saved.userId, saved.token) === registrationKey(userId, token)) {
+-    return token;
+-  }
+ 
++  // Always upsert the token on app start after login. This fixes TestFlight cases
++  // where the local app thinks the token was already registered, but the backend
++  // record was removed, replaced, or never saved after a deploy/database reset.
+   await registerPushToken({
+     expo_push_token: token,
+     platform: Device.osName?.toLowerCase() || 'expo',
+     device_id: Device.osInternalBuildId || Device.modelId || undefined,
+   });
+ 
+-  await writeStoredRegistration({ userId, token });
++  if (!saved || registrationKey(saved.userId, saved.token) !== registrationKey(userId, token)) {
++    await writeStoredRegistration({ userId, token });
++  }
++
+   return token;
+ }
+ 

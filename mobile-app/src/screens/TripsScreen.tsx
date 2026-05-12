@@ -89,6 +89,22 @@ const getTripsForSection = (allTrips: ApiTrip[], section: TripSection) => {
   }
 };
 
+const getTripProgressPercent = (trip: ApiTrip) => {
+  if (trip.completed_at) {
+    return 100;
+  }
+
+  const completedCount = trip.setup_completed_count ?? 0;
+  const pendingCount = trip.setup_pending_count ?? 0;
+  const totalCount = completedCount + pendingCount;
+
+  if (totalCount <= 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.round((completedCount / totalCount) * 100));
+};
+
 export default function TripsScreen({ navigation, route }: Props) {
   const token = useAuthStore((state) => state.token);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
@@ -180,9 +196,12 @@ export default function TripsScreen({ navigation, route }: Props) {
 
   useFocusEffect(
     useCallback(() => {
+      const requestedSection = route.params?.initialSection;
+      const shouldForceRefresh = Boolean(requestedSection === 'Completed' || route.params?.refreshToken);
       const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.trips;
-      loadTrips(!hasLoadedRef.current, !hasLoadedRef.current ? false : stale);
-    }, [loadTrips])
+
+      loadTrips(!hasLoadedRef.current, shouldForceRefresh || (!hasLoadedRef.current ? false : stale));
+    }, [loadTrips, route.params?.initialSection, route.params?.refreshToken])
   );
 
   const jumpToSection = async (section: TripSection) => {
@@ -375,8 +394,11 @@ export default function TripsScreen({ navigation, route }: Props) {
     ]);
   };
 
-  const renderTripCard = ({ item: trip, index }: { item: ApiTrip; index: number }) => (
-    <Pressable onPress={() => openTrip(trip)} style={({ pressed }) => [styles.tripCard, pressed && styles.tripCardPressed]}>
+  const renderTripCard = ({ item: trip, index }: { item: ApiTrip; index: number }) => {
+    const tripProgressPercent = getTripProgressPercent(trip);
+
+    return (
+      <Pressable onPress={() => openTrip(trip)} style={({ pressed }) => [styles.tripCard, pressed && styles.tripCardPressed]}>
       <View style={styles.imageWrap}>
         <Image
           source={
@@ -432,22 +454,14 @@ export default function TripsScreen({ navigation, route }: Props) {
             <Text style={styles.memberPreviewText}>{trip.members_count ?? 1} travelers</Text>
           </View>
 
-          {(trip.setup_completed_count || trip.setup_pending_count) ? (
+          {(trip.completed_at || trip.setup_completed_count || trip.setup_pending_count) ? (
             <View style={styles.progressMiniWrap}>
               <View style={styles.progressMiniTrack}>
                 <View
                   style={[
                     styles.progressMiniFill,
                     {
-                      width: `${Math.max(
-                        8,
-                        Math.min(
-                          100,
-                          (((trip.setup_completed_count ?? 0) /
-                            Math.max(1, (trip.setup_completed_count ?? 0) + (trip.setup_pending_count ?? 0))) *
-                            100)
-                        )
-                      )}%`,
+                      width: `${tripProgressPercent <= 0 ? 0 : Math.max(8, Math.min(100, tripProgressPercent))}%`,
                     },
                   ]}
                 />
@@ -458,6 +472,7 @@ export default function TripsScreen({ navigation, route }: Props) {
       </View>
     </Pressable>
   );
+  };
 
   const renderSectionPage = ({ item: section }: { item: TripSection }) => {
     const pageTrips = sectionTrips[section];

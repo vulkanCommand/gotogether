@@ -16,6 +16,36 @@ import (
 var nonDigitPattern = regexp.MustCompile(`\D+`)
 var nonUsernamePattern = regexp.MustCompile(`[^a-z0-9]+`)
 
+func updateAuthenticatedUserProfile(userID int, email string, name string, phone string) error {
+	_, err := db.DB.Exec(`
+		UPDATE users
+		SET
+			email = CASE WHEN $2 <> '' THEN $2 ELSE email END,
+			name = CASE WHEN $3 <> '' THEN $3 ELSE name END,
+			phone = CASE WHEN $4 <> '' THEN $4 ELSE phone END,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`, userID, email, name, phone)
+	return err
+}
+
+func tombstoneDeletedFirebaseUID(firebaseUID string) error {
+	trimmedUID := strings.TrimSpace(firebaseUID)
+	if trimmedUID == "" {
+		return nil
+	}
+
+	_, err := db.DB.Exec(`
+		UPDATE users
+		SET
+			firebase_uid = firebase_uid || ':deleted:' || id::text,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE firebase_uid = $1
+		  AND is_deleted = TRUE
+	`, trimmedUID)
+	return err
+}
+
 func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 	if db.DB == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database not connected"})
@@ -40,22 +70,100 @@ func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 	emailStr, _ := email.(string)
 	nameStr, _ := name.(string)
 	phoneStr, _ := phone.(string)
+	trimmedUID := strings.TrimSpace(uid)
+	trimmedEmail := strings.TrimSpace(emailStr)
+	trimmedName := strings.TrimSpace(nameStr)
 	normalizedPhone := normalizePhone(phoneStr)
-	defaultUsername := generateDefaultUsername(nameStr, normalizedPhone, uid)
+	defaultUsername := generateDefaultUsername(trimmedName, normalizedPhone, trimmedUID)
 
 	var userID int
+
 	err := db.DB.QueryRow(`
+		SELECT id
+		FROM users
+		WHERE firebase_uid = $1
+		  AND is_deleted = FALSE
+		ORDER BY id ASC
+		LIMIT 1
+	`, trimmedUID).Scan(&userID)
+	if err == nil {
+		if updateErr := updateAuthenticatedUserProfile(userID, trimmedEmail, trimmedName, normalizedPhone); updateErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "failed to sync authenticated user",
+				"details": updateErr.Error(),
+			})
+			return 0, false
+		}
+		return userID, true
+	}
+	if !sqlErrNoRows(err) {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to sync authenticated user",
+			"details": err.Error(),
+		})
+		return 0, false
+	}
+
+	if normalizedPhone != "" {
+		err = db.DB.QueryRow(`
+			SELECT id
+			FROM users
+			WHERE is_deleted = FALSE
+			  AND COALESCE(phone, '') <> ''
+			  AND phone = $1
+			ORDER BY id ASC
+			LIMIT 1
+		`, normalizedPhone).Scan(&userID)
+		if err == nil {
+			if tombstoneErr := tombstoneDeletedFirebaseUID(trimmedUID); tombstoneErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "failed to sync authenticated user",
+					"details": tombstoneErr.Error(),
+				})
+				return 0, false
+			}
+
+			if _, updateErr := db.DB.Exec(`
+				UPDATE users
+				SET
+					firebase_uid = $2,
+					email = CASE WHEN $3 <> '' THEN $3 ELSE email END,
+					name = CASE WHEN $4 <> '' THEN $4 ELSE name END,
+					phone = CASE WHEN $5 <> '' THEN $5 ELSE phone END,
+					updated_at = CURRENT_TIMESTAMP
+				WHERE id = $1
+			`, userID, trimmedUID, trimmedEmail, trimmedName, normalizedPhone); updateErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "failed to sync authenticated user",
+					"details": updateErr.Error(),
+				})
+				return 0, false
+			}
+
+			return userID, true
+		}
+		if !sqlErrNoRows(err) {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "failed to sync authenticated user",
+				"details": err.Error(),
+			})
+			return 0, false
+		}
+	}
+
+	if tombstoneErr := tombstoneDeletedFirebaseUID(trimmedUID); tombstoneErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to sync authenticated user",
+			"details": tombstoneErr.Error(),
+		})
+		return 0, false
+	}
+
+	err = db.DB.QueryRow(`
 		INSERT INTO users (firebase_uid, email, name, phone, username)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (firebase_uid)
-		DO UPDATE SET
-			email = COALESCE(NULLIF(EXCLUDED.email, ''), users.email),
-			name = COALESCE(NULLIF(EXCLUDED.name, ''), users.name),
-			phone = COALESCE(NULLIF(EXCLUDED.phone, ''), users.phone),
-			username = COALESCE(NULLIF(users.username, ''), NULLIF(EXCLUDED.username, ''), users.username),
-			updated_at = CURRENT_TIMESTAMP
 		RETURNING id
-	`, strings.TrimSpace(uid), strings.TrimSpace(emailStr), strings.TrimSpace(nameStr), normalizedPhone, defaultUsername).Scan(&userID)
+	`, trimmedUID, trimmedEmail, trimmedName, normalizedPhone, defaultUsername).Scan(&userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "failed to sync authenticated user",
@@ -82,6 +190,7 @@ func loadUserByID(userID int) (models.User, error) {
 			COALESCE(profile_image_url, '')
 		FROM users
 		WHERE id = $1
+		  AND is_deleted = FALSE
 	`, userID).Scan(
 		&user.ID,
 		&user.FirebaseUID,

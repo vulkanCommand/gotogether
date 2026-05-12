@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
     home_city TEXT,
     bio TEXT,
     profile_image_url TEXT,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

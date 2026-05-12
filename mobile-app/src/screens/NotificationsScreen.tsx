@@ -24,12 +24,9 @@ import { formatNotificationDisplay } from '../utils/notificationDisplay';
 import { mapApiMembersToCrew } from '../utils/tripFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Notifications'>;
-type FilterKey = 'all' | 'trips' | 'expenses' | 'unread';
-
 export default function NotificationsScreen({ navigation }: Props) {
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const hasLoadedRef = useRef(false);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
   const setCrew = useTripStore((state) => state.setCrew);
@@ -57,20 +54,6 @@ export default function NotificationsScreen({ navigation }: Props) {
   );
 
   const unreadCount = useMemo(() => notifications.filter((item) => !item.readAt).length, [notifications]);
-
-  const filteredNotifications = useMemo(() => {
-    return notifications.filter((notification) => {
-      if (activeFilter === 'unread') {
-        return !notification.readAt;
-      }
-
-      if (activeFilter === 'all') {
-        return true;
-      }
-
-      return formatNotificationDisplay(notification).category === activeFilter;
-    });
-  }, [activeFilter, notifications]);
 
   const openTripFromNotification = async (tripId: number, destination?: 'TripOverview' | 'Itinerary' | 'Expenses') => {
     const details = await fetchTripDetails(tripId);
@@ -181,26 +164,7 @@ export default function NotificationsScreen({ navigation }: Props) {
         </GTCard>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-        {[
-          { key: 'all', label: 'All' },
-          { key: 'trips', label: 'Trips' },
-          { key: 'expenses', label: 'Expenses' },
-          { key: 'unread', label: 'Unread' },
-        ].map((filter) => (
-          <Pressable
-            key={filter.key}
-            style={[styles.filterChip, activeFilter === filter.key && styles.filterChipActive]}
-            onPress={() => setActiveFilter(filter.key as FilterKey)}
-          >
-            <Text style={[styles.filterChipText, activeFilter === filter.key && styles.filterChipTextActive]}>
-              {filter.label}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      {filteredNotifications.length === 0 ? (
+      {notifications.length === 0 ? (
         <GTEmptyState
           icon="notifications-off-outline"
           title="Nothing new yet"
@@ -223,7 +187,7 @@ export default function NotificationsScreen({ navigation }: Props) {
             />
           }
         >
-          {filteredNotifications.map((notification) => {
+          {notifications.map((notification) => {
             const display = formatNotificationDisplay(notification);
             const unread = !notification.readAt;
             const tone =
@@ -287,32 +251,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
-  },
-  filterRow: {
-    gap: spacing.sm,
-    paddingVertical: 4,
-  },
-  filterChip: {
-    paddingHorizontal: 14,
-    minHeight: 40,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterChipActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
-  filterChipText: {
-    color: colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  filterChipTextActive: {
-    color: '#FFFFFF',
   },
   listContent: {
     gap: spacing.sm,

@@ -83,64 +83,73 @@ export default function AppFooter() {
       style={[
         styles.footer,
         {
-          height: 58 + Math.max(insets.bottom, 10),
-          paddingBottom: Math.max(insets.bottom, 8),
+          marginBottom: Math.max(insets.bottom, 10),
         },
       ]}
     >
-      {tabs.map((tab) => {
-        const selected = activeTab === tab.name;
+      <View style={styles.footerRow}>
+        {tabs.map((tab) => {
+          const selected = activeTab === tab.name;
 
-        return (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={tab.name}
-            key={tab.name}
-            style={[styles.tab, selected && styles.tabSelected]}
-            onPress={() => goToTab(tab.name)}
-          >
-            <View style={[styles.iconWrap, selected && styles.iconWrapSelected]}>
-              <Ionicons name={tab.icon} size={20} color={selected ? colors.white : colors.tabInactive} />
-            </View>
-            <Text style={[styles.label, selected && styles.labelSelected]}>{tab.name}</Text>
-          </Pressable>
-        );
-      })}
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tab.name}
+              key={tab.name}
+              style={[styles.tab, selected && styles.tabSelected]}
+              onPress={() => goToTab(tab.name)}
+            >
+              <View style={styles.tabStack}>
+                <View style={[styles.iconWrap, selected && styles.iconWrapSelected]}>
+                  <Ionicons name={tab.icon} size={20} color={selected ? colors.white : colors.tabInactive} />
+                </View>
+                <Text style={[styles.label, selected && styles.labelSelected]}>{tab.name}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 16,
-    marginBottom: 8,
+    marginHorizontal: 24,
+    height: 72,
     paddingHorizontal: 8,
-    paddingTop: 6,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.97)',
     borderWidth: 1,
     borderColor: colors.border,
     ...shadows.floating,
+  },
+  footerRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    borderRadius: radius.md,
-    minHeight: 40,
-    paddingVertical: 0,
+    borderRadius: radius.lg,
+    height: 56,
   },
   tabSelected: {
     backgroundColor: '#F5F8FF',
   },
+  tabStack: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
   iconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -148,10 +157,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   label: {
-    fontSize: 10.5,
+    fontSize: 11,
     fontWeight: '600',
     color: colors.tabInactive,
     lineHeight: 12,
+    marginTop: 1,
   },
   labelSelected: {
     color: colors.accent,

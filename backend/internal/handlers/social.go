@@ -53,10 +53,11 @@ func SyncContacts(c *gin.Context) {
 			COALESCE(profile_image_url, '')
 		FROM users
 		WHERE id <> $1
+		  AND is_deleted = FALSE
 		  AND (
-				(array_length($2::text[], 1) IS NOT NULL AND LOWER(COALESCE(email, '')) = ANY($2::text[]))
+				(array_length($2::text[], 1) IS NOT NULL AND COALESCE(email, '') <> '' AND LOWER(COALESCE(email, '')) = ANY($2::text[]))
 				OR
-				(array_length($3::text[], 1) IS NOT NULL AND COALESCE(phone, '') = ANY($3::text[]))
+				(array_length($3::text[], 1) IS NOT NULL AND COALESCE(phone, '') <> '' AND COALESCE(phone, '') = ANY($3::text[]))
 		  )
 		ORDER BY name ASC, id ASC
 	`, userID, pq.Array(emails), pq.Array(phones))
@@ -121,6 +122,7 @@ func GetFriends(c *gin.Context) {
 		FROM friendships f
 		INNER JOIN users u ON u.id = f.friend_user_id
 		WHERE f.user_id = $1
+		  AND u.is_deleted = FALSE
 		ORDER BY u.name ASC, u.id ASC
 	`, userID)
 	if err != nil {
