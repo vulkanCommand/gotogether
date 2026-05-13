@@ -4,7 +4,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Contacts from 'expo-contacts';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
@@ -13,7 +12,7 @@ import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { blockUser, fetchFriends, getBlockedUsers, syncDeviceContacts } from '../config/api';
-import { collectDeviceContactLookupPayload, collectDeviceContactLookupPayloadWithPermission, DeviceInviteContact } from '../utils/contacts';
+import { collectDeviceContactLookupPayload, DeviceInviteContact } from '../utils/contacts';
 import { formatPhoneForDisplay, formatPhoneForFirebase, normalizePhoneForComparison } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
@@ -39,30 +38,39 @@ export default function CreateGroupScreen({ navigation }: Props) {
     return response.friends;
   }, [setFriends]);
 
-  const syncContactsFromDevice = useCallback(async () => {
+  const syncContactsFromDevice = useCallback(async (showPermissionAlert = true) => {
     try {
       setSyncingFriends(true);
       const contacts = await collectDeviceContactLookupPayload();
       setDeviceContacts(contacts.contacts);
-      if (!contacts.granted) {
-        Alert.alert(
-          'Contacts permission not granted',
-          'You can still invite manually with a phone number, or enable Contacts in Settings when you want to sync friends.'
-        );
-        return;
-      }
-
-      console.log('Create group manual sync payload counts', {
+      console.log('Create group contact sync result', {
+        mode: showPermissionAlert ? 'manual' : 'auto',
+        granted: contacts.granted,
+        contacts: contacts.contacts.length,
         emails: contacts.emails.length,
         phones: contacts.phones.length,
       });
 
-      await syncDeviceContacts({
+      if (!contacts.granted) {
+        if (showPermissionAlert) {
+          Alert.alert(
+            'Contacts permission not granted',
+            'You can still invite manually with a phone number, or enable Contacts in Settings when you want to sync friends.'
+          );
+        }
+        return;
+      }
+
+      const syncResponse = await syncDeviceContacts({
         emails: contacts.emails,
         phones: contacts.phones,
       });
       const updatedFriends = await loadFriendsAndRestrictions();
-      console.log('Create group manual sync friends count', { friends: updatedFriends.length });
+      console.log('Create group friends count after sync', {
+        mode: showPermissionAlert ? 'manual' : 'auto',
+        syncReturnedFriends: syncResponse.friends.length,
+        fetchedFriends: updatedFriends.length,
+      });
     } catch (error) {
       console.log('Device contact sync failed', error);
     } finally {
@@ -73,41 +81,19 @@ export default function CreateGroupScreen({ navigation }: Props) {
   useFocusEffect(
     useCallback(() => {
       let active = true;
+      let autoSyncAttempted = false;
 
       const bootstrapFriends = async () => {
         try {
           setSyncingFriends(true);
-          await loadFriendsAndRestrictions();
-
-          const permission = await Contacts.getPermissionsAsync();
-          if (!active || permission.status !== 'granted') {
-            return;
-          }
-
-          const contacts = await collectDeviceContactLookupPayloadWithPermission(true);
-          if (!active || !contacts.granted) {
-            return;
-          }
-
-          setDeviceContacts(contacts.contacts);
-          console.log('Create group silent sync payload counts', {
-            emails: contacts.emails.length,
-            phones: contacts.phones.length,
-          });
-
-          await syncDeviceContacts({
-            emails: contacts.emails,
-            phones: contacts.phones,
-          });
-
-          if (!active) {
-            return;
-          }
-
           const updatedFriends = await loadFriendsAndRestrictions();
-          if (active) {
-            console.log('Create group silent sync friends count', { friends: updatedFriends.length });
+          console.log('Create group friends count before sync', { friends: updatedFriends.length });
+
+          if (!active || autoSyncAttempted) {
+            return;
           }
+          autoSyncAttempted = true;
+          await syncContactsFromDevice(false);
         } catch (error) {
           console.log('Friend refresh failed', error);
         } finally {
@@ -122,7 +108,7 @@ export default function CreateGroupScreen({ navigation }: Props) {
       return () => {
         active = false;
       };
-    }, [loadFriendsAndRestrictions])
+    }, [loadFriendsAndRestrictions, syncContactsFromDevice])
   );
 
   const filteredFriends = useMemo(() => {
