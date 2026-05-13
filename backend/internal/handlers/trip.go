@@ -550,8 +550,9 @@ func UpdateTrip(c *gin.Context) {
 		refreshTripCoverInBackground(tripID, userID, true)
 	}
 
-	createUserNotification(userID, tripID, "Trip updated", req.Name+" was updated.", "alert", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Trip updated", req.Name+" was updated for the crew.", "alert", false)
+	actorName := loadActorDisplayName(userID)
+	createUserNotification(userID, tripID, "You updated "+req.Name, req.Name+" was updated", "alert", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated "+req.Name, actorName+" updated "+req.Name, "alert", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -707,10 +708,12 @@ func CompleteTrip(c *gin.Context) {
 	var tripName string
 	_ = db.DB.QueryRow(`SELECT COALESCE(name, '') FROM trips WHERE id = $1`, tripID).Scan(&tripName)
 	if strings.TrimSpace(tripName) == "" {
-		tripName = "this trip"
+		tripName = loadTripDisplayName(tripID)
 	}
-	createUserNotification(userID, tripID, "Trip completed", "You finished "+strings.TrimSpace(tripName)+".", "alert", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Trip completed", strings.TrimSpace(tripName)+" has been wrapped up and moved to completed trips.", "alert", false)
+	tripName = strings.TrimSpace(tripName)
+	actorName := loadActorDisplayName(userID)
+	createUserNotification(userID, tripID, "You completed "+tripName, "Trip moved to completed", "alert", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" completed "+tripName, tripName+" was wrapped up", "alert", false)
 	c.JSON(http.StatusOK, gin.H{"completed": true, "pending_confirmations": false})
 }
 
@@ -753,6 +756,8 @@ func finalizeTripIfConfirmed(tripID int) error {
 	`, tripID, leadUserID); err != nil {
 		return err
 	}
-	createTripNotifications(tripID, leadUserID, "Trip completed", fmt.Sprintf("All members confirmed trip %d is complete.", tripID), "alert", false)
+	tripName := loadTripDisplayName(tripID)
+	actorName := loadActorDisplayName(leadUserID)
+	createTripNotifications(tripID, leadUserID, actorName+" completed "+tripName, tripName+" was wrapped up", "alert", false)
 	return nil
 }

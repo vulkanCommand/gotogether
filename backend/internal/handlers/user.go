@@ -70,7 +70,7 @@ func UpdateMe(c *gin.Context) {
 		UPDATE users
 		SET
 			name = $2,
-			phone = $3,
+			phone = CASE WHEN $3 <> '' THEN $3 ELSE phone END,
 			username = $4,
 			home_city = $5,
 			bio = $6,

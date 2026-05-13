@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ func SyncContacts(c *gin.Context) {
 			phones = append(phones, normalized)
 		}
 	}
+	log.Printf("contacts sync payload counts emails=%d phones=%d", len(emails), len(phones))
 
 	rows, err := db.DB.Query(`
 		SELECT
@@ -117,7 +119,13 @@ func SyncContacts(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"friends": friends})
+	currentFriends, err := loadVisibleFriends(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch friends", "details": err.Error()})
+		return
+	}
+	log.Printf("contacts sync returned friends=%d", len(currentFriends))
+	c.JSON(http.StatusOK, gin.H{"friends": currentFriends})
 }
 
 func GetFriends(c *gin.Context) {
@@ -126,6 +134,16 @@ func GetFriends(c *gin.Context) {
 		return
 	}
 
+	friends, err := loadVisibleFriends(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch friends", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"friends": friends})
+}
+
+func loadVisibleFriends(userID int) ([]models.Friend, error) {
 	rows, err := db.DB.Query(`
 		SELECT
 			u.id,
@@ -148,8 +166,7 @@ func GetFriends(c *gin.Context) {
 		ORDER BY u.name ASC, u.id ASC
 	`, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch friends", "details": err.Error()})
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -157,13 +174,12 @@ func GetFriends(c *gin.Context) {
 	for rows.Next() {
 		var friend models.Friend
 		if err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.Phone, &friend.Username, &friend.HomeCity, &friend.ProfileImageURL); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read friends", "details": err.Error()})
-			return
+			return nil, err
 		}
 		friends = append(friends, friend)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"friends": friends})
+	return friends, rows.Err()
 }
 
 func SendSMSInvite(c *gin.Context) {

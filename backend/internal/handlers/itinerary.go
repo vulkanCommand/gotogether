@@ -105,8 +105,10 @@ func SaveTripItinerary(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary updated", "You updated the trip itinerary.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary updated", "The trip itinerary was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You updated the itinerary", "The itinerary was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated the itinerary", actorName+" updated the itinerary in "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"message": "itinerary saved"})
 }
 
@@ -162,8 +164,10 @@ func CreateItineraryDay(c *gin.Context) {
 		Status:    "upcoming",
 		Events:    []models.ItineraryEventPayload{},
 	}})
-	createUserNotification(userID, tripID, "Itinerary day added", title+" was added to the trip plan.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary day added", title+" was added to the trip plan.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You added "+title, title+" was added to "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" added an itinerary day", actorName+" added "+title+" to "+tripName, "itinerary", false)
 }
 
 func UpdateItineraryDay(c *gin.Context) {
@@ -203,8 +207,10 @@ func UpdateItineraryDay(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary day updated", title+" was updated.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary day updated", title+" was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You updated "+title, title+" was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated "+title, actorName+" updated "+title+" in "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -253,8 +259,10 @@ func DeleteItineraryDay(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary day deleted", "You deleted a day from the itinerary.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary day deleted", "The trip lead deleted a day from the itinerary.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You deleted an itinerary day", "A day was removed from "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" deleted an itinerary day", actorName+" removed a day from "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
@@ -289,18 +297,11 @@ func CreateItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	actorName := "Someone"
-	if actorUser, err := loadUserByID(userID); err == nil {
-		if strings.TrimSpace(actorUser.Name) != "" {
-			actorName = strings.TrimSpace(actorUser.Name)
-		} else if strings.TrimSpace(actorUser.Username) != "" {
-			actorName = strings.TrimSpace(actorUser.Username)
-		}
-	}
-	notificationTitle := strings.TrimSpace(event.Title) + " added to events"
-	notificationBody := "Added by " + actorName
-	createUserNotification(userID, tripID, notificationTitle, notificationBody, "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, notificationTitle, notificationBody, "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	eventTitle := strings.TrimSpace(event.Title)
+	createUserNotification(userID, tripID, "You added "+eventTitle, eventTitle+" was added to "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" added an event", actorName+" added "+eventTitle+" to "+tripName, "itinerary", false)
 	c.JSON(http.StatusCreated, gin.H{"event": event})
 }
 
@@ -407,8 +408,10 @@ func ReorderItineraryDayEvents(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary reordered", "You updated the order of events for the day.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary reordered", "The order of itinerary events was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You reordered the itinerary", "The itinerary order was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" reordered the itinerary", actorName+" updated the itinerary order in "+tripName, "itinerary", false)
 
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
@@ -472,8 +475,10 @@ func UpdateItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary event updated", title+" was updated.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary event updated", title+" was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You updated "+title, title+" was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated "+title, actorName+" updated "+title+" in "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -522,8 +527,10 @@ func DeleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary event deleted", "You deleted an itinerary event.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary event deleted", "The trip lead deleted an itinerary event.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You deleted an event", "An event was removed from "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" deleted an event", actorName+" removed an event from "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
@@ -589,8 +596,11 @@ func CompleteItineraryEvent(c *gin.Context) {
 	if strings.TrimSpace(eventTitle) == "" {
 		eventTitle = "an itinerary event"
 	}
-	createUserNotification(userID, tripID, "Event completed", "You marked "+strings.TrimSpace(eventTitle)+" complete.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Event completed", strings.TrimSpace(eventTitle)+" was marked complete.", "alert", false)
+	eventTitle = strings.TrimSpace(eventTitle)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, eventTitle+" completed", "You marked "+eventTitle+" complete", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" completed an event", actorName+" marked "+eventTitle+" complete in "+tripName, "alert", false)
 
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
@@ -716,7 +726,13 @@ func finalizeEventIfConfirmed(tripID int, eventID int, actorUserID int) error {
 
 	var eventTitle string
 	_ = db.DB.QueryRow(`SELECT title FROM itinerary_events WHERE id = $1`, eventID).Scan(&eventTitle)
-	createTripNotifications(tripID, actorUserID, "Event completed", strings.TrimSpace(eventTitle)+" is complete after crew confirmation.", "alert", false)
+	eventTitle = strings.TrimSpace(eventTitle)
+	if eventTitle == "" {
+		eventTitle = "an itinerary event"
+	}
+	actorName := loadActorDisplayName(actorUserID)
+	tripName := loadTripDisplayName(tripID)
+	createTripNotifications(tripID, actorUserID, actorName+" completed an event", actorName+" marked "+eventTitle+" complete in "+tripName, "alert", false)
 	return nil
 }
 

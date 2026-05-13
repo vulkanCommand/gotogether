@@ -1,5 +1,19 @@
 const NON_DIGIT_PATTERN = /\D+/g;
 
+export function normalizePhoneForComparison(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const digits = trimmed.replace(NON_DIGIT_PATTERN, '');
+  if (digits.length === 10) {
+    return `1${digits}`;
+  }
+
+  return digits;
+}
+
 export function formatPhoneForFirebase(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -7,11 +21,11 @@ export function formatPhoneForFirebase(value: string) {
   }
 
   if (trimmed.startsWith('+')) {
-    const digits = trimmed.replace(/\D+/g, '');
+    const digits = normalizePhoneForComparison(trimmed);
     return digits ? `+${digits}` : '';
   }
 
-  const digits = trimmed.replace(NON_DIGIT_PATTERN, '');
+  const digits = normalizePhoneForComparison(trimmed);
   if (digits.length === 10) {
     return `+1${digits}`;
   }

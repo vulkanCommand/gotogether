@@ -273,6 +273,21 @@ func CreateTripExpense(c *gin.Context) {
 	}
 	addLinkedEventLabels(&expense, linkedEventID)
 
+	notifyExpenseChange(
+		tripID,
+		userID,
+		"You added "+req.Title,
+		func(_ string, tripName string) string {
+			return req.Title + " was added to " + tripName
+		},
+		func(actorName string) string {
+			return actorName + " added " + req.Title
+		},
+		func(actorName, tripName string) string {
+			return actorName + " added " + req.Title + " to " + tripName
+		},
+	)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"expense": expense,
 	})
@@ -427,6 +442,21 @@ func UpdateTripExpense(c *gin.Context) {
 	}
 	addLinkedEventLabels(&expense, linkedEventID)
 
+	notifyExpenseChange(
+		tripID,
+		userID,
+		"You updated "+req.Title,
+		func(_ string, tripName string) string {
+			return req.Title + " was updated in " + tripName
+		},
+		func(actorName string) string {
+			return actorName + " updated " + req.Title
+		},
+		func(actorName, tripName string) string {
+			return actorName + " updated " + req.Title + " in " + tripName
+		},
+	)
+
 	c.JSON(http.StatusOK, gin.H{"expense": expense})
 }
 
@@ -460,7 +490,36 @@ func DeleteTripExpense(c *gin.Context) {
 		return
 	}
 
+	notifyExpenseChange(
+		tripID,
+		userID,
+		"You deleted an expense",
+		func(_ string, tripName string) string {
+			return "An expense was removed from " + tripName
+		},
+		func(actorName string) string {
+			return actorName + " deleted an expense"
+		},
+		func(actorName, tripName string) string {
+			return actorName + " removed an expense from " + tripName
+		},
+	)
+
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func notifyExpenseChange(
+	tripID int,
+	actorUserID int,
+	selfTitle string,
+	buildSelfBody func(actorName string, tripName string) string,
+	buildMemberTitle func(actorName string) string,
+	buildMemberBody func(actorName string, tripName string) string,
+) {
+	actorName := loadActorDisplayName(actorUserID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(actorUserID, tripID, selfTitle, buildSelfBody(actorName, tripName), "expense", false, "", 0, actorUserID)
+	createTripNotifications(tripID, actorUserID, buildMemberTitle(actorName), buildMemberBody(actorName, tripName), "expense", false)
 }
 
 func loadExpenseGroups(tripID int) ([]models.ExpenseGroupResponse, error) {

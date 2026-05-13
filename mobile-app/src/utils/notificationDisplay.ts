@@ -68,7 +68,8 @@ function titleCase(value: string) {
 
 function extractCompletedEventName(rawBody: string, targetEventName: string, rawTitle: string) {
   const directMatch =
-    rawBody.match(/^(?:You|.+?)\s+marked\s+(.+?)\s+complete(?:d)?$/i) ||
+    rawBody.match(/^(?:You|.+?)\s+marked\s+(.+?)\s+complete(?:d)?(?:\s+in\s+.+)?$/i) ||
+    rawBody.match(/^(.+?)\s+was\s+marked\s+complete(?:d)?$/i) ||
     rawBody.match(/^(.+?)\s+(?:was\s+)?completed$/i);
 
   if (directMatch?.[1]) {
@@ -120,6 +121,11 @@ function extractExpenseTitle(item: ApiNotification | ApiActivityItem, rawTitle: 
   const targetTitle = cleanText(item.targetTitle || '');
   if (targetTitle) {
     return targetTitle;
+  }
+
+  const rawTitleLower = rawTitle.toLowerCase();
+  if (rawTitleLower.includes('deleted an expense') || rawTitleLower.includes('updated an expense')) {
+    return rawTitle;
   }
 
   if (rawTitle && !rawTitle.toLowerCase().includes('expense')) {
@@ -178,14 +184,29 @@ export function formatNotificationDisplay(item: ApiNotification | ApiActivityIte
 
   const titleLower = rawTitle.toLowerCase();
   const bodyLower = rawBody.toLowerCase();
+  const hasActorAwareEventTitle =
+    titleLower.includes(' added an event') ||
+    titleLower.includes(' completed an event') ||
+    titleLower.includes(' deleted an event');
   const isEventCompleted =
     titleLower.includes('event completed') ||
+    titleLower.includes('completed an event') ||
     (bodyLower.includes(' marked ') && bodyLower.includes(' complete')) ||
     (bodyLower.includes(' marked ') && bodyLower.includes(' completed')) ||
+    bodyLower.includes(' was marked complete') ||
     bodyLower.includes(' was completed') ||
     bodyLower.endsWith(' completed');
 
   if (isEventCompleted) {
+    if (hasActorAwareEventTitle) {
+      return {
+        title: rawTitle,
+        body: appendTimestamp(rawBody || 'An itinerary event was completed', timestampValue),
+        category: 'trips',
+        type,
+        tripId,
+      };
+    }
     const eventName = extractCompletedEventName(rawBody, targetEventName, rawTitle);
     return {
       title: eventName ? `${titleCase(eventName)} completed` : 'Itinerary updated',
@@ -199,12 +220,22 @@ export function formatNotificationDisplay(item: ApiNotification | ApiActivityIte
   const isEventAdded =
     titleLower.includes('event added') ||
     titleLower.includes('added event') ||
+    titleLower.includes('added an event') ||
     titleLower.includes('new event') ||
     titleLower.includes('added to events') ||
     bodyLower.includes(' was added to the trip plan') ||
     bodyLower.startsWith('event added by');
 
   if (isEventAdded) {
+    if (hasActorAwareEventTitle) {
+      return {
+        title: rawTitle,
+        body: appendTimestamp(rawBody || 'A new itinerary event was added', timestampValue),
+        category: 'trips',
+        type,
+        tripId,
+      };
+    }
     const eventName = extractAddedEventName(rawTitle, rawBody, targetEventName);
     return {
       title: eventName ? `${titleCase(eventName)} added` : 'Itinerary updated',

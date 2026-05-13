@@ -343,3 +343,24 @@ func createTripActionNotifications(tripID int, actorUserID int, title string, bo
 func createUserNotification(userID int, tripID int, title string, body string, kind string, requiresAction bool, actionType string, targetID int, actorUserID int) {
 	createLegacyNotification(userID, tripID, title, body, kind, requiresAction, actionType, targetID, actorUserID)
 }
+
+func loadActorDisplayName(actorUserID int) string {
+	actorName := "Someone"
+	if actorUser, err := loadUserByID(actorUserID); err == nil {
+		if strings.TrimSpace(actorUser.Name) != "" {
+			actorName = strings.TrimSpace(actorUser.Name)
+		} else if strings.TrimSpace(actorUser.Username) != "" {
+			actorName = strings.TrimSpace(actorUser.Username)
+		}
+	}
+	return actorName
+}
+
+func loadTripDisplayName(tripID int) string {
+	tripName := "your trip"
+	var loadedTripName string
+	if err := db.DB.QueryRow(`SELECT COALESCE(name, '') FROM trips WHERE id = $1`, tripID).Scan(&loadedTripName); err == nil && strings.TrimSpace(loadedTripName) != "" {
+		tripName = strings.TrimSpace(loadedTripName)
+	}
+	return tripName
+}

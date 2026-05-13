@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Contacts from 'expo-contacts';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
@@ -12,8 +13,8 @@ import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
 import { blockUser, fetchFriends, getBlockedUsers, syncDeviceContacts } from '../config/api';
-import { collectDeviceContactLookupPayload, DeviceInviteContact } from '../utils/contacts';
-import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
+import { collectDeviceContactLookupPayload, collectDeviceContactLookupPayloadWithPermission, DeviceInviteContact } from '../utils/contacts';
+import { formatPhoneForDisplay, formatPhoneForFirebase, normalizePhoneForComparison } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
 
@@ -31,17 +32,11 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const [deviceContacts, setDeviceContacts] = useState<DeviceInviteContact[]>([]);
   const [restrictedUsers, setRestrictedUsers] = useState<Friend[]>([]);
 
-  const refreshFriends = useCallback(async () => {
-    try {
-      setSyncingFriends(true);
-      const [response, blockedResponse] = await Promise.all([fetchFriends(), getBlockedUsers()]);
-      setFriends(response.friends);
-      setRestrictedUsers(blockedResponse.restricted_users ?? blockedResponse.users ?? []);
-    } catch (error) {
-      console.log('Friend refresh failed', error);
-    } finally {
-      setSyncingFriends(false);
-    }
+  const loadFriendsAndRestrictions = useCallback(async () => {
+    const [response, blockedResponse] = await Promise.all([fetchFriends(), getBlockedUsers()]);
+    setFriends(response.friends);
+    setRestrictedUsers(blockedResponse.restricted_users ?? blockedResponse.users ?? []);
+    return response.friends;
   }, [setFriends]);
 
   const syncContactsFromDevice = useCallback(async () => {
@@ -57,24 +52,77 @@ export default function CreateGroupScreen({ navigation }: Props) {
         return;
       }
 
+      console.log('Create group manual sync payload counts', {
+        emails: contacts.emails.length,
+        phones: contacts.phones.length,
+      });
+
       await syncDeviceContacts({
         emails: contacts.emails,
         phones: contacts.phones,
       });
-      const [response, blockedResponse] = await Promise.all([fetchFriends(), getBlockedUsers()]);
-      setFriends(response.friends);
-      setRestrictedUsers(blockedResponse.restricted_users ?? blockedResponse.users ?? []);
+      const updatedFriends = await loadFriendsAndRestrictions();
+      console.log('Create group manual sync friends count', { friends: updatedFriends.length });
     } catch (error) {
       console.log('Device contact sync failed', error);
     } finally {
       setSyncingFriends(false);
     }
-  }, [setFriends]);
+  }, [loadFriendsAndRestrictions]);
 
   useFocusEffect(
     useCallback(() => {
-      void refreshFriends();
-    }, [refreshFriends])
+      let active = true;
+
+      const bootstrapFriends = async () => {
+        try {
+          setSyncingFriends(true);
+          await loadFriendsAndRestrictions();
+
+          const permission = await Contacts.getPermissionsAsync();
+          if (!active || permission.status !== 'granted') {
+            return;
+          }
+
+          const contacts = await collectDeviceContactLookupPayloadWithPermission(true);
+          if (!active || !contacts.granted) {
+            return;
+          }
+
+          setDeviceContacts(contacts.contacts);
+          console.log('Create group silent sync payload counts', {
+            emails: contacts.emails.length,
+            phones: contacts.phones.length,
+          });
+
+          await syncDeviceContacts({
+            emails: contacts.emails,
+            phones: contacts.phones,
+          });
+
+          if (!active) {
+            return;
+          }
+
+          const updatedFriends = await loadFriendsAndRestrictions();
+          if (active) {
+            console.log('Create group silent sync friends count', { friends: updatedFriends.length });
+          }
+        } catch (error) {
+          console.log('Friend refresh failed', error);
+        } finally {
+          if (active) {
+            setSyncingFriends(false);
+          }
+        }
+      };
+
+      void bootstrapFriends();
+
+      return () => {
+        active = false;
+      };
+    }, [loadFriendsAndRestrictions])
   );
 
   const filteredFriends = useMemo(() => {
@@ -96,12 +144,12 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const inviteCandidates = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     const friendEmailSet = new Set(friends.map((friend) => friend.email?.trim().toLowerCase()).filter(Boolean));
-    const friendPhoneSet = new Set(friends.map((friend) => formatPhoneForFirebase(friend.phone)).filter(Boolean));
+    const friendPhoneSet = new Set(friends.map((friend) => normalizePhoneForComparison(friend.phone)).filter(Boolean));
     const restrictedEmailSet = new Set(
       restrictedUsers.map((restrictedUser) => restrictedUser.email?.trim().toLowerCase()).filter(Boolean)
     );
     const restrictedPhoneSet = new Set(
-      restrictedUsers.map((restrictedUser) => formatPhoneForFirebase(restrictedUser.phone)).filter(Boolean)
+      restrictedUsers.map((restrictedUser) => normalizePhoneForComparison(restrictedUser.phone)).filter(Boolean)
     );
 
     return deviceContacts
