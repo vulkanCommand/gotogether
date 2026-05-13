@@ -156,8 +156,8 @@ func GetBlockedUsers(c *gin.Context) {
 
 	restrictedRows, err := db.DB.Query(`
 		SELECT DISTINCT
-			u.id,
-			COALESCE(u.name, ''),
+			u.id AS id,
+			COALESCE(u.name, '') AS name,
 			COALESCE(u.email, ''),
 			COALESCE(u.phone, ''),
 			COALESCE(u.username, ''),
@@ -171,7 +171,7 @@ func GetBlockedUsers(c *gin.Context) {
 			END
 		WHERE (ub.blocker_user_id = $1 OR ub.blocked_user_id = $1)
 		  AND u.is_deleted = FALSE
-		ORDER BY u.name ASC, u.id ASC
+		ORDER BY name ASC, id ASC
 	`, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch blocked users", "details": err.Error()})
