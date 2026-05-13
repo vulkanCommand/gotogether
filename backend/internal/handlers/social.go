@@ -63,7 +63,17 @@ func SyncContacts(c *gin.Context) {
 		  AND (
 				(array_length($2::text[], 1) IS NOT NULL AND COALESCE(email, '') <> '' AND LOWER(COALESCE(email, '')) = ANY($2::text[]))
 				OR
-				(array_length($3::text[], 1) IS NOT NULL AND COALESCE(phone, '') <> '' AND COALESCE(phone, '') = ANY($3::text[]))
+				(
+					array_length($3::text[], 1) IS NOT NULL
+					AND COALESCE(phone, '') <> ''
+					AND (
+						CASE
+							WHEN LENGTH(REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')) = 10
+								THEN '1' || REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')
+							ELSE REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')
+						END
+					) = ANY($3::text[])
+				)
 		  )
 		ORDER BY name ASC, id ASC
 	`, userID, pq.Array(emails), pq.Array(phones))

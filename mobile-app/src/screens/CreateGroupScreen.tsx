@@ -229,6 +229,10 @@ export default function CreateGroupScreen({ navigation }: Props) {
     navigation.navigate('TripCreate');
   };
 
+  const footerLabel = selectedIds.length > 0
+    ? `Create Group (${selectedIds.length + 1} members)`
+    : 'Continue solo';
+
   return (
     <View style={styles.screen}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
@@ -344,9 +348,11 @@ export default function CreateGroupScreen({ navigation }: Props) {
 
           {filteredFriends.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No friends found</Text>
+              <Text style={styles.emptyTitle}>{friends.length === 0 && !search.trim() ? 'No connected friends yet' : 'No friends found'}</Text>
               <Text style={styles.emptyCopy}>
-                Search for a connected friend, or invite one of your contacts if they have not joined yet.
+                {friends.length === 0 && !search.trim()
+                  ? 'You can sync contacts, invite someone, or continue solo.'
+                  : 'Search for a connected friend, or invite one of your contacts if they have not joined yet.'}
               </Text>
               {search.trim().includes('@') ? (
                 <Pressable onPress={connectByEmail} style={styles.connectButton}>
@@ -365,13 +371,11 @@ export default function CreateGroupScreen({ navigation }: Props) {
         </View>
       </ScrollView>
 
-      {selectedIds.length > 0 ? (
-        <View style={[styles.footer, { bottom: Math.max(insets.bottom, 12) }]}>
-          <Pressable onPress={handleContinue} style={styles.ctaButton}>
-            <Text style={styles.ctaText}>Create Group ({selectedIds.length + 1} members)</Text>
-          </Pressable>
-        </View>
-      ) : null}
+      <View style={[styles.footer, { bottom: Math.max(insets.bottom, 12) }]}>
+        <Pressable onPress={handleContinue} style={styles.ctaButton}>
+          <Text style={styles.ctaText}>{footerLabel}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }

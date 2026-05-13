@@ -110,7 +110,13 @@ func getOrCreateAuthenticatedUserID(c *gin.Context) (int, bool) {
 			FROM users
 			WHERE is_deleted = FALSE
 			  AND COALESCE(phone, '') <> ''
-			  AND phone = $1
+			  AND (
+					CASE
+						WHEN LENGTH(REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')) = 10
+							THEN '1' || REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')
+						ELSE REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')
+					END
+			  ) = $1
 			ORDER BY id ASC
 			LIMIT 1
 		`, normalizedPhone).Scan(&userID)
