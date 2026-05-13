@@ -3,8 +3,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 
 import { colors } from '../theme/colors';
+import { radius, shadows } from '../theme/spacing';
 
 const tabs = [
   { name: 'Home', icon: 'home-outline' },
@@ -70,6 +72,7 @@ export default function AppFooter() {
   }, [navigationState]);
 
   const goToTab = (tabName: TabName) => {
+    Haptics.selectionAsync().catch(() => undefined);
     navigation.navigate('MainTabs', {
       screen: tabName,
     });
@@ -80,44 +83,85 @@ export default function AppFooter() {
       style={[
         styles.footer,
         {
-          height: 68 + Math.max(insets.bottom, 12),
-          paddingBottom: Math.max(insets.bottom, 12),
+          marginBottom: Math.max(insets.bottom, 10),
         },
       ]}
     >
-      {tabs.map((tab) => {
-        const selected = activeTab === tab.name;
+      <View style={styles.footerRow}>
+        {tabs.map((tab) => {
+          const selected = activeTab === tab.name;
 
-        return (
-          <Pressable key={tab.name} style={styles.tab} onPress={() => goToTab(tab.name)}>
-            <Ionicons name={tab.icon} size={26} color={selected ? colors.accent : colors.tabInactive} />
-            <Text style={[styles.label, selected && styles.labelSelected]}>{tab.name}</Text>
-          </Pressable>
-        );
-      })}
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tab.name}
+              key={tab.name}
+              style={[styles.tab, selected && styles.tabSelected]}
+              onPress={() => goToTab(tab.name)}
+            >
+              <View style={styles.tabStack}>
+                <View style={[styles.iconWrap, selected && styles.iconWrapSelected]}>
+                  <Ionicons name={tab.icon} size={20} color={selected ? colors.white : colors.tabInactive} />
+                </View>
+                <Text style={[styles.label, selected && styles.labelSelected]}>{tab.name}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   footer: {
+    marginHorizontal: 24,
+    height: 72,
+    paddingHorizontal: 8,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.floating,
+  },
+  footerRow: {
+    flex: 1,
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
+    borderRadius: radius.lg,
+    height: 56,
+  },
+  tabSelected: {
+    backgroundColor: '#F5F8FF',
+  },
+  tabStack: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  iconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconWrapSelected: {
+    backgroundColor: colors.accent,
   },
   label: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '600',
     color: colors.tabInactive,
+    lineHeight: 12,
+    marginTop: 1,
   },
   labelSelected: {
     color: colors.accent,

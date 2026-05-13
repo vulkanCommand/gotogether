@@ -18,9 +18,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import AppFooter from '../components/AppFooter';
+import ReportModal from '../components/ReportModal';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
+import { CACHE_TTLS, cacheKeys, invalidateTripCaches, isCacheFresh, readCachedValue, writeCachedValue } from '../services/resourceCache';
 import { ItineraryDay, ItineraryEvent, isCompletedEvent, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -33,6 +35,7 @@ import {
   apiRequest,
 } from '../config/api';
 import { formatTripDate, formatTripRange } from '../utils/tripFlow';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Itinerary'>;
 
@@ -205,6 +208,42 @@ const getDayDateKey = (day: ItineraryDay, tripStart?: string) => {
   return parsed ? formatLocalDateKey(parsed) : null;
 };
 
+const parseEventTimeSortValue = (value?: string) => {
+  const label = value?.trim() ?? '';
+  const match = label.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const meridiem = match[3].toUpperCase();
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes < 0 || minutes > 59 || hours < 1 || hours > 12) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  if (meridiem === 'AM' && hours === 12) {
+    hours = 0;
+  } else if (meridiem === 'PM' && hours < 12) {
+    hours += 12;
+  }
+
+  return hours * 60 + minutes;
+};
+
+const sortEventsByTime = (events: ItineraryEvent[] = []) =>
+  [...events].sort((first, second) => {
+    const firstMinutes = parseEventTimeSortValue(first.time);
+    const secondMinutes = parseEventTimeSortValue(second.time);
+
+    if (firstMinutes !== secondMinutes) {
+      return firstMinutes - secondMinutes;
+    }
+
+    return first.title.localeCompare(second.title);
+  });
+
 const sortDaysByDate = (days: ItineraryDay[] = [], tripStart?: string) => {
   const sortedDays = [...days].sort((first, second) => {
     const firstDate = parseDayDateLabel(first.dateLabel, tripStart);
@@ -224,7 +263,7 @@ const sortDaysByDate = (days: ItineraryDay[] = [], tripStart?: string) => {
 
   return sortedDays.map((day) => ({
     ...day,
-    events: Array.isArray(day.events) ? day.events : [],
+    events: sortEventsByTime(Array.isArray(day.events) ? day.events : []),
   }));
 };
 
@@ -296,7 +335,9 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [locationResults, setLocationResults] = useState<ApiPlaceResult[]>([]);
   const [searchingLocations, setSearchingLocations] = useState(false);
+  const [reportEvent, setReportEvent] = useState<ItineraryEvent | null>(null);
   const hasFetchedRef = useRef(false);
+  const lastFetchedRef = useRef(0);
 
   const canManageItinerary = Boolean(
     currentTrip &&
@@ -306,13 +347,33 @@ export default function ItineraryScreen({ navigation }: Props) {
         currentTrip.created_by === Number(user?.id))
   );
 
-  const fetchItinerary = useCallback(async () => {
+  const fetchItinerary = useCallback(async (force = false) => {
     if (!currentTrip?.id) {
       return;
     }
 
+    const cacheKey = cacheKeys.itinerary(currentTrip.id);
+    const cached = await readCachedValue<ItineraryDay[]>(cacheKey);
+
+    if (cached && !hasFetchedRef.current) {
+      const cachedDays =
+        Array.isArray(cached.value) && cached.value.length > 0
+          ? sortDaysByDate(cached.value, currentTrip.start_date)
+          : buildFallbackDays(currentTrip.start_date, currentTrip.end_date);
+      setItineraryDays(cachedDays);
+      hasFetchedRef.current = true;
+      lastFetchedRef.current = cached.updatedAt;
+      setLoading(false);
+    }
+
+    if (!force && cached && isCacheFresh(cached.updatedAt, CACHE_TTLS.itinerary)) {
+      return;
+    }
+
     try {
-      setLoading(true);
+      if (!hasFetchedRef.current) {
+        setLoading(true);
+      }
       const data = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${currentTrip.id}/itinerary`);
       let days = Array.isArray(data.days) && data.days.length > 0 ? sortDaysByDate(data.days, currentTrip.start_date) : [];
 
@@ -321,7 +382,9 @@ export default function ItineraryScreen({ navigation }: Props) {
       }
 
       setItineraryDays(days);
+      await writeCachedValue(cacheKey, days);
       hasFetchedRef.current = true;
+      lastFetchedRef.current = Date.now();
     } catch (error) {
       console.log('Fetch itinerary failed', error);
       if (!hasFetchedRef.current) {
@@ -339,7 +402,8 @@ export default function ItineraryScreen({ navigation }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      fetchItinerary();
+      const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.itinerary;
+      fetchItinerary(!hasFetchedRef.current ? false : stale);
     }, [fetchItinerary])
   );
 
@@ -459,8 +523,15 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const saveEvent = async () => {
-    if (!currentTrip?.id || !selectedDay || !eventTitle.trim() || !time.trim()) {
+    const titleValidation = validateUserText(eventTitle, { required: true, maxLength: 100 });
+    const notesValidation = validateUserText(notes, { maxLength: 500 });
+
+    if (!currentTrip?.id || !selectedDay || titleValidation.reason === 'required' || !time.trim()) {
       Alert.alert('Missing details', 'Add at least an event title and time.');
+      return;
+    }
+    if (!titleValidation.ok || !notesValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
       return;
     }
 
@@ -481,27 +552,28 @@ export default function ItineraryScreen({ navigation }: Props) {
 
       if (editingEventId) {
         await updateItineraryEvent(currentTrip.id, editingEventId, {
-          title: eventTitle.trim(),
+          title: titleValidation.value,
           time: time.trim(),
           location: location.trim() || 'Location TBD',
           locationIsMapped,
-          notes: notes.trim(),
+          notes: notesValidation.value,
           attendees: [],
         });
       } else {
         await createItineraryEvent(currentTrip.id, targetDay.id, {
-          title: eventTitle.trim(),
+          title: titleValidation.value,
           time: time.trim(),
           location: location.trim() || 'Location TBD',
           locationIsMapped,
-          notes: notes.trim(),
+          notes: notesValidation.value,
           attendees: [],
         });
       }
 
+      await invalidateTripCaches(currentTrip.id);
       setShowEventModal(false);
       resetEventForm();
-      await fetchItinerary();
+      await fetchItinerary(true);
     } catch (error: any) {
       Alert.alert('Save failed', error?.message || 'Could not save the event right now.');
     } finally {
@@ -523,7 +595,8 @@ export default function ItineraryScreen({ navigation }: Props) {
           try {
             setSaving(true);
             await deleteItineraryEvent(currentTrip.id, event.id);
-            await fetchItinerary();
+            await invalidateTripCaches(currentTrip.id);
+            await fetchItinerary(true);
           } catch (error: any) {
             Alert.alert('Delete failed', error?.message || 'Could not delete the event right now.');
           } finally {
@@ -535,23 +608,16 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const openEventActions = (event: ItineraryEvent) => {
-    if (!canManageItinerary) {
-      return;
-    }
-
-    if (isCompletedEvent(event)) {
-      Alert.alert('Event completed', 'Completed events are locked and can no longer be edited or deleted.');
-      return;
-    }
-
     const actionButtons: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [
-      { text: 'Edit', onPress: () => openEditEvent(event) },
+      { text: 'Report', style: 'destructive', onPress: () => setReportEvent(event) },
     ];
 
-    actionButtons.push(
-      { text: 'Delete', style: 'destructive', onPress: () => deleteEventAction(event) },
-      { text: 'Cancel', style: 'cancel' }
-    );
+    if (canManageItinerary && !isCompletedEvent(event)) {
+      actionButtons.unshift({ text: 'Edit', onPress: () => openEditEvent(event) });
+      actionButtons.push({ text: 'Delete', style: 'destructive', onPress: () => deleteEventAction(event) });
+    }
+
+    actionButtons.push({ text: 'Cancel', style: 'cancel' });
 
     Alert.alert(event.title, 'Choose an action for this event.', actionButtons);
   };
@@ -577,6 +643,8 @@ export default function ItineraryScreen({ navigation }: Props) {
         ? mergeCompletedEventIntoDays(itineraryDays, response.days, event.id)
         : mergeCompletedEventIntoDays(itineraryDays, itineraryDays, event.id);
       setItineraryDays(completedDays);
+      await writeCachedValue(cacheKeys.itinerary(currentTrip.id), completedDays);
+      await invalidateTripCaches(currentTrip.id);
     } catch (error: any) {
       updateEventInDay(owningDay.id, event.id, { status: previousStatus, isCompleted: previousIsCompleted });
       Alert.alert('Update failed', error?.message || 'Could not update the event right now.');
@@ -680,11 +748,9 @@ export default function ItineraryScreen({ navigation }: Props) {
                         </View>
                       </View>
 
-                      {canManageItinerary && !done ? (
-                        <Pressable style={styles.eventMenuButton} onPress={() => openEventActions(event)}>
-                          <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
-                        </Pressable>
-                      ) : null}
+                      <Pressable style={styles.eventMenuButton} onPress={() => openEventActions(event)}>
+                        <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
+                      </Pressable>
                     </View>
                     <Text style={[styles.eventLocation, done && styles.eventMetaDone]}>
                       <Ionicons name="location-outline" size={12} color={colors.textMuted} /> {event.location}
@@ -850,6 +916,14 @@ export default function ItineraryScreen({ navigation }: Props) {
         </Pressable>
       </Modal>
 
+      <ReportModal
+        visible={Boolean(reportEvent)}
+        onClose={() => setReportEvent(null)}
+        contentType="event"
+        contentId={reportEvent?.id}
+        subjectLabel={reportEvent?.title || 'event'}
+      />
+
       <AppFooter />
     </View>
   );
@@ -863,7 +937,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 36,
+    paddingBottom: footerScrollPadding,
   },
   header: {
     flexDirection: 'row',
@@ -888,7 +962,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   subtitle: {
@@ -906,7 +980,7 @@ const styles = StyleSheet.create({
   },
   dayTabs: {
     gap: spacing.sm,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.md,
   },
   dayTab: {
     borderRadius: 16,
@@ -914,7 +988,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 48,
+    justifyContent: 'center',
     minWidth: 98,
   },
   dayTabSelected: {
@@ -924,7 +999,7 @@ const styles = StyleSheet.create({
   dayTabTitle: {
     color: colors.textPrimary,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   dayTabMeta: {
     marginTop: 2,
@@ -955,7 +1030,7 @@ const styles = StyleSheet.create({
   addDayText: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   loadingBox: {
     marginBottom: spacing.md,
@@ -1003,14 +1078,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   eventCardDone: {
-    backgroundColor: '#F3F4F6',
-    borderColor: '#D1D5DB',
-    opacity: 0.88,
+    backgroundColor: '#F7F8FB',
+    borderColor: '#D7DEE9',
   },
   eventTime: {
     color: colors.accent,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   eventTimeDone: {
     color: colors.textMuted,
@@ -1043,8 +1117,8 @@ const styles = StyleSheet.create({
   },
   eventTitle: {
     color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '600',
   },
   eventTitleDone: {
     color: colors.textSecondary,
@@ -1059,17 +1133,17 @@ const styles = StyleSheet.create({
   completedTagText: {
     color: '#207245',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   eventLocation: {
     marginTop: 6,
     color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 14,
   },
   eventNotes: {
     marginTop: 6,
     color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 14,
     lineHeight: 18,
   },
   eventMetaDone: {
@@ -1092,7 +1166,7 @@ const styles = StyleSheet.create({
   eventActionText: {
     color: colors.textPrimary,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   eventDeleteChip: {
     borderColor: '#F3C9C4',
@@ -1101,19 +1175,19 @@ const styles = StyleSheet.create({
   eventDeleteText: {
     color: colors.danger,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   emptyState: {
     borderRadius: 18,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 20,
+    padding: 16,
   },
   emptyTitle: {
     color: colors.textPrimary,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   emptyCopy: {
     marginTop: 8,
@@ -1134,7 +1208,7 @@ const styles = StyleSheet.create({
   emptyAddButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modalBackdrop: {
     flex: 1,
@@ -1162,7 +1236,7 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
     marginBottom: spacing.md,
   },
@@ -1206,7 +1280,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: colors.textSecondary,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   timeEditorRow: {
     width: '100%',
@@ -1239,12 +1313,12 @@ const styles = StyleSheet.create({
   timeEditorValue: {
     color: colors.textPrimary,
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   timeEditorSeparator: {
     color: colors.textPrimary,
     fontSize: 24,
-    fontWeight: '800',
+    fontWeight: '600',
     marginTop: 6,
   },
   meridiemButton: {
@@ -1265,7 +1339,7 @@ const styles = StyleSheet.create({
   meridiemButtonText: {
     color: colors.textSecondary,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   meridiemButtonTextSelected: {
     color: colors.accent,
@@ -1280,7 +1354,7 @@ const styles = StyleSheet.create({
   timeDoneButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   locationStatusRow: {
     flexDirection: 'row',
@@ -1309,7 +1383,7 @@ const styles = StyleSheet.create({
   locationOptionTitle: {
     color: colors.textPrimary,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   locationOptionSubtitle: {
     marginTop: 4,
@@ -1330,15 +1404,15 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: spacing.md,
-    borderRadius: 20,
+    borderRadius: 18,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
+    minHeight: 50,
   },
   saveButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

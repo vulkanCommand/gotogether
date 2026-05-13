@@ -22,8 +22,10 @@ type UpdateProfileRequest struct {
 }
 
 type PushTokenRequest struct {
-	Token    string `json:"token"`
-	Platform string `json:"platform"`
+	Token         string `json:"token"`
+	ExpoPushToken string `json:"expo_push_token"`
+	Platform      string `json:"platform"`
+	DeviceID      string `json:"device_id"`
 }
 
 type ContactSyncRequest struct {

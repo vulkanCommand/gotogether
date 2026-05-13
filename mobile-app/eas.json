@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 18.6.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
@@ -12,7 +12,17 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": false,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
+    "testflight": {
+      "autoIncrement": false,
+      "distribution": "store",
+      "ios": {
+        "resourceClass": "m-medium"
+      }
     }
   },
   "submit": {

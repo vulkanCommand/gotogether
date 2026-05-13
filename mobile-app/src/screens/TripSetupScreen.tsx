@@ -220,7 +220,7 @@ export default function TripSetupScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   cardMeta: {
@@ -250,13 +250,13 @@ const styles = StyleSheet.create({
   },
   dayText: {
     color: colors.textPrimary,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   dayMeta: {
     marginTop: 2,
     color: colors.textSecondary,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   dayTextSelected: {
     color: '#FFFFFF',
@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
   },
   memberName: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   memberVoteCopy: {
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
   },
   youTag: {
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '700',
     color: colors.accentStrong,
     textTransform: 'uppercase',
     letterSpacing: 0.3,

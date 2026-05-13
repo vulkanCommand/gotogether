@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -104,8 +105,10 @@ func SaveTripItinerary(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary updated", "You updated the trip itinerary.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary updated", "The trip itinerary was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You updated the itinerary", "The itinerary was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated the itinerary", actorName+" updated the itinerary in "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"message": "itinerary saved"})
 }
 
@@ -161,8 +164,10 @@ func CreateItineraryDay(c *gin.Context) {
 		Status:    "upcoming",
 		Events:    []models.ItineraryEventPayload{},
 	}})
-	createUserNotification(userID, tripID, "Itinerary day added", title+" was added to the trip plan.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary day added", title+" was added to the trip plan.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You added "+title, title+" was added to "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" added an itinerary day", actorName+" added "+title+" to "+tripName, "itinerary", false)
 }
 
 func UpdateItineraryDay(c *gin.Context) {
@@ -202,8 +207,10 @@ func UpdateItineraryDay(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary day updated", title+" was updated.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary day updated", title+" was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You updated "+title, title+" was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated "+title, actorName+" updated "+title+" in "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -252,8 +259,10 @@ func DeleteItineraryDay(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary day deleted", "You deleted a day from the itinerary.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary day deleted", "The trip lead deleted a day from the itinerary.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You deleted an itinerary day", "A day was removed from "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" deleted an itinerary day", actorName+" removed a day from "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
@@ -288,8 +297,11 @@ func CreateItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "New itinerary event", event.Title+" was added to the trip plan.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "New itinerary event", event.Title+" was added to the trip plan.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	eventTitle := strings.TrimSpace(event.Title)
+	createUserNotification(userID, tripID, "You added "+eventTitle, eventTitle+" was added to "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" added an event", actorName+" added "+eventTitle+" to "+tripName, "itinerary", false)
 	c.JSON(http.StatusCreated, gin.H{"event": event})
 }
 
@@ -396,8 +408,10 @@ func ReorderItineraryDayEvents(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary reordered", "You updated the order of events for the day.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary reordered", "The order of itinerary events was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You reordered the itinerary", "The itinerary order was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" reordered the itinerary", actorName+" updated the itinerary order in "+tripName, "itinerary", false)
 
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
@@ -436,8 +450,16 @@ func UpdateItineraryEvent(c *gin.Context) {
 	title := strings.TrimSpace(req.Title)
 	timeLabel := strings.TrimSpace(req.Time)
 	location := strings.TrimSpace(req.Location)
-	if title == "" || timeLabel == "" {
+	titleValidation := validateUserText(title, textValidationOptions{Required: true, MaxLength: 100})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || timeLabel == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "event title and time are required"})
+		return
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 	if location == "" {
@@ -448,13 +470,15 @@ func UpdateItineraryEvent(c *gin.Context) {
 		UPDATE itinerary_events
 		SET title = $1, time_label = $2, location = $3, location_is_mapped = $4, notes = $5, attendee_summary = $6
 		WHERE id = $7
-	`, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), strings.Join(req.Attendees, "||"), eventID); err != nil {
+	`, title, timeLabel, location, req.LocationIsMapped, req.Notes, strings.Join(req.Attendees, "||"), eventID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update event", "details": err.Error()})
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary event updated", title+" was updated.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary event updated", title+" was updated.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You updated "+title, title+" was updated in "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated "+title, actorName+" updated "+title+" in "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -503,8 +527,10 @@ func DeleteItineraryEvent(c *gin.Context) {
 		return
 	}
 
-	createUserNotification(userID, tripID, "Itinerary event deleted", "You deleted an itinerary event.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Itinerary event deleted", "The trip lead deleted an itinerary event.", "itinerary", false)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, "You deleted an event", "An event was removed from "+tripName, "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" deleted an event", actorName+" removed an event from "+tripName, "itinerary", false)
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
@@ -570,8 +596,11 @@ func CompleteItineraryEvent(c *gin.Context) {
 	if strings.TrimSpace(eventTitle) == "" {
 		eventTitle = "an itinerary event"
 	}
-	createUserNotification(userID, tripID, "Event completed", "You marked "+strings.TrimSpace(eventTitle)+" complete.", "itinerary", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Event completed", strings.TrimSpace(eventTitle)+" was marked complete.", "alert", false)
+	eventTitle = strings.TrimSpace(eventTitle)
+	actorName := loadActorDisplayName(userID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(userID, tripID, eventTitle+" completed", "You marked "+eventTitle+" complete", "itinerary", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" completed an event", actorName+" marked "+eventTitle+" complete in "+tripName, "alert", false)
 
 	days, err := loadTripItinerary(tripID)
 	if err != nil {
@@ -697,7 +726,13 @@ func finalizeEventIfConfirmed(tripID int, eventID int, actorUserID int) error {
 
 	var eventTitle string
 	_ = db.DB.QueryRow(`SELECT title FROM itinerary_events WHERE id = $1`, eventID).Scan(&eventTitle)
-	createTripNotifications(tripID, actorUserID, "Event completed", strings.TrimSpace(eventTitle)+" is complete after crew confirmation.", "alert", false)
+	eventTitle = strings.TrimSpace(eventTitle)
+	if eventTitle == "" {
+		eventTitle = "an itinerary event"
+	}
+	actorName := loadActorDisplayName(actorUserID)
+	tripName := loadTripDisplayName(tripID)
+	createTripNotifications(tripID, actorUserID, actorName+" completed an event", actorName+" marked "+eventTitle+" complete in "+tripName, "alert", false)
 	return nil
 }
 
@@ -865,18 +900,58 @@ func loadTripItinerary(tripID int) ([]models.ItineraryDayPayload, error) {
 	}
 
 	for index := range days {
+		sort.SliceStable(days[index].Events, func(first, second int) bool {
+			firstMinutes := parseItineraryTimeSortValue(days[index].Events[first].Time)
+			secondMinutes := parseItineraryTimeSortValue(days[index].Events[second].Time)
+			if firstMinutes != secondMinutes {
+				return firstMinutes < secondMinutes
+			}
+			return days[index].Events[first].Title < days[index].Events[second].Title
+		})
 		days[index].Status = dayCompletionStatus(days[index])
 	}
 
 	return days, nil
 }
 
+func parseItineraryTimeSortValue(value string) int {
+	label := strings.TrimSpace(strings.ToUpper(value))
+	var hours, minutes int
+	var meridiem string
+	if _, err := fmt.Sscanf(label, "%d:%d %2s", &hours, &minutes, &meridiem); err != nil {
+		return int(^uint(0) >> 1)
+	}
+
+	if minutes < 0 || minutes > 59 || hours < 1 || hours > 12 {
+		return int(^uint(0) >> 1)
+	}
+
+	if meridiem == "AM" && hours == 12 {
+		hours = 0
+	} else if meridiem == "PM" && hours < 12 {
+		hours += 12
+	}
+
+	if meridiem != "AM" && meridiem != "PM" {
+		return int(^uint(0) >> 1)
+	}
+
+	return hours*60 + minutes
+}
+
 func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayload) (models.ItineraryEventPayload, error) {
 	title := strings.TrimSpace(req.Title)
 	timeLabel := strings.TrimSpace(req.Time)
 	location := strings.TrimSpace(req.Location)
-	if title == "" || timeLabel == "" {
+	titleValidation := validateUserText(title, textValidationOptions{Required: true, MaxLength: 100})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || timeLabel == "" {
 		return models.ItineraryEventPayload{}, fmt.Errorf("event title and time are required")
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		return models.ItineraryEventPayload{}, fmt.Errorf(friendlyTextValidationMessage)
 	}
 	if location == "" {
 		location = "Location TBD"
@@ -919,7 +994,7 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 		INSERT INTO itinerary_events (itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, is_completed, attendee_summary, event_order)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id
-	`, dayID, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), status, isCompleted, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
+	`, dayID, title, timeLabel, location, req.LocationIsMapped, req.Notes, status, isCompleted, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
 	if err != nil {
 		return models.ItineraryEventPayload{}, err
 	}
@@ -931,7 +1006,7 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 		Time:             timeLabel,
 		Location:         location,
 		LocationIsMapped: req.LocationIsMapped,
-		Notes:            strings.TrimSpace(req.Notes),
+		Notes:            req.Notes,
 		Attendees:        req.Attendees,
 		Status:           status,
 		IsCompleted:      isCompleted,

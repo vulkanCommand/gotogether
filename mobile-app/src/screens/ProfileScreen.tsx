@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -7,20 +7,27 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import GTCard from '../components/GTCard';
+import GTSectionHeader from '../components/GTSectionHeader';
 import TextField from '../components/TextField';
 import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
 import {
   deleteMyProfileImage,
+  fetchExpenseGroups,
   fetchTrips,
+  ApiTrip,
   profileImageFileUrl,
   updateMyProfile,
   updateMyProfileImage,
 } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { useFriendStore } from '../store/friendStore';
+import { calculateOverallExpenseSummary, formatMoney, getBalanceDisplay } from '../utils/expenseCalculations';
+import { cacheKeys, readCachedValue, writeCachedValue } from '../services/resourceCache';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Profile'>,
@@ -39,8 +46,11 @@ export default function ProfileScreen({ navigation }: Props) {
   const [name, setName] = useState(user?.name ?? '');
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [totalTripsCount, setTotalTripsCount] = useState<number | null>(null);
+  const [expenseSummaryLabel, setExpenseSummaryLabel] = useState('No expense activity yet');
   const [saving, setSaving] = useState(false);
   const [avatarVersion, setAvatarVersion] = useState(() => Date.now());
+  const [photoActionsVisible, setPhotoActionsVisible] = useState(false);
+  const [photoPreviewVisible, setPhotoPreviewVisible] = useState(false);
 
   useEffect(() => {
     setName(user?.name ?? '');
@@ -50,17 +60,38 @@ export default function ProfileScreen({ navigation }: Props) {
   useEffect(() => {
     const loadTripCount = async () => {
       try {
+        const cachedTrips = await readCachedValue<ApiTrip[]>(cacheKeys.trips);
+
+        if (cachedTrips?.value) {
+          setTotalTripsCount(cachedTrips.value.length);
+        }
+
         const response = await fetchTrips();
         const trips = Array.isArray(response.trips) ? response.trips : [];
+        await writeCachedValue(cacheKeys.trips, trips);
         setTotalTripsCount(trips.length);
+
+        if (trips.length > 0 && user?.id) {
+          const groups = (
+            await Promise.all(trips.map(async (trip) => (await fetchExpenseGroups(trip.id)).groups ?? []))
+          ).flat();
+          const summary = calculateOverallExpenseSummary(groups, [], user.id);
+          const display = getBalanceDisplay(summary.netBalance);
+          setExpenseSummaryLabel(
+            display.isSettled ? 'Settled up across your trips' : `${display.label} ${formatMoney(display.amount)}`
+          );
+        } else {
+          setExpenseSummaryLabel('No expense activity yet');
+        }
       } catch (error) {
         console.log('Profile trip count load failed', error);
         setTotalTripsCount(0);
+        setExpenseSummaryLabel('No expense activity yet');
       }
     };
 
     void loadTripCount();
-  }, []);
+  }, [user?.id]);
 
   const displayName = user?.name?.trim() || user?.username?.trim() || 'Traveler';
   const displayPhone = user?.phone?.trim() || 'Phone not set';
@@ -76,8 +107,14 @@ export default function ProfileScreen({ navigation }: Props) {
       : null;
 
   const saveProfile = async () => {
-    if (!name.trim()) {
+    const nameValidation = validateUserText(name, { required: true, maxLength: 60 });
+
+    if (nameValidation.reason === 'required') {
       Alert.alert('Missing name', 'Please enter your name.');
+      return;
+    }
+    if (!nameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
       return;
     }
 
@@ -85,8 +122,8 @@ export default function ProfileScreen({ navigation }: Props) {
       setSaving(true);
 
       const response = await updateMyProfile({
-        name: name.trim(),
-        username: user?.username?.trim() || name.trim().replace(/\s+/g, '').toLowerCase(),
+        name: nameValidation.value,
+        username: user?.username?.trim() || nameValidation.value.replace(/\s+/g, '').toLowerCase(),
         phone: phone.trim(),
         home_city: user?.home_city ?? '',
         bio: user?.bio ?? '',
@@ -148,6 +185,36 @@ export default function ProfileScreen({ navigation }: Props) {
     }
   };
 
+  const openPhotoActions = () => {
+    setPhotoActionsVisible(true);
+  };
+
+  const openPhotoPreview = () => {
+    if (!avatarSource) {
+      return;
+    }
+
+    setPhotoActionsVisible(false);
+    setPhotoPreviewVisible(true);
+  };
+
+  const handleChangePhoto = () => {
+    setPhotoActionsVisible(false);
+    void pickProfileImage();
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoActionsVisible(false);
+    Alert.alert('Remove photo', 'Remove your current profile photo?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => void removeProfileImage(),
+      },
+    ]);
+  };
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -168,9 +235,9 @@ export default function ProfileScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <View style={styles.heroCard}>
+        <GTCard style={styles.heroCard}>
           <View style={styles.heroHeader}>
-            <Pressable style={styles.avatarWrap} onPress={pickProfileImage}>
+            <Pressable style={styles.avatarWrap} onPress={openPhotoActions}>
               {avatarSource ? (
                 <Image source={avatarSource} style={styles.avatarImage} />
               ) : (
@@ -198,46 +265,23 @@ export default function ProfileScreen({ navigation }: Props) {
               </View>
             </View>
           </View>
+        </GTCard>
 
-          <View style={styles.quickActions}>
-            <Pressable style={styles.photoButton} onPress={pickProfileImage}>
-              <Ionicons name="image-outline" size={17} color={colors.accentStrong} />
-              <Text style={styles.photoButtonText}>{avatarSource ? 'Change photo' : 'Upload photo'}</Text>
-            </Pressable>
+        <GTCard style={styles.expenseSummaryCard}>
+          <Text style={styles.cardTitle}>Money snapshot</Text>
+          <Text style={styles.expenseSummaryText}>{expenseSummaryLabel}</Text>
+          <Pressable style={styles.expenseSummaryLink} onPress={() => navigation.navigate('MainTabs', { screen: 'Expenses' })}>
+            <Text style={styles.expenseSummaryLinkText}>Open Expenses</Text>
+          </Pressable>
+        </GTCard>
 
-            {avatarSource ? (
-              <Pressable style={styles.removeButton} onPress={removeProfileImage}>
-                <Ionicons name="trash-outline" size={17} color={colors.danger} />
-                <Text style={styles.removeButtonText}>Remove</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryPill}>
-            <Ionicons name="people-outline" size={16} color={colors.accentStrong} />
-            <Text style={styles.summaryPillText}>{connectedFriendsLabel}</Text>
-          </View>
-
-          <View style={styles.summaryPill}>
-            <Ionicons name="airplane-outline" size={16} color={colors.accentStrong} />
-            <Text style={styles.summaryPillText}>{totalTripsLabel}</Text>
-          </View>
-        </View>
-
-        <View style={styles.detailsCard}>
-          <View style={styles.detailHeader}>
-            <View>
-              <Text style={styles.cardTitle}>Details</Text>
-              <Text style={styles.cardSubtitle}>Only the essentials.</Text>
-            </View>
-
-            <Pressable style={styles.editButton} onPress={() => setEditing((value) => !value)}>
-              <Ionicons name={editing ? 'close-outline' : 'create-outline'} size={16} color={colors.accentStrong} />
-              <Text style={styles.editButtonText}>{editing ? 'Cancel' : 'Edit'}</Text>
-            </Pressable>
-          </View>
+        <GTCard style={styles.detailsCard}>
+          <GTSectionHeader
+            title="Details"
+            subtitle="Only the essentials."
+            actionLabel={editing ? 'Cancel' : 'Edit'}
+            onPressAction={() => setEditing((value) => !value)}
+          />
 
           {editing ? (
             <>
@@ -254,8 +298,48 @@ export default function ProfileScreen({ navigation }: Props) {
               <DetailRow icon="call-outline" label="Phone number" value={displayPhone} />
             </>
           )}
-        </View>
+        </GTCard>
       </ScrollView>
+
+      <Modal transparent visible={photoActionsVisible} animationType="fade" onRequestClose={() => setPhotoActionsVisible(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setPhotoActionsVisible(false)}>
+          <View style={styles.modalCenter}>
+            <Pressable style={styles.actionModalCard} onPress={() => undefined}>
+              {avatarSource ? (
+                <Pressable style={styles.actionRow} onPress={openPhotoPreview}>
+                  <Text style={styles.actionRowPrimaryText}>View profile photo</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable style={styles.actionRow} onPress={handleChangePhoto}>
+                <Text style={styles.actionRowPrimaryText}>Change photo</Text>
+              </Pressable>
+
+              {avatarSource ? (
+                <Pressable style={styles.actionRow} onPress={handleRemovePhoto}>
+                  <Text style={styles.actionRowDangerText}>Remove photo</Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable style={[styles.actionRow, styles.actionRowLast]} onPress={() => setPhotoActionsVisible(false)}>
+                <Text style={styles.actionRowCancelText}>Cancel</Text>
+              </Pressable>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal transparent visible={photoPreviewVisible} animationType="fade" onRequestClose={() => setPhotoPreviewVisible(false)}>
+        <View style={styles.previewBackdrop}>
+          <Pressable style={styles.previewCloseButton} onPress={() => setPhotoPreviewVisible(false)}>
+            <Ionicons name="close" size={22} color="#FFFFFF" />
+          </Pressable>
+
+          <View style={styles.previewContent}>
+            {avatarSource ? <Image source={avatarSource} style={styles.previewImage} resizeMode="contain" /> : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -282,7 +366,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 120,
+    paddingBottom: footerScrollPadding,
     gap: spacing.lg,
   },
   topRow: {
@@ -296,9 +380,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: colors.textPrimary,
-    fontSize: 34,
-    fontWeight: '900',
-    letterSpacing: -1,
+    fontSize: 30,
+    fontWeight: '700',
+    letterSpacing: -0.6,
   },
   headerSubtitle: {
     marginTop: 4,
@@ -325,15 +409,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   heroCard: {
-    borderRadius: 30,
+    borderRadius: radius.xl,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     padding: 18,
-    shadowColor: colors.shadowStrong,
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 12 },
   },
   heroHeader: {
     flexDirection: 'row',
@@ -358,7 +438,7 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: 34,
-    fontWeight: '900',
+    fontWeight: '700',
     color: colors.accentStrong,
   },
   cameraBadge: {
@@ -379,15 +459,15 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '700',
     color: colors.textPrimary,
     letterSpacing: -0.4,
   },
   phone: {
     marginTop: 5,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.textSecondary,
-    fontWeight: '600',
+    fontWeight: '400',
   },
   metricGrid: {
     flexDirection: 'row',
@@ -400,95 +480,44 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   metricValue: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   metricLabel: {
     marginTop: 2,
     color: colors.textSecondary,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  quickActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  photoButton: {
-    flex: 1,
-    borderRadius: radius.pill,
-    backgroundColor: colors.accentSoft,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  photoButtonText: {
-    color: colors.accentStrong,
-    fontWeight: '900',
-    fontSize: 14,
-  },
-  removeButton: {
-    borderRadius: radius.pill,
-    backgroundColor: '#FFF1F1',
-    borderWidth: 1,
-    borderColor: '#F8C7C7',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  removeButtonText: {
-    color: colors.danger,
-    fontWeight: '900',
-    fontSize: 14,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  summaryPill: {
-    flex: 1,
-    borderRadius: 22,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 13,
-    paddingVertical: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  summaryPillText: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
   detailsCard: {
-    borderRadius: 30,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
     padding: 18,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
+  },
+  expenseSummaryCard: {
+    minHeight: 92,
+    gap: 6,
+    justifyContent: 'space-between',
+  },
+  expenseSummaryText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '400',
+    lineHeight: 20,
+  },
+  expenseSummaryLink: {
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+  },
+  expenseSummaryLinkText: {
+    color: colors.accentStrong,
+    fontSize: 14,
+    fontWeight: '600',
   },
   detailHeader: {
     flexDirection: 'row',
@@ -498,10 +527,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   cardTitle: {
-    fontSize: 22,
-    fontWeight: '900',
+    fontSize: 17,
+    fontWeight: '600',
     color: colors.textPrimary,
-    letterSpacing: -0.4,
+    letterSpacing: -0.2,
   },
   cardSubtitle: {
     marginTop: 3,
@@ -520,7 +549,7 @@ const styles = StyleSheet.create({
   },
   editButtonText: {
     color: colors.accentStrong,
-    fontWeight: '900',
+    fontWeight: '600',
     fontSize: 13,
   },
   detailRow: {
@@ -544,7 +573,7 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '600',
     color: colors.textSecondary,
     marginBottom: 4,
     textTransform: 'uppercase',
@@ -552,7 +581,7 @@ const styles = StyleSheet.create({
   },
   detailValue: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
     lineHeight: 23,
   },
@@ -574,6 +603,78 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modalCenter: {
+    justifyContent: 'center',
+  },
+  actionModalCard: {
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  actionRow: {
+    minHeight: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEF2F7',
+  },
+  actionRowLast: {
+    borderBottomWidth: 0,
+  },
+  actionRowPrimaryText: {
+    color: colors.accentStrong,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionRowDangerText: {
+    color: colors.danger,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  actionRowCancelText: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 32,
+  },
+  previewCloseButton: {
+    position: 'absolute',
+    top: 54,
+    right: 24,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  previewContent: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewImage: {
+    width: '100%',
+    height: 360,
+    borderRadius: radius.xl,
   },
 });

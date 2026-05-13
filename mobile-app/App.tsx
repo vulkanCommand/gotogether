@@ -11,11 +11,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { colors } from './src/theme/colors';
 import { firebaseAuth } from './src/config/firebase';
 import { useAuthStore } from './src/store/authStore';
-import { registerPushToken, syncAuthenticatedUser } from './src/config/api';
-import {
-  addNotificationResponseListener,
-  registerForPushNotificationsAsync,
-} from './src/config/pushNotifications';
+import { syncAuthenticatedUser } from './src/config/api';
+import { attachNotificationNavigation, ensurePushRegistration } from './src/services/notifications';
 
 const navTheme = {
   ...DefaultTheme,
@@ -36,29 +33,45 @@ function AuthBootstrap() {
   const clearSession = useAuthStore((state) => state.clearSession);
   const setAuthChecked = useAuthStore((state) => state.setAuthChecked);
   const setUser = useAuthStore((state) => state.setUser);
+  const cachedUser = useAuthStore((state) => state.user);
 
   useEffect(() => {
     const unsubscribe = onIdTokenChanged(firebaseAuth, async (user) => {
-      try {
-        if (!user) {
-          clearSession();
-          return;
-        }
+      if (!user) {
+        clearSession();
+        setAuthChecked(true);
+        return;
+      }
 
+      try {
         const freshToken = await getIdToken(user);
         setSession(freshToken);
-        const response = await syncAuthenticatedUser();
-        setUser(response.user);
+        setAuthChecked(true);
+
+        syncAuthenticatedUser()
+          .then((response) => {
+            setUser(response.user);
+          })
+          .catch((error) => {
+            console.log('Profile sync failed', error);
+
+            if (!useAuthStore.getState().user && !cachedUser) {
+              clearSession();
+            }
+          });
       } catch (error) {
         console.log('Auth bootstrap failed', error);
-        clearSession();
-      } finally {
+
+        if (!useAuthStore.getState().user && !cachedUser) {
+          clearSession();
+        }
+
         setAuthChecked(true);
       }
     });
 
     return unsubscribe;
-  }, [clearSession, setAuthChecked, setSession, setUser]);
+  }, [cachedUser, clearSession, setAuthChecked, setSession, setUser]);
 
   return null;
 }
@@ -76,14 +89,10 @@ function PushBootstrap() {
 
     const setupPush = async () => {
       try {
-        const expoPushToken = await registerForPushNotificationsAsync();
-        if (!mounted || !expoPushToken) {
+        if (!mounted || !user?.id) {
           return;
         }
-        await registerPushToken({
-          token: expoPushToken,
-          platform: 'expo',
-        });
+        await ensurePushRegistration(user.id);
       } catch (error) {
         console.log('Push registration failed', error);
       }
@@ -91,17 +100,13 @@ function PushBootstrap() {
 
     setupPush();
 
-    const subscription = addNotificationResponseListener(() => {
-      if (navigationRef.isReady()) {
-        navigationRef.navigate('Notifications');
-      }
-    });
+    const subscription = attachNotificationNavigation(navigationRef);
 
     return () => {
       mounted = false;
       subscription.remove();
     };
-  }, [token, user]);
+  }, [token, user?.id]);
 
   return null;
 }

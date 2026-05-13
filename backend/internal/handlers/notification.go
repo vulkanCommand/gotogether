@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,11 +24,14 @@ func GetNotifications(c *gin.Context) {
 			COALESCE(trip_id, 0),
 			title,
 			body,
+			COALESCE(type, kind, 'activity'),
 			kind,
 			requires_action,
 			COALESCE(action_type, ''),
 			COALESCE(target_id, 0),
 			COALESCE(action_completed_at::text, ''),
+			COALESCE(read_at::text, ''),
+			COALESCE(data::text, 'null'),
 			created_at::text
 		FROM notifications
 		WHERE user_id = $1 AND cleared_at IS NULL
@@ -43,15 +47,106 @@ func GetNotifications(c *gin.Context) {
 	notifications := make([]models.NotificationResponse, 0)
 	for rows.Next() {
 		var item models.NotificationResponse
-		if err := rows.Scan(&item.ID, &item.TripID, &item.Title, &item.Body, &item.Kind, &item.RequiresAction, &item.ActionType, &item.TargetID, &item.ActionCompletedAt, &item.CreatedAt); err != nil {
+		var rawData []byte
+		if err := rows.Scan(&item.ID, &item.TripID, &item.Title, &item.Body, &item.Type, &item.Kind, &item.RequiresAction, &item.ActionType, &item.TargetID, &item.ActionCompletedAt, &item.ReadAt, &rawData, &item.CreatedAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read notifications", "details": err.Error()})
 			return
 		}
+		item.Data = rawData
 		enrichNotificationActionDetails(&item)
 		notifications = append(notifications, item)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"notifications": notifications})
+}
+
+func GetRecentActivity(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	rows, err := db.DB.Query(`
+		SELECT
+			id,
+			COALESCE(trip_id, 0),
+			title,
+			body,
+			COALESCE(type, kind, 'activity'),
+			kind,
+			requires_action,
+			COALESCE(action_type, ''),
+			COALESCE(target_id, 0),
+			COALESCE(action_completed_at::text, ''),
+			COALESCE(read_at::text, ''),
+			COALESCE(data::text, 'null'),
+			created_at::text
+		FROM notifications
+		WHERE user_id = $1
+		  AND cleared_at IS NULL
+		ORDER BY created_at DESC, id DESC
+		LIMIT 5
+	`, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch recent activity", "details": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	activities := make([]models.NotificationResponse, 0)
+	for rows.Next() {
+		var item models.NotificationResponse
+		var rawData []byte
+		if err := rows.Scan(&item.ID, &item.TripID, &item.Title, &item.Body, &item.Type, &item.Kind, &item.RequiresAction, &item.ActionType, &item.TargetID, &item.ActionCompletedAt, &item.ReadAt, &rawData, &item.CreatedAt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read recent activity", "details": err.Error()})
+			return
+		}
+		item.Data = rawData
+		enrichNotificationActionDetails(&item)
+		activities = append(activities, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"activities": activities})
+}
+
+func MarkNotificationRead(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	notificationID, err := strconv.Atoi(c.Param("notificationId"))
+	if err != nil || notificationID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid notification id"})
+		return
+	}
+
+	if err := markNotificationReadForUser(context.Background(), notificationID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to mark notification read", "details": err.Error()})
+		return
+	}
+
+	notification, err := loadNotificationByID(context.Background(), notificationID, userID)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"read": true})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"read": true, "notification": notification})
+}
+
+func MarkAllNotificationsRead(c *gin.Context) {
+	userID, ok := getOrCreateAuthenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	if err := markAllNotificationsReadForUser(context.Background(), userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to mark all notifications read", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"read": true})
 }
 
 func AcceptNotificationAction(c *gin.Context) {
@@ -246,43 +341,26 @@ func createTripActionNotifications(tripID int, actorUserID int, title string, bo
 }
 
 func createUserNotification(userID int, tripID int, title string, body string, kind string, requiresAction bool, actionType string, targetID int, actorUserID int) {
-	actionType = strings.TrimSpace(actionType)
-	if requiresAction && actionType != "" && targetID > 0 {
-		var existingID int
-		err := db.DB.QueryRow(`
-			SELECT id
-			FROM notifications
-			WHERE user_id = $1
-				AND trip_id = $2
-				AND action_type = $3
-				AND target_id = $4
-				AND requires_action = TRUE
-				AND action_completed_at IS NULL
-				AND cleared_at IS NULL
-			LIMIT 1
-		`, userID, tripID, actionType, targetID).Scan(&existingID)
-		if err == nil && existingID > 0 {
-			return
+	createLegacyNotification(userID, tripID, title, body, kind, requiresAction, actionType, targetID, actorUserID)
+}
+
+func loadActorDisplayName(actorUserID int) string {
+	actorName := "Someone"
+	if actorUser, err := loadUserByID(actorUserID); err == nil {
+		if strings.TrimSpace(actorUser.Name) != "" {
+			actorName = strings.TrimSpace(actorUser.Name)
+		} else if strings.TrimSpace(actorUser.Username) != "" {
+			actorName = strings.TrimSpace(actorUser.Username)
 		}
 	}
+	return actorName
+}
 
-	var notificationID int
-	err := db.DB.QueryRow(`
-		INSERT INTO notifications (
-			user_id, trip_id, title, body, kind, requires_action, action_type, target_id, actor_user_id
-		)
-		VALUES ($1, NULLIF($2, 0), $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, 0), NULLIF($9, 0))
-		RETURNING id
-	`, userID, tripID, strings.TrimSpace(title), strings.TrimSpace(body), strings.TrimSpace(kind), requiresAction, actionType, targetID, actorUserID).Scan(&notificationID)
-	if err != nil {
-		return
+func loadTripDisplayName(tripID int) string {
+	tripName := "your trip"
+	var loadedTripName string
+	if err := db.DB.QueryRow(`SELECT COALESCE(name, '') FROM trips WHERE id = $1`, tripID).Scan(&loadedTripName); err == nil && strings.TrimSpace(loadedTripName) != "" {
+		tripName = strings.TrimSpace(loadedTripName)
 	}
-
-	go sendPushNotificationToUser(userID, title, body, map[string]any{
-		"screen":         "Notifications",
-		"notificationId": notificationID,
-		"tripId":         tripID,
-		"kind":           strings.TrimSpace(kind),
-		"requiresAction": requiresAction,
-	})
+	return tripName
 }

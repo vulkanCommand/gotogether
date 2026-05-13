@@ -5,16 +5,15 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import AppFooter from '../components/AppFooter';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
-import { useFriendStore } from '../store/friendStore';
+import { Friend, useFriendStore } from '../store/friendStore';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { fetchFriends, sendSMSInvite, syncDeviceContacts } from '../config/api';
+import { blockUser, fetchFriends, getBlockedUsers, syncDeviceContacts } from '../config/api';
 import { collectDeviceContactLookupPayload, DeviceInviteContact } from '../utils/contacts';
-import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
+import { formatPhoneForDisplay, formatPhoneForFirebase, normalizePhoneForComparison } from '../utils/phone';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateGroup'>;
 
@@ -30,32 +29,86 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const [inviting, setInviting] = useState(false);
   const [syncingFriends, setSyncingFriends] = useState(false);
   const [deviceContacts, setDeviceContacts] = useState<DeviceInviteContact[]>([]);
+  const [restrictedUsers, setRestrictedUsers] = useState<Friend[]>([]);
 
-  const refreshFriends = useCallback(async () => {
+  const loadFriendsAndRestrictions = useCallback(async () => {
+    const [response, blockedResponse] = await Promise.all([fetchFriends(), getBlockedUsers()]);
+    setFriends(response.friends);
+    setRestrictedUsers(blockedResponse.restricted_users ?? blockedResponse.users ?? []);
+    return response.friends;
+  }, [setFriends]);
+
+  const syncContactsFromDevice = useCallback(async (showPermissionAlert = true) => {
     try {
       setSyncingFriends(true);
       const contacts = await collectDeviceContactLookupPayload();
       setDeviceContacts(contacts.contacts);
-      if (contacts.granted) {
-        await syncDeviceContacts({
-          emails: contacts.emails,
-          phones: contacts.phones,
-        });
+      console.log('Create group contact sync result', {
+        mode: showPermissionAlert ? 'manual' : 'auto',
+        granted: contacts.granted,
+        contacts: contacts.contacts.length,
+        emails: contacts.emails.length,
+        phones: contacts.phones.length,
+      });
+
+      if (!contacts.granted) {
+        if (showPermissionAlert) {
+          Alert.alert(
+            'Contacts permission not granted',
+            'You can still invite manually with a phone number, or enable Contacts in Settings when you want to sync friends.'
+          );
+        }
+        return;
       }
 
-      const response = await fetchFriends();
-      setFriends(response.friends);
+      const syncResponse = await syncDeviceContacts({
+        emails: contacts.emails,
+        phones: contacts.phones,
+      });
+      const updatedFriends = await loadFriendsAndRestrictions();
+      console.log('Create group friends count after sync', {
+        mode: showPermissionAlert ? 'manual' : 'auto',
+        syncReturnedFriends: syncResponse.friends.length,
+        fetchedFriends: updatedFriends.length,
+      });
     } catch (error) {
-      console.log('Auto friend sync failed', error);
+      console.log('Device contact sync failed', error);
     } finally {
       setSyncingFriends(false);
     }
-  }, [setFriends]);
+  }, [loadFriendsAndRestrictions]);
 
   useFocusEffect(
     useCallback(() => {
-      void refreshFriends();
-    }, [refreshFriends])
+      let active = true;
+      let autoSyncAttempted = false;
+
+      const bootstrapFriends = async () => {
+        try {
+          setSyncingFriends(true);
+          const updatedFriends = await loadFriendsAndRestrictions();
+          console.log('Create group friends count before sync', { friends: updatedFriends.length });
+
+          if (!active || autoSyncAttempted) {
+            return;
+          }
+          autoSyncAttempted = true;
+          await syncContactsFromDevice(false);
+        } catch (error) {
+          console.log('Friend refresh failed', error);
+        } finally {
+          if (active) {
+            setSyncingFriends(false);
+          }
+        }
+      };
+
+      void bootstrapFriends();
+
+      return () => {
+        active = false;
+      };
+    }, [loadFriendsAndRestrictions, syncContactsFromDevice])
   );
 
   const filteredFriends = useMemo(() => {
@@ -77,10 +130,22 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const inviteCandidates = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     const friendEmailSet = new Set(friends.map((friend) => friend.email?.trim().toLowerCase()).filter(Boolean));
-    const friendPhoneSet = new Set(friends.map((friend) => formatPhoneForFirebase(friend.phone)).filter(Boolean));
+    const friendPhoneSet = new Set(friends.map((friend) => normalizePhoneForComparison(friend.phone)).filter(Boolean));
+    const restrictedEmailSet = new Set(
+      restrictedUsers.map((restrictedUser) => restrictedUser.email?.trim().toLowerCase()).filter(Boolean)
+    );
+    const restrictedPhoneSet = new Set(
+      restrictedUsers.map((restrictedUser) => normalizePhoneForComparison(restrictedUser.phone)).filter(Boolean)
+    );
 
     return deviceContacts
       .filter((contact) => {
+        const matchesRestrictedUser =
+          contact.emails.some((email) => restrictedEmailSet.has(email)) ||
+          contact.phones.some((phone) => restrictedPhoneSet.has(phone));
+        if (matchesRestrictedUser) {
+          return false;
+        }
         const hasUnsyncedChannel =
           contact.emails.some((email) => !friendEmailSet.has(email)) ||
           contact.phones.some((phone) => !friendPhoneSet.has(phone));
@@ -100,11 +165,42 @@ export default function CreateGroupScreen({ navigation }: Props) {
         invitePhone: contact.phones.find((phone) => !friendPhoneSet.has(phone)) || '',
       }))
       .filter((contact) => Boolean(contact.invitePhone));
-  }, [deviceContacts, friends, search]);
+  }, [deviceContacts, friends, restrictedUsers, search]);
 
   const toggle = (id: number) => {
     setSelectedIds((current) =>
       current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+    );
+  };
+
+  const confirmBlockUser = (friendId: number, friendName: string) => {
+    Alert.alert(
+      'Block this user?',
+      'You won’t see each other in contact search or invite suggestions. Existing shared trip history will remain.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(friendId);
+              setFriends(friends.filter((friend) => friend.id !== friendId));
+              setRestrictedUsers((current) => {
+                if (current.some((item) => item.id === friendId)) {
+                  return current;
+                }
+                const blockedFriend = friends.find((friend) => friend.id === friendId);
+                return blockedFriend ? [...current, blockedFriend] : current;
+              });
+              setSelectedIds((current) => current.filter((id) => id !== friendId));
+              Alert.alert('User blocked', `${friendName} has been blocked.`);
+            } catch {
+              Alert.alert('Block failed', 'Could not block this user. Please try again.');
+            }
+          },
+        },
+      ]
     );
   };
 
@@ -167,6 +263,10 @@ export default function CreateGroupScreen({ navigation }: Props) {
     navigation.navigate('TripCreate');
   };
 
+  const footerLabel = selectedIds.length > 0
+    ? `Create Group (${selectedIds.length + 1} members)`
+    : 'Continue solo';
+
   return (
     <View style={styles.screen}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
@@ -209,12 +309,12 @@ export default function CreateGroupScreen({ navigation }: Props) {
             style={styles.searchInput}
           />
           {/* small refresh button to re-sync contacts and friends */}
-          <Pressable onPress={() => void refreshFriends()} style={styles.refreshButton} hitSlop={8}>
-            <Ionicons name="refresh" size={18} color={colors.textMuted} />
+          <Pressable onPress={() => void syncContactsFromDevice()} style={styles.refreshButton} hitSlop={8}>
+            <Ionicons name="people-outline" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
 
-        {syncingFriends ? <Text style={styles.syncingText}>Syncing contacts and friends...</Text> : null}
+        {syncingFriends ? <Text style={styles.syncingText}>Checking contacts and refreshing friends...</Text> : null}
 
         <View style={styles.list}>
           {filteredFriends.map((friend) => {
@@ -224,6 +324,7 @@ export default function CreateGroupScreen({ navigation }: Props) {
               <Pressable
                 key={friend.id}
                 onPress={() => toggle(friend.id)}
+                onLongPress={() => confirmBlockUser(friend.id, friend.name || friend.email || 'This user')}
                 style={[styles.friendRow, isSelected && styles.friendRowSelected]}
               >
                 <View style={styles.friendAvatar}>
@@ -281,9 +382,11 @@ export default function CreateGroupScreen({ navigation }: Props) {
 
           {filteredFriends.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No friends found</Text>
+              <Text style={styles.emptyTitle}>{friends.length === 0 && !search.trim() ? 'No connected friends yet' : 'No friends found'}</Text>
               <Text style={styles.emptyCopy}>
-                Search for a connected friend, or invite one of your contacts if they have not joined yet.
+                {friends.length === 0 && !search.trim()
+                  ? 'You can sync contacts, invite someone, or continue solo.'
+                  : 'Search for a connected friend, or invite one of your contacts if they have not joined yet.'}
               </Text>
               {search.trim().includes('@') ? (
                 <Pressable onPress={connectByEmail} style={styles.connectButton}>
@@ -302,14 +405,11 @@ export default function CreateGroupScreen({ navigation }: Props) {
         </View>
       </ScrollView>
 
-      {selectedIds.length > 0 ? (
-        <View style={[styles.footer, { bottom: 68 + Math.max(insets.bottom, 12) - 12 }]}>
-          <Pressable onPress={handleContinue} style={styles.ctaButton}>
-            <Text style={styles.ctaText}>Create Group ({selectedIds.length + 1} members)</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      <AppFooter />
+      <View style={[styles.footer, { bottom: Math.max(insets.bottom, 12) }]}>
+        <Pressable onPress={handleContinue} style={styles.ctaButton}>
+          <Text style={styles.ctaText}>{footerLabel}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -322,7 +422,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 56,
-    paddingBottom: 220,
+    paddingBottom: 132,
   },
   header: {
     flexDirection: 'row',
@@ -342,7 +442,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   selectedRow: {
@@ -370,7 +470,7 @@ const styles = StyleSheet.create({
   selectedAvatarText: {
     color: colors.accentStrong,
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   removeButton: {
     position: 'absolute',
@@ -452,7 +552,7 @@ const styles = StyleSheet.create({
   },
   friendAvatarText: {
     color: colors.accentStrong,
-    fontWeight: '800',
+    fontWeight: '600',
     fontSize: 14,
   },
   friendName: {
@@ -489,7 +589,7 @@ const styles = StyleSheet.create({
   inlineInviteButtonText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   checkCircle: {
     width: 20,
@@ -554,6 +654,6 @@ const styles = StyleSheet.create({
   ctaText: {
     color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

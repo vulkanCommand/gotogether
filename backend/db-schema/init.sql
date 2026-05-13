@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
     home_city TEXT,
     bio TEXT,
     profile_image_url TEXT,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -163,6 +165,7 @@ CREATE TABLE IF NOT EXISTS user_push_tokens (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expo_push_token TEXT NOT NULL UNIQUE,
     platform TEXT NOT NULL DEFAULT 'expo',
+    device_id TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -185,11 +188,14 @@ CREATE TABLE IF NOT EXISTS notifications (
     trip_id INTEGER REFERENCES trips(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     body TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'activity',
     kind TEXT NOT NULL DEFAULT 'activity',
     requires_action BOOLEAN NOT NULL DEFAULT FALSE,
     action_type TEXT,
     target_id INTEGER,
     actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    data JSONB,
+    read_at TIMESTAMP,
     action_completed_at TIMESTAMP,
     cleared_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -210,4 +216,25 @@ CREATE TABLE IF NOT EXISTS trip_completion_confirmations (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (trip_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id SERIAL PRIMARY KEY,
+    reporter_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reported_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    content_type TEXT NOT NULL,
+    content_id TEXT,
+    reason TEXT NOT NULL,
+    details TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_blocks (
+    id SERIAL PRIMARY KEY,
+    blocker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (blocker_user_id, blocked_user_id)
 );

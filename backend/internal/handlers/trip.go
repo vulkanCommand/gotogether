@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -49,8 +50,27 @@ func CreateTrip(c *gin.Context) {
 	req.StartDate = strings.TrimSpace(req.StartDate)
 	req.EndDate = strings.TrimSpace(req.EndDate)
 
-	if req.Name == "" || req.Destination == "" || req.StartDate == "" || req.EndDate == "" {
+	nameValidation := validateUserText(req.Name, textValidationOptions{Required: true, MaxLength: 80})
+	destinationValidation := validateUserText(req.Destination, textValidationOptions{Required: true, MaxLength: 120})
+	req.Name = nameValidation.Value
+	req.Destination = destinationValidation.Value
+
+	if nameValidation.Empty || destinationValidation.Empty || req.StartDate == "" || req.EndDate == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name, destination, start_date, and end_date are required"})
+		return
+	}
+	if nameValidation.TooLong || nameValidation.Unsafe || destinationValidation.TooLong || destinationValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
+		return
+	}
+
+	restrictedMemberIDs, err := filterBlockedUserIDs(userID, req.MemberIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate selected members", "details": err.Error()})
+		return
+	}
+	if len(restrictedMemberIDs) > 0 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "one or more selected members are unavailable for new trips"})
 		return
 	}
 
@@ -114,18 +134,25 @@ func CreateTrip(c *gin.Context) {
 	}
 
 	addedMembers := map[int]bool{userID: true}
+	newlyInsertedMemberIDs := make([]int, 0)
 	for _, memberID := range req.MemberIDs {
 		if memberID <= 0 || addedMembers[memberID] {
 			continue
 		}
 		addedMembers[memberID] = true
-		if _, err := tx.Exec(`
+		var insertedUserID int
+		err := tx.QueryRow(`
 			INSERT INTO trip_members (trip_id, user_id, role)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (trip_id, user_id) DO NOTHING
-		`, trip.ID, memberID, "member"); err != nil {
+			RETURNING user_id
+		`, trip.ID, memberID, "member").Scan(&insertedUserID)
+		if err != nil && !sqlErrNoRows(err) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add trip member", "details": err.Error()})
 			return
+		}
+		if err == nil && insertedUserID > 0 && insertedUserID != userID {
+			newlyInsertedMemberIDs = append(newlyInsertedMemberIDs, insertedUserID)
 		}
 	}
 
@@ -158,6 +185,10 @@ func CreateTrip(c *gin.Context) {
 
 	if !commitOrRespond(c, tx) {
 		return
+	}
+
+	for _, addedUserID := range newlyInsertedMemberIDs {
+		NotifyTripMemberAdded(context.Background(), trip.ID, userID, addedUserID)
 	}
 
 	refreshTripCoverInBackground(trip.ID, userID, false)
@@ -469,8 +500,18 @@ func UpdateTrip(c *gin.Context) {
 	req.Destination = strings.TrimSpace(req.Destination)
 	req.StartDate = strings.TrimSpace(req.StartDate)
 	req.EndDate = strings.TrimSpace(req.EndDate)
-	if req.Name == "" || req.Destination == "" || req.StartDate == "" || req.EndDate == "" {
+
+	nameValidation := validateUserText(req.Name, textValidationOptions{Required: true, MaxLength: 80})
+	destinationValidation := validateUserText(req.Destination, textValidationOptions{Required: true, MaxLength: 120})
+	req.Name = nameValidation.Value
+	req.Destination = destinationValidation.Value
+
+	if nameValidation.Empty || destinationValidation.Empty || req.StartDate == "" || req.EndDate == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name, destination, start_date, and end_date are required"})
+		return
+	}
+	if nameValidation.TooLong || nameValidation.Unsafe || destinationValidation.TooLong || destinationValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 
@@ -509,8 +550,9 @@ func UpdateTrip(c *gin.Context) {
 		refreshTripCoverInBackground(tripID, userID, true)
 	}
 
-	createUserNotification(userID, tripID, "Trip updated", req.Name+" was updated.", "alert", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Trip updated", req.Name+" was updated for the crew.", "alert", false)
+	actorName := loadActorDisplayName(userID)
+	createUserNotification(userID, tripID, "You updated "+req.Name, req.Name+" was updated", "alert", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" updated "+req.Name, actorName+" updated "+req.Name, "alert", false)
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
@@ -666,10 +708,12 @@ func CompleteTrip(c *gin.Context) {
 	var tripName string
 	_ = db.DB.QueryRow(`SELECT COALESCE(name, '') FROM trips WHERE id = $1`, tripID).Scan(&tripName)
 	if strings.TrimSpace(tripName) == "" {
-		tripName = "this trip"
+		tripName = loadTripDisplayName(tripID)
 	}
-	createUserNotification(userID, tripID, "Trip completed", "You finished "+strings.TrimSpace(tripName)+".", "alert", false, "", 0, userID)
-	createTripNotifications(tripID, userID, "Trip completed", strings.TrimSpace(tripName)+" has been wrapped up and moved to completed trips.", "alert", false)
+	tripName = strings.TrimSpace(tripName)
+	actorName := loadActorDisplayName(userID)
+	createUserNotification(userID, tripID, "You completed "+tripName, "Trip moved to completed", "alert", false, "", 0, userID)
+	createTripNotifications(tripID, userID, actorName+" completed "+tripName, tripName+" was wrapped up", "alert", false)
 	c.JSON(http.StatusOK, gin.H{"completed": true, "pending_confirmations": false})
 }
 
@@ -712,6 +756,8 @@ func finalizeTripIfConfirmed(tripID int) error {
 	`, tripID, leadUserID); err != nil {
 		return err
 	}
-	createTripNotifications(tripID, leadUserID, "Trip completed", fmt.Sprintf("All members confirmed trip %d is complete.", tripID), "alert", false)
+	tripName := loadTripDisplayName(tripID)
+	actorName := loadActorDisplayName(leadUserID)
+	createTripNotifications(tripID, leadUserID, actorName+" completed "+tripName, tripName+" was wrapped up", "alert", false)
 	return nil
 }

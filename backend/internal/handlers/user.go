@@ -48,8 +48,15 @@ func UpdateMe(c *gin.Context) {
 	req.HomeCity = strings.TrimSpace(req.HomeCity)
 	req.Bio = strings.TrimSpace(req.Bio)
 
-	if req.Name == "" {
+	nameValidation := validateUserText(req.Name, textValidationOptions{Required: true, MaxLength: 60})
+	req.Name = nameValidation.Value
+
+	if nameValidation.Empty {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+	if nameValidation.TooLong || nameValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 
@@ -63,7 +70,7 @@ func UpdateMe(c *gin.Context) {
 		UPDATE users
 		SET
 			name = $2,
-			phone = $3,
+			phone = CASE WHEN $3 <> '' THEN $3 ELSE phone END,
 			username = $4,
 			home_city = $5,
 			bio = $6,
@@ -100,7 +107,22 @@ func DeleteMe(c *gin.Context) {
 	}
 	defer rollbackQuietly(tx)
 
-	if _, err := tx.Exec(`DELETE FROM users WHERE id = $1`, userID); err != nil {
+	if _, err := tx.Exec(`
+		UPDATE users
+		SET
+			is_deleted = TRUE,
+			deleted_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP,
+			firebase_uid = CASE
+				WHEN COALESCE(firebase_uid, '') = '' THEN 'deleted:' || id::text
+				ELSE firebase_uid || ':deleted:' || id::text
+			END,
+			phone = '',
+			email = '',
+			username = '',
+			profile_image_url = ''
+		WHERE id = $1
+	`, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete account", "details": err.Error()})
 		return
 	}

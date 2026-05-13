@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 38,
     lineHeight: 44,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: -1.2,
     marginBottom: spacing.md,
   },
@@ -106,6 +106,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

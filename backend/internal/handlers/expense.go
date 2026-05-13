@@ -82,8 +82,14 @@ func CreateExpenseGroup(c *gin.Context) {
 	}
 
 	name := strings.TrimSpace(req.Name)
-	if name == "" {
+	nameValidation := validateUserText(name, textValidationOptions{Required: true, MaxLength: 80})
+	name = nameValidation.Value
+	if nameValidation.Empty {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "group name is required"})
+		return
+	}
+	if nameValidation.TooLong || nameValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 
@@ -158,8 +164,16 @@ func CreateTripExpense(c *gin.Context) {
 	req.PaidBy = strings.TrimSpace(req.PaidBy)
 	req.SplitMethod = normalizeSplitMethod(req.SplitMethod)
 	req.Notes = strings.TrimSpace(req.Notes)
-	if req.Title == "" || req.Amount <= 0 {
+	titleValidation := validateUserText(req.Title, textValidationOptions{Required: true, MaxLength: 120})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	req.Title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || req.Amount <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "title and positive amount are required"})
+		return
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 
@@ -259,6 +273,21 @@ func CreateTripExpense(c *gin.Context) {
 	}
 	addLinkedEventLabels(&expense, linkedEventID)
 
+	notifyExpenseChange(
+		tripID,
+		userID,
+		"You added "+req.Title,
+		func(_ string, tripName string) string {
+			return req.Title + " was added to " + tripName
+		},
+		func(actorName string) string {
+			return actorName + " added " + req.Title
+		},
+		func(actorName, tripName string) string {
+			return actorName + " added " + req.Title + " to " + tripName
+		},
+	)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"expense": expense,
 	})
@@ -293,8 +322,16 @@ func UpdateTripExpense(c *gin.Context) {
 	req.PaidBy = strings.TrimSpace(req.PaidBy)
 	req.SplitMethod = normalizeSplitMethod(req.SplitMethod)
 	req.Notes = strings.TrimSpace(req.Notes)
-	if req.Title == "" || req.Amount <= 0 {
+	titleValidation := validateUserText(req.Title, textValidationOptions{Required: true, MaxLength: 120})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	req.Title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || req.Amount <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "title and positive amount are required"})
+		return
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 
@@ -405,6 +442,21 @@ func UpdateTripExpense(c *gin.Context) {
 	}
 	addLinkedEventLabels(&expense, linkedEventID)
 
+	notifyExpenseChange(
+		tripID,
+		userID,
+		"You updated "+req.Title,
+		func(_ string, tripName string) string {
+			return req.Title + " was updated in " + tripName
+		},
+		func(actorName string) string {
+			return actorName + " updated " + req.Title
+		},
+		func(actorName, tripName string) string {
+			return actorName + " updated " + req.Title + " in " + tripName
+		},
+	)
+
 	c.JSON(http.StatusOK, gin.H{"expense": expense})
 }
 
@@ -438,7 +490,36 @@ func DeleteTripExpense(c *gin.Context) {
 		return
 	}
 
+	notifyExpenseChange(
+		tripID,
+		userID,
+		"You deleted an expense",
+		func(_ string, tripName string) string {
+			return "An expense was removed from " + tripName
+		},
+		func(actorName string) string {
+			return actorName + " deleted an expense"
+		},
+		func(actorName, tripName string) string {
+			return actorName + " removed an expense from " + tripName
+		},
+	)
+
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func notifyExpenseChange(
+	tripID int,
+	actorUserID int,
+	selfTitle string,
+	buildSelfBody func(actorName string, tripName string) string,
+	buildMemberTitle func(actorName string) string,
+	buildMemberBody func(actorName string, tripName string) string,
+) {
+	actorName := loadActorDisplayName(actorUserID)
+	tripName := loadTripDisplayName(tripID)
+	createUserNotification(actorUserID, tripID, selfTitle, buildSelfBody(actorName, tripName), "expense", false, "", 0, actorUserID)
+	createTripNotifications(tripID, actorUserID, buildMemberTitle(actorName), buildMemberBody(actorName, tripName), "expense", false)
 }
 
 func loadExpenseGroups(tripID int) ([]models.ExpenseGroupResponse, error) {
@@ -592,35 +673,11 @@ func loadTripExpenseMembers(tripID int) ([]tripExpenseMember, error) {
 
 func buildExpenseSplits(req models.CreateExpenseRequest, members []tripExpenseMember, memberNames map[int]string) ([]models.ExpenseSplitPayload, error) {
 	amount := roundCurrency(req.Amount)
+	if strings.HasPrefix(req.SplitMethod, "settlement") {
+		return buildIncomingSplitAmounts(req.SplitPreview, memberNames, amount, "settlement")
+	}
 	if req.SplitMethod == "custom" {
-		splits := make([]models.ExpenseSplitPayload, 0)
-		total := 0.0
-		seen := map[int]bool{}
-		for _, incoming := range req.SplitPreview {
-			memberID := parseNumericID(incoming.MemberID)
-			memberName, exists := memberNames[memberID]
-			if !exists || seen[memberID] {
-				continue
-			}
-			splitAmount := roundCurrency(incoming.Amount)
-			if splitAmount < 0 {
-				return nil, fmt.Errorf("custom split amounts cannot be negative")
-			}
-			seen[memberID] = true
-			total = roundCurrency(total + splitAmount)
-			splits = append(splits, models.ExpenseSplitPayload{
-				MemberID:   strconv.Itoa(memberID),
-				MemberName: memberName,
-				Amount:     splitAmount,
-			})
-		}
-		if len(splits) == 0 {
-			return nil, fmt.Errorf("custom split needs at least one member amount")
-		}
-		if math.Abs(total-amount) > 0.01 {
-			return nil, fmt.Errorf("custom splits must add up to the expense total")
-		}
-		return splits, nil
+		return buildIncomingSplitAmounts(req.SplitPreview, memberNames, amount, "custom")
 	}
 
 	selectedMembers := members
@@ -668,6 +725,37 @@ func buildExpenseSplits(req models.CreateExpenseRequest, members []tripExpenseMe
 	return splits, nil
 }
 
+func buildIncomingSplitAmounts(incomingSplits []models.ExpenseSplitPayload, memberNames map[int]string, amount float64, splitKind string) ([]models.ExpenseSplitPayload, error) {
+	splits := make([]models.ExpenseSplitPayload, 0)
+	total := 0.0
+	seen := map[int]bool{}
+	for _, incoming := range incomingSplits {
+		memberID := parseNumericID(incoming.MemberID)
+		memberName, exists := memberNames[memberID]
+		if !exists || seen[memberID] {
+			continue
+		}
+		splitAmount := roundCurrency(incoming.Amount)
+		if splitAmount < 0 {
+			return nil, fmt.Errorf("%s split amounts cannot be negative", splitKind)
+		}
+		seen[memberID] = true
+		total = roundCurrency(total + splitAmount)
+		splits = append(splits, models.ExpenseSplitPayload{
+			MemberID:   strconv.Itoa(memberID),
+			MemberName: memberName,
+			Amount:     splitAmount,
+		})
+	}
+	if len(splits) == 0 {
+		return nil, fmt.Errorf("%s split needs at least one member amount", splitKind)
+	}
+	if math.Abs(total-amount) > 0.01 {
+		return nil, fmt.Errorf("%s splits must add up to the expense total", splitKind)
+	}
+	return splits, nil
+}
+
 func expenseGroupBelongsToTrip(groupID int, tripID int) bool {
 	var exists bool
 	err := db.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM expense_groups WHERE id = $1 AND trip_id = $2)`, groupID, tripID).Scan(&exists)
@@ -707,6 +795,12 @@ func eventBelongsToTrip(eventID int, tripID int) bool {
 
 func normalizeSplitMethod(value string) string {
 	normalized := strings.ToLower(strings.TrimSpace(value))
+	if strings.Contains(normalized, "settlement") {
+		if strings.Contains(normalized, "card") {
+			return "settlement_card"
+		}
+		return "settlement_cash"
+	}
 	if strings.Contains(normalized, "custom") {
 		return "custom"
 	}
@@ -714,10 +808,16 @@ func normalizeSplitMethod(value string) string {
 }
 
 func splitMethodLabel(value string) string {
-	if normalizeSplitMethod(value) == "custom" {
+	switch normalizeSplitMethod(value) {
+	case "custom":
 		return "Custom split"
+	case "settlement_card":
+		return "Settlement - Card"
+	case "settlement_cash":
+		return "Settlement - Cash"
+	default:
+		return "Equal split"
 	}
-	return "Equal split"
 }
 
 func parseNumericID(value string) int {

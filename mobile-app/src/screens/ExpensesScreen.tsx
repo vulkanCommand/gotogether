@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,18 +18,25 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import ReportModal from '../components/ReportModal';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { CurrentTrip, ExpenseGroup, ExpenseItem, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
+import { footerScrollPadding } from '../theme/spacing';
+import { CACHE_TTLS, cacheKeys, fetchWithCache, invalidateTripCaches, isCacheFresh, readCachedValue, writeCachedValue } from '../services/resourceCache';
 import { createExpenseGroup, createTripExpense, deleteTripExpense, fetchExpenseGroups, fetchTripDetails, fetchTrips } from '../config/api';
 import {
   calculateExpenseGroupSummary,
   calculateOverallExpenseSummary,
   formatMoney,
+  getBalanceDisplay,
   getExpenseGroupDisplayName,
+  getExpenseImpactAmount,
   getExpenseImpactLabel,
   groupExpensesByMonth,
+  isSettlementExpense,
 } from '../utils/expenseCalculations';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Expenses'>,
@@ -38,6 +47,8 @@ type TripSection = {
   trip: CurrentTrip;
   groups: ExpenseGroup[];
 };
+
+const EXPENSE_SECTIONS_CACHE_KEY = 'expenses:sections';
 
 const palette = {
   screen: '#F3F6FB',
@@ -51,6 +62,7 @@ const palette = {
   teal: '#2563EB',
   tealSoft: '#E7F0FF',
   orange: '#EA580C',
+  green: '#16A34A',
   border: '#DEE7F2',
   modalOverlay: 'rgba(15, 23, 42, 0.25)',
   white: '#FFFFFF',
@@ -66,8 +78,33 @@ type BalanceLine = {
   amount: number;
 };
 
+const parseCurrencyInput = (value: string) => {
+  const normalized = value.replace(/[^0-9.]/g, '');
+  const parts = normalized.split('.');
+  const clean = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : normalized;
+  const parsed = Number(clean);
+  return Number.isFinite(parsed) ? Math.round((parsed + Number.EPSILON) * 100) / 100 : 0;
+};
+
 const groupIcons = ['document-text-outline', 'home-outline', 'airplane-outline', 'wallet-outline'];
 const groupIconColors = ['#134E7A', '#145C43', '#A44B12', '#7A1748'];
+
+const toTimestamp = (value?: string | null) => {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getGroupLastActivityAt = (group: ExpenseGroup, trip: CurrentTrip) => {
+  const latestExpenseTimestamp = (group.expenses ?? []).reduce((latest, expense) => {
+    return Math.max(latest, toTimestamp(expense.createdAt));
+  }, 0);
+
+  return latestExpenseTimestamp || toTimestamp(group.createdAt) || toTimestamp(trip.end_date) || toTimestamp(trip.start_date);
+};
 
 export default function ExpensesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -92,53 +129,129 @@ export default function ExpensesScreen({ navigation }: Props) {
   // method.
   const [showSettleModal, setShowSettleModal] = useState(false);
   const [selectedSettleLine, setSelectedSettleLine] = useState<BalanceLine | null>(null);
+  const [settlementAmount, setSettlementAmount] = useState('');
+  const settlementSubmittingRef = useRef(false);
 
   // Search modal state to allow filtering groups when tapping the search icon.
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [reportExpense, setReportExpense] = useState<ExpenseItem | null>(null);
+  const hasLoadedRef = useRef(false);
+  const lastFetchedRef = useRef(0);
 
-  const refreshGroups = useCallback(async () => {
+  const applySections = useCallback((sections: TripSection[]) => {
+    setTripSections(sections);
+
+    const activeTripId = currentTrip?.id ?? sections[0]?.trip.id ?? null;
+    const activeGroups = sections.find((section) => section.trip.id === activeTripId)?.groups ?? [];
+
+    setExpenseGroups(activeGroups);
+    setExpenses(activeGroups.flatMap((group) => group.expenses ?? []));
+  }, [currentTrip?.id, setExpenseGroups, setExpenses]);
+
+  const refreshGroups = useCallback(async (showSpinner = false, force = false) => {
+    const cachedSections = await readCachedValue<TripSection[]>(EXPENSE_SECTIONS_CACHE_KEY);
+
+    if (cachedSections && !hasLoadedRef.current) {
+      applySections(cachedSections.value);
+      hasLoadedRef.current = true;
+      lastFetchedRef.current = cachedSections.updatedAt;
+      setLoading(false);
+    }
+
     try {
-      setLoading(true);
-      const tripData = await fetchTrips();
-      const trips = Array.isArray(tripData.trips) ? tripData.trips : [];
+      if (showSpinner && !hasLoadedRef.current) {
+        setLoading(true);
+      }
+
+      const tripsResponse = await fetchWithCache(
+        cacheKeys.trips,
+        CACHE_TTLS.trips,
+        async () => {
+          const tripData = await fetchTrips();
+          return Array.isArray(tripData.trips) ? (tripData.trips as CurrentTrip[]) : [];
+        },
+        { force }
+      );
+
+      const trips = tripsResponse.data;
       const sections = await Promise.all(
         trips.map(async (trip) => {
-          const groupData = await fetchExpenseGroups(trip.id);
+          const groupData = await fetchWithCache(
+            cacheKeys.expenseGroups(trip.id),
+            CACHE_TTLS.expenseGroups,
+            async () => {
+              const response = await fetchExpenseGroups(trip.id);
+              return (response.groups ?? []) as ExpenseGroup[];
+            },
+            { force }
+          );
+
           return {
             trip: trip as CurrentTrip,
-            groups: (groupData.groups ?? []) as ExpenseGroup[],
+            groups: groupData.data,
           };
         })
       );
 
-      setTripSections(sections);
-
-      const activeTripId = currentTrip?.id ?? sections[0]?.trip.id ?? null;
-      const activeGroups = sections.find((section) => section.trip.id === activeTripId)?.groups ?? [];
-      setExpenseGroups(activeGroups);
-      setExpenses(activeGroups.flatMap((group) => group.expenses ?? []));
+      applySections(sections);
+      await writeCachedValue(EXPENSE_SECTIONS_CACHE_KEY, sections);
+      hasLoadedRef.current = true;
+      lastFetchedRef.current = Date.now();
     } catch (error) {
       console.log('Fetch expense groups failed', error);
-      setTripSections([]);
-      setExpenseGroups([]);
-      setExpenses([]);
+      if (!hasLoadedRef.current) {
+        setTripSections([]);
+        setExpenseGroups([]);
+        setExpenses([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, [currentTrip?.id, setExpenseGroups, setExpenses]);
+  }, [applySections, setExpenseGroups, setExpenses]);
 
   useEffect(() => {
-    void refreshGroups();
+    void refreshGroups(true);
   }, [refreshGroups]);
 
   useFocusEffect(
     useCallback(() => {
-      void refreshGroups();
+      const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.expenseGroups;
+      void refreshGroups(false, !hasLoadedRef.current ? false : stale);
     }, [refreshGroups])
   );
 
   const allGroups = useMemo(() => tripSections.flatMap((section) => section.groups), [tripSections]);
+  const sortedOverviewGroups = useMemo(
+    () =>
+      tripSections
+        .flatMap((section, sectionIndex) =>
+          section.groups.map((group, groupIndex) => ({
+            group,
+            trip: section.trip,
+            lastActivityAt: getGroupLastActivityAt(group, section.trip),
+            stableIndex: sectionIndex * 1000 + groupIndex,
+          }))
+        )
+        .sort((left, right) => {
+          if (left.lastActivityAt !== right.lastActivityAt) {
+            return right.lastActivityAt - left.lastActivityAt;
+          }
+
+          const tripNameComparison = left.trip.name.localeCompare(right.trip.name);
+          if (tripNameComparison !== 0) {
+            return tripNameComparison;
+          }
+
+          const groupNameComparison = left.group.name.localeCompare(right.group.name);
+          if (groupNameComparison !== 0) {
+            return groupNameComparison;
+          }
+
+          return left.stableIndex - right.stableIndex;
+        }),
+    [tripSections]
+  );
   const overallSummary = useMemo(
     () => calculateOverallExpenseSummary(allGroups, crew, user?.id),
     [allGroups, crew, user?.id]
@@ -196,15 +309,20 @@ export default function ExpensesScreen({ navigation }: Props) {
   };
 
   const openAddExpense = () => {
-    const fallbackGroup = selectedGroup ?? allGroups[0];
-    navigation.navigate('AddExpense', { groupId: fallbackGroup?.id });
+    if (!selectedGroup || !selectedSection) {
+      Alert.alert('Choose a group first', 'Open an expense group before adding a new expense.');
+      return;
+    }
+
+    navigation.navigate('AddExpense', { tripId: selectedSection.trip.id, groupId: selectedGroup.id });
   };
 
   const editExpense = (expense: ExpenseItem) => {
-    if (!selectedGroup) {
+    if (!selectedGroup || !selectedSection) {
       return;
     }
-    navigation.navigate('AddExpense', { groupId: selectedGroup.id, expenseId: expense.id });
+
+    navigation.navigate('AddExpense', { tripId: selectedSection.trip.id, groupId: selectedGroup.id, expenseId: expense.id });
   };
 
   const deleteExpense = (expense: ExpenseItem) => {
@@ -220,7 +338,8 @@ export default function ExpensesScreen({ navigation }: Props) {
         onPress: async () => {
           try {
             await deleteTripExpense(selectedSection.trip.id, expense.id);
-            await refreshGroups();
+            await invalidateTripCaches(selectedSection.trip.id);
+            await refreshGroups(false, true);
           } catch (error: any) {
             Alert.alert('Delete failed', error?.message || 'Could not delete expense');
           }
@@ -240,63 +359,35 @@ export default function ExpensesScreen({ navigation }: Props) {
       return;
     }
 
+    const groupNameValidation = validateUserText(newGroupName, { required: true, maxLength: 80 });
+    if (groupNameValidation.reason === 'required') {
+      Alert.alert('Choose a trip first', 'Open a trip expense group first, then create another group inside that trip.');
+      return;
+    }
+    if (!groupNameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+      return;
+    }
+
     try {
-      await createExpenseGroup(tripForGroup.id, { name: newGroupName.trim() });
+      await createExpenseGroup(tripForGroup.id, { name: groupNameValidation.value });
       setNewGroupName('');
       setShowGroupModal(false);
-      await refreshGroups();
+      await invalidateTripCaches(tripForGroup.id);
+      await refreshGroups(false, true);
     } catch (error: any) {
       Alert.alert('Group failed', error?.message || 'Could not create expense group');
     }
   };
 
-  const createSettlement = async (method: 'Cash' | 'Card') => {
-    if (!selectedSection?.trip.id || !selectedGroup || !selectedGroupSummary || settling) {
+  const closeSettleModal = () => {
+    if (settling) {
       return;
     }
 
-    const lines = selectedGroupSummary.currentUserBalanceLines;
-    if (lines.length === 0) {
-      Alert.alert('Nothing to settle', 'You are already settled in this group.');
-      return;
-    }
-
-    try {
-      setSettling(true);
-      const userKey = String(user?.id ?? '');
-
-      for (const line of lines) {
-        const userOwes = line.fromMemberId === userKey;
-        const payerId = Number(userOwes ? line.fromMemberId : line.toMemberId);
-        const receiverId = userOwes ? line.toMemberId : line.fromMemberId;
-        const receiverName = userOwes ? line.toMemberName : line.fromMemberName;
-        const payerName = userOwes ? line.fromMemberName : line.toMemberName;
-
-        await createTripExpense(selectedSection.trip.id, {
-          title: userOwes ? `Settlement to ${receiverName}` : `Settlement from ${payerName}`,
-          amount: line.amount,
-          paidByUserId: payerId,
-          expenseGroupId: selectedGroup.id,
-          linkedEventId: '',
-          splitMethod: `Settlement - ${method}`,
-          notes: `Settled by ${method.toLowerCase()}`,
-          splitPreview: [
-            {
-              memberId: String(receiverId),
-              memberName: receiverName,
-              amount: line.amount,
-            },
-          ],
-        });
-      }
-
-      await refreshGroups();
-      Alert.alert('Settled', `Balance cleared using ${method}.`);
-    } catch (error: any) {
-      Alert.alert('Settle up failed', error?.message || 'Could not settle this balance.');
-    } finally {
-      setSettling(false);
-    }
+    setShowSettleModal(false);
+    setSelectedSettleLine(null);
+    setSettlementAmount('');
   };
 
   const handleSettleUp = () => {
@@ -304,133 +395,159 @@ export default function ExpensesScreen({ navigation }: Props) {
       Alert.alert('Nothing to settle', 'You are already settled in this group.');
       return;
     }
-    // Instead of paying everyone at once, allow the user to select a specific
-    // balance line.  Opening the settle modal presents a list of members the
-    // user either owes or is owed by.
+
+    setSelectedSettleLine(null);
+    setSettlementAmount('');
     setShowSettleModal(true);
   };
 
-  // Create a single settlement for a specific balance line.  This mirrors the
-  // existing createSettlement implementation but only applies to one line.
+  const selectSettleLine = (line: BalanceLine) => {
+    setSelectedSettleLine(line);
+    setSettlementAmount(line.amount.toFixed(2));
+  };
+
   const createSingleSettlement = async (line: BalanceLine, method: 'Cash' | 'Card') => {
-    if (!selectedSection?.trip.id || !selectedGroup || settling) {
+    if (!selectedSection?.trip.id || !selectedGroup || settling || settlementSubmittingRef.current) {
       return;
     }
-    try {
-      setSettling(true);
-      // Determine whether the current user is the debtor or creditor.
-      const userKey = String(user?.id ?? '');
-      const userOwes = line.fromMemberId === userKey;
-      const payerId = userOwes ? Number(line.fromMemberId) : Number(line.toMemberId);
-      const receiverId = userOwes ? line.toMemberId : line.fromMemberId;
-      const receiverName = userOwes ? line.toMemberName : line.fromMemberName;
-      const payerName = userOwes ? line.fromMemberName : line.toMemberName;
 
+    const enteredAmount = parseCurrencyInput(settlementAmount);
+    if (enteredAmount <= 0) {
+      Alert.alert('Enter amount', 'Enter how much you want to settle.');
+      return;
+    }
+
+    if (enteredAmount - line.amount > 0.01) {
+      Alert.alert('Amount too high', `You can settle up to ${formatMoney(line.amount)} with this person.`);
+      return;
+    }
+
+    try {
+      settlementSubmittingRef.current = true;
+      setSettling(true);
+      const debtorId = Number(line.fromMemberId);
+      const creditorId = Number(line.toMemberId);
+      const debtorName = line.fromMemberName;
+      const creditorName = line.toMemberName;
+      const paymentAmount = Math.round((enteredAmount + Number.EPSILON) * 100) / 100;
+
+      // Settlements must always flow from the debtor to the creditor so they
+      // reduce the existing balance instead of creating a new debt in reverse.
       await createTripExpense(selectedSection.trip.id, {
-        title: userOwes ? `Settlement to ${receiverName}` : `Settlement from ${payerName}`,
-        amount: line.amount,
-        paidByUserId: payerId,
+        title: `Settlement to ${creditorName}`,
+        amount: paymentAmount,
+        paidByUserId: debtorId,
         expenseGroupId: selectedGroup.id,
         linkedEventId: '',
         splitMethod: `Settlement - ${method}`,
-        notes: `Settled by ${method.toLowerCase()}`,
+        notes: `Settled ${formatMoney(paymentAmount)} by ${method.toLowerCase()}`,
         splitPreview: [
           {
-            memberId: String(receiverId),
-            memberName: receiverName,
-            amount: line.amount,
+            memberId: String(creditorId),
+            memberName: creditorName,
+            amount: paymentAmount,
           },
         ],
       });
-      await refreshGroups();
-      Alert.alert('Settled', `Balance with ${receiverName} cleared using ${method}.`);
+
+      await invalidateTripCaches(selectedSection.trip.id);
+      await refreshGroups(false, true);
+      const remaining = Math.max(0, Math.round((line.amount - paymentAmount + Number.EPSILON) * 100) / 100);
+      closeSettleModal();
+      Alert.alert(
+        'Settlement recorded',
+        remaining > 0.009
+          ? `${formatMoney(paymentAmount)} settled. Remaining balance between ${debtorName} and ${creditorName}: ${formatMoney(remaining)}.`
+          : `Balance between ${debtorName} and ${creditorName} cleared using ${method}.`
+      );
     } catch (error: any) {
       Alert.alert('Settle up failed', error?.message || 'Could not settle this balance.');
     } finally {
+      settlementSubmittingRef.current = false;
       setSettling(false);
     }
   };
 
-  const renderOverview = () => (
-    <>
-      <View style={styles.topRow}>
-        <Pressable
-          style={styles.circleButton}
-          onPress={() => {
-            // Open a search modal when tapping the search icon instead of refreshing
-            setSearchQuery('');
-            setShowSearchModal(true);
-          }}
-        >
-          <Ionicons name="search-outline" size={24} color={palette.text} />
-        </Pressable>
-        <Pressable onPress={() => setShowGroupModal(true)}>
-          <Text style={styles.createGroupText}>Create group</Text>
-        </Pressable>
-      </View>
+  const renderOverview = () => {
+    const overallDisplay = getBalanceDisplay(overallSummary.netBalance);
 
-      <View style={styles.overallHeaderRow}>
-        <Text style={styles.overallHeaderText}>
-          {overallSummary.netBalance >= 0 ? 'Overall, you are owed ' : 'Overall, you owe '}
-          <Text style={overallSummary.netBalance >= 0 ? styles.positiveText : styles.negativeText}>
-            {formatMoney(Math.abs(overallSummary.netBalance))}
-          </Text>
-        </Text>
-        <Pressable style={styles.circleButton} onPress={() => void refreshGroups()}>
-          {loading ? <ActivityIndicator color={palette.text} /> : <Ionicons name="options-outline" size={22} color={palette.text} />}
-        </Pressable>
-      </View>
+    return (
+      <>
+        <View style={styles.topRow}>
+          <Pressable
+            style={styles.circleButton}
+            onPress={() => {
+              setSearchQuery('');
+              setShowSearchModal(true);
+            }}
+          >
+            <Ionicons name="search-outline" size={24} color={palette.text} />
+          </Pressable>
+          <Pressable onPress={() => setShowGroupModal(true)}>
+            <Text style={styles.createGroupText}>Create group</Text>
+          </Pressable>
+        </View>
 
-      <View style={styles.groupList}>
-        {allGroups.map((group, index) => {
-          const section = tripSections.find((item) => item.groups.some((candidate) => candidate.id === group.id));
-          if (!section) {
-            return null;
-          }
-
-          const groupSummary = calculateExpenseGroupSummary(group, crew, user?.id);
-          const previewLines = buildPreviewLines(groupSummary, user?.id);
-          const isPositive = groupSummary.netBalance >= 0;
-
-          return (
-            <Pressable key={group.id} style={styles.groupRow} onPress={() => openGroup(section.trip, group)}>
-              <GroupAvatar index={index} />
-              <View style={styles.groupCenter}>
-                <Text style={styles.groupName}>{getExpenseGroupDisplayName(group.name, section.trip.name)}</Text>
-                {previewLines.length > 0 ? (
-                  previewLines.map((line) => (
-                    <Text key={line} style={styles.groupSubline} numberOfLines={1}>
-                      {line}
-                    </Text>
-                  ))
-                ) : (
-                  <Text style={styles.groupSubline}>No balances yet</Text>
-                )}
-              </View>
-              <View style={styles.groupRight}>
-                <Text style={styles.groupBalanceLabel}>Total spent</Text>
-                <Text style={styles.groupBalanceAmount}>{formatMoney(groupSummary.totalSpent)}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
-
-        {!loading && allGroups.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>No expense groups yet</Text>
-            <Text style={styles.emptyText}>Create a group and start adding trip expenses.</Text>
+        <View style={styles.overallHeaderRow}>
+          <View style={styles.overallBalanceBlock}>
+            <Text style={[styles.overallBalanceAmount, overallDisplay.isPositive ? styles.positiveText : styles.negativeText]}>
+              {formatMoney(overallDisplay.amount)}
+            </Text>
+            <Text style={styles.overallBalanceLabel}>{overallDisplay.label}</Text>
           </View>
-        ) : null}
-      </View>
-    </>
-  );
+          <Pressable style={styles.circleButton} onPress={() => void refreshGroups()}>
+            {loading ? <ActivityIndicator color={palette.text} /> : <Ionicons name="options-outline" size={22} color={palette.text} />}
+          </Pressable>
+        </View>
+
+        <View style={styles.groupList}>
+          {sortedOverviewGroups.map(({ group, trip }, index) => {
+            const groupSummary = calculateExpenseGroupSummary(group, crew, user?.id);
+            const previewLines = buildPreviewLines(groupSummary, user?.id);
+            const groupDisplay = getBalanceDisplay(groupSummary.netBalance);
+
+            return (
+              <Pressable key={group.id} style={styles.groupRow} onPress={() => openGroup(trip, group)}>
+                <GroupAvatar index={index} />
+                <View style={styles.groupCenter}>
+                  <Text style={styles.groupName}>{getExpenseGroupDisplayName(group.name, trip.name)}</Text>
+                  {previewLines.length > 0 ? (
+                    previewLines.map((line) => (
+                      <Text key={line} style={styles.groupSubline} numberOfLines={1}>
+                        {line}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text style={styles.groupSubline}>No balances yet</Text>
+                  )}
+                </View>
+                <View style={styles.groupRight}>
+                  <Text style={styles.groupBalanceLabel}>{groupDisplay.label}</Text>
+                  <Text style={[styles.groupBalanceAmount, groupDisplay.isPositive ? styles.positiveText : styles.negativeText]}>
+                    {formatMoney(groupDisplay.amount)}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+
+          {!loading && sortedOverviewGroups.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No expense groups yet</Text>
+              <Text style={styles.emptyText}>Create a group and start adding trip expenses.</Text>
+            </View>
+          ) : null}
+        </View>
+      </>
+    );
+  };
 
   const renderDetail = () => {
     if (!selectedGroup || !selectedSection || !selectedGroupSummary) {
       return null;
     }
 
-    const balancePositive = selectedGroupSummary.netBalance >= 0;
+    const balanceDisplay = getBalanceDisplay(selectedGroupSummary.netBalance);
     const memberCount = Math.max(selectedSection.trip.members_count ?? 0, selectedGroupSummary.memberTotals.length);
 
     return (
@@ -451,15 +568,17 @@ export default function ExpensesScreen({ navigation }: Props) {
 
         <View style={styles.detailBody}>
           <Text style={styles.detailHeadline}>
-            {balancePositive ? 'You are owed ' : 'You owe '}
-            <Text style={balancePositive ? styles.positiveText : styles.negativeText}>
-              {formatMoney(balancePositive ? selectedGroupSummary.currentUserIsOwed : selectedGroupSummary.currentUserOwes)}
-            </Text>
+            {balanceDisplay.isSettled ? 'You are settled up' : `${balanceDisplay.headline} `}
+            {!balanceDisplay.isSettled ? (
+              <Text style={balanceDisplay.isPositive ? styles.positiveText : styles.negativeText}>
+                {formatMoney(balanceDisplay.amount)}
+              </Text>
+            ) : null}
           </Text>
 
           <View style={styles.detailSummaryRow}>
-            <MetricPill label="Total spent" value={formatMoney(selectedGroupSummary.totalSpent)} />
-            <MetricPill label="Balances" value={`${selectedGroupSummary.currentUserBalanceLines.length}`} />
+            <MetricPill label={balanceDisplay.label} value={formatMoney(balanceDisplay.amount)} />
+            <MetricPill label="Open balances" value={`${selectedGroupSummary.currentUserBalanceLines.length}`} />
           </View>
 
           <Pressable style={[styles.settleButton, settling && styles.settleButtonDisabled]} onPress={handleSettleUp} disabled={settling}>
@@ -472,7 +591,14 @@ export default function ExpensesScreen({ navigation }: Props) {
                 <Text style={styles.monthLabel}>{monthGroup.label}</Text>
                 {monthGroup.expenses.map((expense, index) => {
                   const impact = getExpenseImpactLabel(expense, user?.id);
-                  const tonePositive = impact.toLowerCase().includes('paid');
+                  const impactAmount = getExpenseImpactAmount(expense, user?.id);
+                  const tonePositive = impactAmount >= 0;
+                  const displayAmount =
+                    impactAmount > 0.009
+                      ? `+${formatMoney(impactAmount)}`
+                      : impactAmount < -0.009
+                        ? `-${formatMoney(Math.abs(impactAmount))}`
+                        : formatMoney(0);
                   return (
                     <Pressable
                       key={expense.id}
@@ -480,6 +606,7 @@ export default function ExpensesScreen({ navigation }: Props) {
                       onLongPress={() =>
                         Alert.alert(expense.title, 'Choose an action', [
                           { text: 'Edit', onPress: () => editExpense(expense) },
+                          { text: 'Report', style: 'destructive', onPress: () => setReportExpense(expense) },
                           { text: 'Delete', style: 'destructive', onPress: () => deleteExpense(expense) },
                           { text: 'Cancel', style: 'cancel' },
                         ])
@@ -491,7 +618,11 @@ export default function ExpensesScreen({ navigation }: Props) {
                       </View>
 
                       <View style={styles.activityIconWrap}>
-                        <Ionicons name="cash-outline" size={19} color={palette.teal} />
+                        <Ionicons
+                          name={isSettlementExpense(expense) ? 'swap-horizontal-outline' : 'cash-outline'}
+                          size={19}
+                          color={palette.teal}
+                        />
                       </View>
 
                       <View style={styles.activityContent}>
@@ -503,8 +634,9 @@ export default function ExpensesScreen({ navigation }: Props) {
 
                       <View style={styles.activityAmountWrap}>
                         <Text style={[styles.activityAmount, tonePositive ? styles.positiveText : styles.negativeText]}>
-                          {formatMoney(expense.amount)}
+                          {displayAmount}
                         </Text>
+                        <Text style={styles.activityTotalAmount}>{formatMoney(expense.amount)}</Text>
                       </View>
                     </Pressable>
                   );
@@ -528,7 +660,7 @@ export default function ExpensesScreen({ navigation }: Props) {
     <View style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 96 }}
+        contentContainerStyle={{ paddingBottom: footerScrollPadding + 28 }}
       >
         {selectedGroup ? renderDetail() : <View style={[styles.content, { paddingTop: Math.max(insets.top, 22) + 8 }]}>{renderOverview()}</View>}
       </ScrollView>
@@ -536,7 +668,7 @@ export default function ExpensesScreen({ navigation }: Props) {
       {(!selectedGroup || selectedSection) && (
         <View pointerEvents="box-none" style={styles.floatingActionWrap}>
           <Pressable style={[styles.floatingAction, { bottom: Math.max(insets.bottom, 18) + 8 }]} onPress={openAddExpense}>
-            <Ionicons name="receipt-outline" size={22} color={palette.white} />
+            <Ionicons name="receipt-outline" size={20} color={palette.white} />
             <Text style={styles.floatingActionText}>Add expense</Text>
           </Pressable>
         </View>
@@ -566,54 +698,123 @@ export default function ExpensesScreen({ navigation }: Props) {
         </View>
       </Modal>
 
-      {/* Modal to choose which balance line to settle.  Lists all balances
-          involving the current user.  Once a line is selected, the user is
-          prompted to choose the payment method. */}
-      <Modal
-        visible={showSettleModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowSettleModal(false)}
-      >
+      <Modal visible={showSettleModal} transparent animationType="fade" onRequestClose={closeSettleModal}>
         <View style={styles.modalOverlay}>
-          <View style={styles.settleModalCard}>
-            <Text style={styles.modalTitle}>Select person to settle with</Text>
-            {selectedGroupSummary?.currentUserBalanceLines?.map((line) => {
-              const userKey = String(user?.id ?? '');
-              const userOwes = line.fromMemberId === userKey;
-              const personName = userOwes ? line.toMemberName : line.fromMemberName;
-              const descriptor = userOwes
-                ? `You owe ${formatMoney(line.amount)} to ${personName}`
-                : `${personName} owes you ${formatMoney(line.amount)}`;
-              return (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.settleKeyboardWrap}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.bottom, 16) : 0}
+          >
+            <View style={styles.settleModalCard}>
+              <View style={styles.settleHeaderRow}>
+                <Text style={styles.modalTitle}>Settle up</Text>
                 <Pressable
-                  key={`${line.fromMemberId}-${line.toMemberId}`}
-                  onPress={() => {
-                    setShowSettleModal(false);
-                    setSelectedSettleLine(line);
-                    Alert.alert(
-                      `Settle with ${personName}`,
-                      'How was this paid?',
-                      [
-                        { text: 'Cash', onPress: () => void createSingleSettlement(line, 'Cash') },
-                        { text: 'Card', onPress: () => void createSingleSettlement(line, 'Card') },
-                        { text: 'Cancel', style: 'cancel' },
-                      ]
-                    );
-                  }}
-                  style={styles.settleRow}
+                  onPress={closeSettleModal}
+                  style={styles.settleCloseButton}
+                  disabled={settling}
                 >
-                  <Text style={styles.settleRowText}>{descriptor}</Text>
+                  <Ionicons name="close" size={18} color={palette.text} />
                 </Pressable>
-              );
-            })}
-            {(!selectedGroupSummary || selectedGroupSummary.currentUserBalanceLines.length === 0) ? (
-              <Text style={styles.emptyText}>No balances to settle.</Text>
-            ) : null}
-            <Pressable style={styles.modalSecondaryButton} onPress={() => setShowSettleModal(false)}>
-              <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
-            </Pressable>
-          </View>
+              </View>
+              <Text style={styles.modalSubtitle}>
+                Choose one person, enter how much is being paid, then select cash or card.
+              </Text>
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.settleListContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              >
+                {selectedGroupSummary?.currentUserBalanceLines?.map((line) => {
+                  const userKey = String(user?.id ?? '');
+                  const userOwes = line.fromMemberId === userKey;
+                  const personName = userOwes ? line.toMemberName : line.fromMemberName;
+                  const descriptor = userOwes
+                    ? `You owe ${formatMoney(line.amount)} to ${personName}`
+                    : `${personName} owes you ${formatMoney(line.amount)}`;
+                  const selected = selectedSettleLine === line;
+
+                  return (
+                    <Pressable
+                      key={`${line.fromMemberId}-${line.toMemberId}`}
+                      onPress={() => selectSettleLine(line)}
+                      style={[styles.settleRow, selected && styles.settleRowSelected]}
+                    >
+                      <View style={styles.settleRowCopy}>
+                        <Text style={styles.settleRowText}>{personName}</Text>
+                        <Text style={styles.settleRowSubtext}>{descriptor}</Text>
+                      </View>
+                      <Text style={[styles.settleRowAmount, userOwes ? styles.negativeText : styles.positiveText]}>
+                        {formatMoney(line.amount)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+
+                {(!selectedGroupSummary || selectedGroupSummary.currentUserBalanceLines.length === 0) ? (
+                  <Text style={styles.emptyText}>No balances to settle.</Text>
+                ) : null}
+
+                {selectedSettleLine ? (() => {
+                  const userKey = String(user?.id ?? '');
+                  const userOwes = selectedSettleLine.fromMemberId === userKey;
+                  const personName = userOwes ? selectedSettleLine.toMemberName : selectedSettleLine.fromMemberName;
+                  const enteredAmount = parseCurrencyInput(settlementAmount);
+                  const canSubmitSettlement =
+                    enteredAmount > 0 &&
+                    enteredAmount - selectedSettleLine.amount <= 0.01 &&
+                    !settling &&
+                    !settlementSubmittingRef.current;
+                  const remainingAmount = Math.max(
+                    0,
+                    Math.round((selectedSettleLine.amount - enteredAmount + Number.EPSILON) * 100) / 100
+                  );
+
+                  return (
+                    <View style={styles.settlePaymentCard}>
+                      <Text style={styles.settlePaymentTitle}>Amount to settle with {personName}</Text>
+                      <TextInput
+                        value={settlementAmount}
+                        onChangeText={setSettlementAmount}
+                        placeholder="0.00"
+                        placeholderTextColor={palette.textMuted}
+                        keyboardType="decimal-pad"
+                        returnKeyType="done"
+                        style={styles.modalInput}
+                      />
+                      <Text style={styles.settlePaymentMeta}>
+                        {remainingAmount > 0.009
+                          ? `Remaining after this payment: ${formatMoney(remainingAmount)}`
+                          : 'This clears the balance with this person.'}
+                      </Text>
+
+                      <View style={styles.paymentMethodRow}>
+                        <Pressable
+                          style={[styles.modalPrimaryButton, !canSubmitSettlement && styles.settleButtonDisabled]}
+                          onPress={() => void createSingleSettlement(selectedSettleLine, 'Cash')}
+                          disabled={!canSubmitSettlement}
+                        >
+                          <Text style={styles.modalPrimaryButtonText}>Cash</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.modalPrimaryButton, !canSubmitSettlement && styles.settleButtonDisabled]}
+                          onPress={() => void createSingleSettlement(selectedSettleLine, 'Card')}
+                          disabled={!canSubmitSettlement}
+                        >
+                          <Text style={styles.modalPrimaryButtonText}>Card</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })() : null}
+
+                <Pressable style={styles.modalSecondaryButton} onPress={closeSettleModal} disabled={settling}>
+                  <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -640,30 +841,28 @@ export default function ExpensesScreen({ navigation }: Props) {
               contentContainerStyle={{ paddingVertical: 8 }}
               keyboardShouldPersistTaps="handled"
             >
-              {allGroups
-                .filter((group) => {
-                  const trip = tripSections.find((sec) => sec.groups.some((g) => g.id === group.id))?.trip;
+              {sortedOverviewGroups
+                .filter(({ group, trip }) => {
                   const query = searchQuery.trim().toLowerCase();
                   if (!query) return true;
-                  const groupName = getExpenseGroupDisplayName(group.name, trip?.name).toLowerCase();
+                  const groupName = getExpenseGroupDisplayName(group.name, trip.name).toLowerCase();
                   return groupName.includes(query);
                 })
-                .map((group) => {
-                  const section = tripSections.find((sec) => sec.groups.some((g) => g.id === group.id));
-                  if (!section) return null;
+                .map(({ group, trip }) => {
                   const groupSummary = calculateExpenseGroupSummary(group, crew, user?.id);
+                  const groupDisplay = getBalanceDisplay(groupSummary.netBalance);
                   return (
                     <Pressable
                       key={group.id}
                       onPress={() => {
                         // Open this group in the detail view.
                         setShowSearchModal(false);
-                        openGroup(section.trip, group);
+                        openGroup(trip, group);
                       }}
                       style={styles.searchRow}
                     >
-                      <Text style={styles.searchRowText}>{getExpenseGroupDisplayName(group.name, section.trip.name)}</Text>
-                      <Text style={styles.searchRowSubtext}>{formatMoney(groupSummary.totalSpent)}</Text>
+                      <Text style={styles.searchRowText}>{getExpenseGroupDisplayName(group.name, trip.name)}</Text>
+                      <Text style={[styles.searchRowSubtext, groupDisplay.isPositive ? styles.positiveText : styles.negativeText]}>{groupDisplay.label} {formatMoney(groupDisplay.amount)}</Text>
                     </Pressable>
                   );
                 })}
@@ -674,6 +873,14 @@ export default function ExpensesScreen({ navigation }: Props) {
           </View>
         </View>
       </Modal>
+
+      <ReportModal
+        visible={Boolean(reportExpense)}
+        onClose={() => setReportExpense(null)}
+        contentType="expense"
+        contentId={reportExpense?.id}
+        subjectLabel={reportExpense?.title || 'expense'}
+      />
     </View>
   );
 }
@@ -742,8 +949,8 @@ const styles = StyleSheet.create({
   },
   createGroupText: {
     color: palette.teal,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   overallHeaderRow: {
     flexDirection: 'row',
@@ -758,8 +965,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 28,
   },
+  overallBalanceBlock: {
+    flex: 1,
+  },
+  overallBalanceAmount: {
+    color: palette.text,
+    fontSize: 26,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+  },
+  overallBalanceLabel: {
+    marginTop: 3,
+    color: palette.textMuted,
+    fontSize: 13,
+    fontWeight: '500',
+    textTransform: 'lowercase',
+  },
   positiveText: {
-    color: palette.teal,
+    color: palette.green,
   },
   negativeText: {
     color: palette.orange,
@@ -770,7 +993,7 @@ const styles = StyleSheet.create({
   groupRow: {
     flexDirection: 'row',
     gap: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: palette.line,
   },
@@ -788,8 +1011,8 @@ const styles = StyleSheet.create({
   },
   groupName: {
     color: palette.text,
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   groupSubline: {
     color: palette.textMuted,
@@ -809,7 +1032,7 @@ const styles = StyleSheet.create({
   },
   groupBalanceAmount: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     textAlign: 'right',
   },
   emptyCard: {
@@ -824,7 +1047,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: palette.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   emptyText: {
     color: palette.textMuted,
@@ -852,9 +1075,9 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: palette.white,
-    fontSize: 32,
-    fontWeight: '800',
-    lineHeight: 38,
+    fontSize: 28,
+    fontWeight: '700',
+    lineHeight: 34,
   },
   heroMemberPill: {
     marginTop: 14,
@@ -872,7 +1095,7 @@ const styles = StyleSheet.create({
   heroMemberText: {
     color: palette.white,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   detailBody: {
     paddingHorizontal: 20,
@@ -880,9 +1103,9 @@ const styles = StyleSheet.create({
   },
   detailHeadline: {
     color: palette.text,
-    fontSize: 19,
-    fontWeight: '700',
-    lineHeight: 30,
+    fontSize: 18,
+    fontWeight: '600',
+    lineHeight: 28,
   },
   detailSummaryRow: {
     flexDirection: 'row',
@@ -907,7 +1130,7 @@ const styles = StyleSheet.create({
   metricValue: {
     color: palette.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   settleButton: {
     marginTop: 16,
@@ -923,7 +1146,7 @@ const styles = StyleSheet.create({
   settleButtonText: {
     color: palette.white,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   activitySection: {
     marginTop: 26,
@@ -935,7 +1158,7 @@ const styles = StyleSheet.create({
   monthLabel: {
     color: palette.text,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   activityRow: {
     flexDirection: 'row',
@@ -992,7 +1215,13 @@ const styles = StyleSheet.create({
   },
   activityAmount: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
+  },
+  activityTotalAmount: {
+    marginTop: 3,
+    color: palette.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
   },
   floatingActionWrap: {
     ...StyleSheet.absoluteFillObject,
@@ -1003,15 +1232,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+    minHeight: 52,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     borderRadius: 999,
     backgroundColor: palette.teal,
   },
   floatingActionText: {
     color: palette.white,
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
@@ -1032,7 +1262,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     color: palette.text,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modalSubtitle: {
     color: palette.textMuted,
@@ -1076,25 +1306,98 @@ const styles = StyleSheet.create({
   modalPrimaryButtonText: {
     color: palette.white,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
 
   // Additional styles for settle and search modals
   settleModalCard: {
-    width: '88%',
-    borderRadius: 16,
+    width: '90%',
+    borderRadius: 22,
     backgroundColor: palette.panel,
     padding: 20,
-    maxHeight: '70%',
+    maxHeight: '88%',
+    gap: 12,
+  },
+  settleKeyboardWrap: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  settleCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.panelSoft,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  settleListContent: {
+    gap: 8,
+    paddingVertical: 4,
+    paddingBottom: 8,
   },
   settleRow: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: palette.line,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: palette.line,
+    backgroundColor: palette.panelSoft,
+  },
+  settleRowSelected: {
+    borderColor: palette.teal,
+    backgroundColor: palette.tealSoft,
+  },
+  settleRowCopy: {
+    flex: 1,
+    gap: 4,
   },
   settleRowText: {
     fontSize: 15,
+    fontWeight: '600',
     color: palette.text,
+  },
+  settleRowSubtext: {
+    color: palette.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  settleRowAmount: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  settlePaymentCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.panelSoft,
+    padding: 14,
+    gap: 10,
+  },
+  settlePaymentTitle: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  settlePaymentMeta: {
+    color: palette.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  paymentMethodRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
   searchModalCard: {
     width: '90%',
@@ -1113,7 +1416,7 @@ const styles = StyleSheet.create({
   },
   searchRowText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     color: palette.text,
   },
   searchRowSubtext: {

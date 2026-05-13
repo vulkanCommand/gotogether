@@ -1,5 +1,7 @@
 import * as Contacts from 'expo-contacts';
 
+import { normalizePhoneForComparison } from './phone';
+
 export type DeviceInviteContact = {
   id: string;
   name: string;
@@ -9,7 +11,11 @@ export type DeviceInviteContact = {
 
 export async function collectDeviceContactLookupPayload() {
   const permission = await Contacts.requestPermissionsAsync();
-  if (permission.status !== 'granted') {
+  return collectDeviceContactLookupPayloadWithPermission(permission.status === 'granted');
+}
+
+export async function collectDeviceContactLookupPayloadWithPermission(granted: boolean) {
+  if (!granted) {
     return {
       granted: false,
       emails: [] as string[],
@@ -40,9 +46,8 @@ export async function collectDeviceContactLookupPayload() {
     }
 
     for (const phone of contact.phoneNumbers ?? []) {
-      const digits = (phone.number ?? '').replace(/\D+/g, '');
-      if (digits) {
-        const normalized = digits.length === 10 ? `1${digits}` : digits;
+      const normalized = normalizePhoneForComparison(phone.number ?? '');
+      if (normalized) {
         phoneSet.add(normalized);
         contactPhones.push(normalized);
       }

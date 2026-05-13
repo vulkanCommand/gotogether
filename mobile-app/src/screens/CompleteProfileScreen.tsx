@@ -15,6 +15,7 @@ import { radius, spacing } from '../theme/spacing';
 import { updateMyProfile, updateMyProfileImage } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { formatPhoneForDisplay } from '../utils/phone';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CompleteProfile'>;
 
@@ -45,15 +46,21 @@ export default function CompleteProfileScreen({ navigation }: Props) {
   };
 
   const handleSave = async () => {
-    if (!name.trim()) {
+    const nameValidation = validateUserText(name, { required: true, maxLength: 60 });
+
+    if (nameValidation.reason === 'required') {
       Alert.alert('Missing details', 'Your name is required.');
+      return;
+    }
+    if (!nameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
       return;
     }
 
     try {
       setSaving(true);
       const response = await updateMyProfile({
-        name: name.trim(),
+        name: nameValidation.value,
         phone: user?.phone ?? '',
       });
       let updatedUser = response.user;
@@ -68,7 +75,7 @@ export default function CompleteProfileScreen({ navigation }: Props) {
         updatedUser = imageResponse.user;
       }
       setUser(updatedUser);
-      navigation.replace('PermissionsSetup');
+      navigation.replace('MainTabs');
     } catch (error: any) {
       console.log('Profile update failed', error);
       Alert.alert('Save failed', error?.message || 'Could not save profile');
@@ -120,7 +127,7 @@ const styles = StyleSheet.create({
   },
   phoneLabel: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.accent,
     marginTop: spacing.sm,
     marginBottom: spacing.md,
@@ -142,6 +149,6 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: colors.accent,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

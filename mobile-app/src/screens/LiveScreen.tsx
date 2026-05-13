@@ -8,10 +8,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import tzLookup from 'tz-lookup';
 
+import GTButton from '../components/GTButton';
+import GTCard from '../components/GTCard';
+import GTEmptyState from '../components/GTEmptyState';
+import GTSectionHeader from '../components/GTSectionHeader';
 import NotificationBell from '../components/NotificationBell';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
 import { apiRequest, fetchTripLiveLocations, updateTripLocation, userProfileImageFileUrl } from '../config/api';
 import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
@@ -76,7 +80,7 @@ export default function LiveScreen() {
   const token = useAuthStore((state) => state.token);
 
   const [loading, setLoading] = useState(false);
-  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
   const [locations, setLocations] = useState<LiveMember[]>([]);
   const [destinationCoordinate, setDestinationCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
   const [destinationStatus, setDestinationStatus] = useState('');
@@ -90,9 +94,9 @@ export default function LiveScreen() {
     try {
       setLoading(true);
 
-      const permission = await Location.requestForegroundPermissionsAsync();
+      const permission = await Location.getForegroundPermissionsAsync();
       const granted = permission.status === 'granted';
-      setPermissionGranted(granted);
+      setPermissionStatus(granted ? 'granted' : permission.status === 'denied' ? 'denied' : 'undetermined');
 
       if (granted) {
         const currentPosition = await Location.getCurrentPositionAsync({
@@ -150,6 +154,11 @@ export default function LiveScreen() {
     return null;
   }, [itineraryDays]);
 
+  const hasMappableDestination = useMemo(
+    () => shouldShowLocationIcon(activeDestination?.event.location, activeDestination?.event.locationIsMapped),
+    [activeDestination?.event.location, activeDestination?.event.locationIsMapped]
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -159,6 +168,12 @@ export default function LiveScreen() {
       if (!locationText) {
         setDestinationCoordinate(null);
         setDestinationStatus('No active event location yet.');
+        return;
+      }
+
+      if (!hasMappableDestination) {
+        setDestinationCoordinate(null);
+        setDestinationStatus('Could not map this event location yet.');
         return;
       }
 
@@ -178,12 +193,12 @@ export default function LiveScreen() {
           setDestinationStatus('');
         } else {
           setDestinationCoordinate(null);
-          setDestinationStatus('Could not map this event location yet.');
+          setDestinationStatus('');
         }
       } catch {
         if (!cancelled) {
           setDestinationCoordinate(null);
-          setDestinationStatus('Could not map this event location yet.');
+          setDestinationStatus('');
         }
       }
     };
@@ -193,7 +208,7 @@ export default function LiveScreen() {
     return () => {
       cancelled = true;
     };
-  }, [activeDestination?.event.location]);
+  }, [activeDestination?.event.location, hasMappableDestination]);
 
   const region = useMemo(() => {
     if (destinationCoordinate) {
@@ -220,8 +235,22 @@ export default function LiveScreen() {
   }, [destinationCoordinate, mappableLocations]);
 
   const hasMapPins = mappableLocations.length > 0 || destinationCoordinate !== null;
+  const liveSharingEnabled = permissionStatus === 'granted';
   const selfLocation = mappableLocations.find((member) => member.is_current_user);
   const selfDistance = selfLocation && destinationCoordinate ? distanceMiles(selfLocation, destinationCoordinate) : null;
+
+  const requestLocationPermission = async () => {
+    try {
+      const result = await Location.requestForegroundPermissionsAsync();
+      const granted = result.status === 'granted';
+      setPermissionStatus(granted ? 'granted' : result.status === 'denied' ? 'denied' : 'undetermined');
+      if (granted) {
+        await refreshLiveMap();
+      }
+    } catch (error) {
+      console.log('Location permission request failed', error);
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -247,7 +276,7 @@ export default function LiveScreen() {
             <View style={styles.mapWrap}>
               {loading ? <ActivityIndicator size="large" color={colors.accent} /> : null}
 
-              {!loading && hasMapPins && Platform.OS !== 'web' ? (
+              {!loading && liveSharingEnabled && hasMapPins && Platform.OS !== 'web' ? (
                 <MapView style={styles.map} initialRegion={region} region={region}>
                   {destinationCoordinate ? (
                     <Marker
@@ -277,7 +306,7 @@ export default function LiveScreen() {
                       title={member.name || member.email}
                       description={
                         member.is_current_user
-                          ? `You • ${formatMemberTimestamp(member.updated_at, member.latitude, member.longitude)}`
+                          ? `You - ${formatMemberTimestamp(member.updated_at, member.latitude, member.longitude)}`
                           : formatMemberTimestamp(member.updated_at, member.latitude, member.longitude)
                       }
                     >
@@ -299,19 +328,35 @@ export default function LiveScreen() {
                 </MapView>
               ) : !loading ? (
                 <View style={styles.mapFallback}>
-                  <Text style={styles.mapText}>
-                    {Platform.OS === 'web'
-                      ? 'Live map preview is available on the mobile app.'
-                      : permissionGranted
-                        ? 'No live locations shared yet.'
-                        : 'Location permission is required for the live map.'}
-                  </Text>
+                  {!liveSharingEnabled && Platform.OS !== 'web' ? (
+                    <>
+                      <View style={styles.permissionIconWrap}>
+                        <Ionicons name="location-outline" size={30} color={colors.accentStrong} />
+                      </View>
+                      <Text style={styles.permissionTitle}>Live sharing is off</Text>
+                      <Text style={styles.permissionBody}>
+                        Enable location to share your position with your trip group.
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.mapText}>
+                      {Platform.OS === 'web'
+                        ? 'Live map preview is available on the mobile app.'
+                        : 'No live locations shared yet.'}
+                    </Text>
+                  )}
+                  {!liveSharingEnabled && Platform.OS !== 'web' ? (
+                    <View style={styles.permissionActions}>
+                      <GTButton title="Enable Location" onPress={() => void requestLocationPermission()} />
+                      <GTButton title="Open Settings" variant="secondary" onPress={() => void Linking.openSettings()} />
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
             </View>
 
-            <View style={styles.card}>
-              <Text style={styles.sectionEyebrow}>Active destination</Text>
+            <GTCard style={styles.card}>
+              <GTSectionHeader title="Active destination" subtitle="Where the trip is headed next." />
               {activeDestination ? (
                 <>
                   <Text style={styles.destinationTitle}>{activeDestination.event.title}</Text>
@@ -329,25 +374,37 @@ export default function LiveScreen() {
                   )}
 
                   <Text style={styles.distanceText}>
-                    {selfDistance !== null ? `${formatMiles(selfDistance)} from you` : destinationStatus || 'Share your location to see your distance.'}
+                    {selfDistance !== null
+                      ? `${formatMiles(selfDistance)} from you`
+                      : hasMappableDestination
+                        ? 'Share your location to see your distance.'
+                        : destinationStatus || 'Share your location to see your distance.'}
                   </Text>
                 </>
               ) : (
-                <Text style={styles.emptyText}>Add an itinerary event location to show the live destination.</Text>
+                <GTEmptyState
+                  icon="pin-outline"
+                  title="No live destination yet"
+                  body="Add an itinerary event location to show the shared destination here."
+                />
               )}
-            </View>
+            </GTCard>
 
-            <View style={styles.card}>
+            <GTCard style={styles.card}>
               <View style={styles.sectionRow}>
                 <Text style={styles.sectionTitle}>Crew status</Text>
-                <Pressable style={styles.refreshButton} onPress={refreshLiveMap}>
-                  <Ionicons name="refresh" size={16} color={colors.accent} />
+                <Pressable style={styles.refreshButton} onPress={() => void refreshLiveMap()}>
+                  <Ionicons name="refresh" size={18} color={colors.accentStrong} />
                   <Text style={styles.refreshButtonText}>Refresh</Text>
                 </Pressable>
               </View>
 
               {locations.length === 0 ? (
-                <Text style={styles.emptyText}>No crew locations are available yet.</Text>
+                <GTEmptyState
+                  icon="people-outline"
+                  title="No crew locations yet"
+                  body="Once someone in the trip shares their location, they’ll show up here."
+                />
               ) : (
                 locations.map((member) => (
                   <View key={member.user_id} style={styles.memberRow}>
@@ -370,7 +427,7 @@ export default function LiveScreen() {
                   </View>
                 ))
               )}
-            </View>
+            </GTCard>
           </>
         )}
       </ScrollView>
@@ -504,7 +561,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 120,
+    paddingBottom: footerScrollPadding,
     gap: spacing.lg,
   },
   header: {
@@ -518,8 +575,8 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: colors.textPrimary,
-    fontSize: 30,
-    fontWeight: '900',
+    fontSize: 28,
+    fontWeight: '700',
   },
   headerSubtitle: {
     marginTop: 4,
@@ -565,7 +622,7 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: colors.accent,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   mapFallback: {
     flex: 1,
@@ -573,10 +630,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
   },
+  permissionIconWrap: {
+    width: 74,
+    height: 74,
+    borderRadius: 26,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  permissionTitle: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  permissionBody: {
+    marginTop: spacing.xs,
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 21,
+    maxWidth: 280,
+  },
   mapText: {
     color: colors.primary,
-    fontWeight: '700',
+    fontWeight: '500',
     textAlign: 'center',
+  },
+  permissionActions: {
+    width: '100%',
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
   sectionEyebrow: {
     color: colors.textSecondary,
@@ -594,7 +679,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   memberRow: {
     flexDirection: 'row',
@@ -610,7 +695,7 @@ const styles = StyleSheet.create({
   },
   memberName: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   memberMeta: {
@@ -633,14 +718,14 @@ const styles = StyleSheet.create({
   memberBadgeText: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   memberBadgeTextSelf: {
     color: colors.accentStrong,
   },
   destinationTitle: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   destinationMeta: {
@@ -663,33 +748,34 @@ const styles = StyleSheet.create({
   locationButtonText: {
     color: colors.accentStrong,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   refreshButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderRadius: radius.pill,
+    minHeight: 44,
+    borderRadius: 19,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surfaceMuted,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 0,
   },
   refreshButtonText: {
     color: colors.accentStrong,
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '600',
   },
   distanceText: {
     marginTop: spacing.sm,
     color: colors.accent,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   emptyTitle: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   emptyText: {

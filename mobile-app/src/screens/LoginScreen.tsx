@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
 import { FirebaseAuthTypes, signInWithPhoneNumber } from '@react-native-firebase/auth';
@@ -9,7 +9,6 @@ import Screen from '../components/Screen';
 import AppCard from '../components/AppCard';
 import Pill from '../components/Pill';
 import PrimaryButton from '../components/PrimaryButton';
-import SectionTitle from '../components/SectionTitle';
 import TextField from '../components/TextField';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
@@ -98,31 +97,32 @@ export default function LoginScreen({ navigation }: Props) {
 
   return (
     <Screen>
-      <LinearGradient colors={['#0F172A', '#173A75', '#2563EB']} style={styles.hero}>
-        <Pill label={confirmation ? 'Secure sign-in' : 'Premium trip access'} tone="accent" />
-        <Text style={styles.heroTitle}>{confirmation ? 'One step left' : 'Welcome back to the crew'}</Text>
-        <Text style={styles.heroSubtitle}>
-          {confirmation
-            ? 'Enter the 6-digit code and we will drop you into your shared trip workspace.'
-            : 'Phone-first sign-in keeps the group fast, secure, and easy to join from any device.'}
-        </Text>
-      </LinearGradient>
+      <View style={styles.layout}>
+        <LinearGradient colors={[colors.accent, colors.violet]} style={styles.hero}>
+          <View style={styles.glowTop} />
+          <View style={styles.glowBottom} />
+          <Pill
+            label={confirmation ? 'Secure sign-in' : 'Trip access'}
+            tone="accent"
+            style={styles.heroPill}
+            textStyle={styles.heroPillText}
+          />
+          <Text style={styles.heroTitle}>
+            {confirmation ? 'Enter verification code' : 'Continue with phone'}
+          </Text>
+          <Text style={styles.heroSubtitle}>
+            {confirmation
+              ? `Sent to ${maskPhoneForOtp(phoneNumber)}.`
+              : 'We’ll send a one-time code to verify your number.'}
+          </Text>
+        </LinearGradient>
 
-      <SectionTitle
-        title={confirmation ? 'Enter OTP' : 'Continue with phone'}
-        subtitle={
-          confirmation
-            ? `We sent a one-time code to ${maskPhoneForOtp(phoneNumber)}.`
-            : 'Use your phone number to sign in or create your account with a one-time code.'
-        }
-      />
-
-      <AppCard>
-        <View style={styles.form}>
+        <AppCard style={styles.formCard}>
+          <View style={styles.form}>
           {!confirmation ? (
             <>
-              <Text style={styles.helperText}>
-                Enter +countrycode for international numbers, or just the 10-digit number for the US.
+              <Text style={styles.formIntro}>
+                Enter +countrycode for international numbers, or use a 10-digit US number.
               </Text>
               <TextField
                 label="Phone number"
@@ -134,16 +134,23 @@ export default function LoginScreen({ navigation }: Props) {
                 autoComplete="tel"
               />
               <PrimaryButton
-                title={loading ? 'Sending code...' : 'Send OTP'}
+                title={loading ? 'Sending code...' : 'Send code'}
                 onPress={sendCode}
                 disabled={loading}
               />
+              <Pressable style={styles.backLinkInline} onPress={() => navigation.navigate('Onboarding')}>
+                <Text style={styles.backLinkInlineText}>Back to onboarding</Text>
+              </Pressable>
             </>
           ) : (
             <>
-              <TextField
-                label="Verification code"
-                placeholder="6-digit code"
+              <Text style={styles.formIntro}>
+                Use the 6-digit code we sent to your selected phone number.
+              </Text>
+              <TextInput
+                style={styles.otpInput}
+                placeholder="123456"
+                placeholderTextColor={colors.textMuted}
                 value={verificationCode}
                 onChangeText={setVerificationCode}
                 keyboardType="number-pad"
@@ -156,20 +163,24 @@ export default function LoginScreen({ navigation }: Props) {
                 onPress={verifyCode}
                 disabled={verifying}
               />
-              <PrimaryButton title="Change number" variant="secondary" onPress={resetPhoneFlow} />
-              <Pressable
-                style={styles.inlineLink}
-                onPress={sendCode}
-                disabled={loading}
-              >
-                <Text style={styles.inlineLinkText}>
-                  {loading ? 'Sending a new code...' : 'Resend code'}
-                </Text>
+              <View style={styles.otpActions}>
+                <Pressable style={styles.inlineLink} onPress={sendCode} disabled={loading}>
+                  <Text style={styles.inlineLinkText}>
+                    {loading ? 'Sending a new code...' : 'Resend code'}
+                  </Text>
+                </Pressable>
+                <Pressable style={styles.inlineLink} onPress={resetPhoneFlow}>
+                  <Text style={styles.inlineLinkText}>Change number</Text>
+                </Pressable>
+              </View>
+              <Pressable style={styles.backLinkInline} onPress={() => navigation.navigate('Onboarding')}>
+                <Text style={styles.backLinkInlineText}>Back to onboarding</Text>
               </Pressable>
             </>
           )}
-        </View>
-      </AppCard>
+          </View>
+        </AppCard>
+      </View>
 
       {isExpoGo ? (
         <AppCard>
@@ -179,37 +190,86 @@ export default function LoginScreen({ navigation }: Props) {
           </Text>
         </AppCard>
       ) : null}
-
-      <Pressable style={styles.backLink} onPress={() => navigation.navigate('Onboarding')}>
-        <Text style={styles.backLinkText}>Back to onboarding</Text>
-      </Pressable>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  layout: {
+    gap: spacing.lg,
+  },
   hero: {
     borderRadius: radius.lg,
-    padding: spacing.xl,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: 22,
     gap: spacing.sm,
+    overflow: 'hidden',
+    minHeight: 188,
+    justifyContent: 'flex-end',
+  },
+  glowTop: {
+    position: 'absolute',
+    top: -70,
+    right: -40,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  glowBottom: {
+    position: 'absolute',
+    bottom: -56,
+    left: -24,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  heroPill: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderColor: 'rgba(255,255,255,0.34)',
+  },
+  heroPillText: {
+    color: 'rgba(255,255,255,0.96)',
   },
   heroTitle: {
     color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: -0.9,
+    fontSize: 30,
+    fontWeight: '700',
+    letterSpacing: -0.8,
   },
   heroSubtitle: {
-    color: '#DBEAFE',
+    color: 'rgba(255,255,255,0.78)',
     fontSize: 14,
     lineHeight: 21,
+  },
+  formCard: {
+    padding: spacing.lg,
   },
   form: {
     gap: spacing.md,
   },
+  formIntro: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  otpInput: {
+    minHeight: 58,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    color: colors.textPrimary,
+    fontSize: 24,
+    fontWeight: '600',
+    textAlign: 'center',
+    letterSpacing: 6,
+    paddingHorizontal: 18,
+  },
   helperTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   helperText: {
@@ -220,19 +280,24 @@ const styles = StyleSheet.create({
   inlineLink: {
     alignItems: 'center',
     paddingVertical: 6,
+    flex: 1,
   },
   inlineLinkText: {
     color: colors.accent,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
-  backLink: {
+  otpActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  backLinkInline: {
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingTop: 4,
   },
-  backLinkText: {
+  backLinkInlineText: {
     color: colors.accent,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
 });

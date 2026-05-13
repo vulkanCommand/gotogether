@@ -6,6 +6,8 @@ import { NavigatorScreenParams } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import AppFooter from '../components/AppFooter';
+import AppGuideModal from '../components/AppGuideModal';
+import ActiveTripBootstrap from '../components/ActiveTripBootstrap';
 
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -38,7 +40,7 @@ export type RootStackParamList = {
   TripOverview: undefined;
   TripSetup: undefined;
   Itinerary: undefined;
-  AddExpense: { groupId?: number; eventId?: string; expenseId?: string } | undefined;
+  AddExpense: { tripId?: number; groupId?: number; eventId?: string; expenseId?: string } | undefined;
   TripCompletion: undefined;
   Settings: undefined;
   Notifications: undefined;
@@ -46,7 +48,7 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   Home: undefined;
-  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed' } | undefined;
+  Trips: { initialSection?: 'Current' | 'Upcoming' | 'Completed'; refreshToken?: number } | undefined;
   Live: undefined;
   Expenses: undefined;
   Profile: undefined;
@@ -56,42 +58,50 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function MainTabs() {
-  return (
-    <Tab.Navigator
-      tabBar={() => <AppFooter />}
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.tabInactive,
-        tabBarStyle: {
-          height: 84,
-          paddingTop: 10,
-          paddingBottom: 16,
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-        },
-        tabBarIcon: ({ color, size }) => {
-          const map: Record<string, keyof typeof Ionicons.glyphMap> = {
-            Home: 'home-outline',
-            Trips: 'airplane-outline',
-            Live: 'navigate-outline',
-            Expenses: 'wallet-outline',
-            Profile: 'person-outline',
-          };
+  const user = useAuthStore((state) => state.user);
 
-          return <Ionicons name={map[route.name]} size={size} color={color} />;
-        },
-        tabBarLabel: ({ color }) => (
-          <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{route.name}</Text>
-        ),
-      })}
-    >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Trips" component={TripsScreen} />
-      <Tab.Screen name="Live" component={LiveScreen} />
-      <Tab.Screen name="Expenses" component={ExpensesScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
-    </Tab.Navigator>
+  return (
+    <>
+      <ActiveTripBootstrap />
+
+      <Tab.Navigator
+        tabBar={() => <AppFooter />}
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarActiveTintColor: colors.accent,
+          tabBarInactiveTintColor: colors.tabInactive,
+          tabBarStyle: {
+            height: 84,
+            paddingTop: 10,
+            paddingBottom: 16,
+            backgroundColor: colors.surface,
+            borderTopColor: colors.border,
+          },
+          tabBarIcon: ({ color, size }) => {
+            const map: Record<string, keyof typeof Ionicons.glyphMap> = {
+              Home: 'home-outline',
+              Trips: 'airplane-outline',
+              Live: 'navigate-outline',
+              Expenses: 'wallet-outline',
+              Profile: 'person-outline',
+            };
+
+            return <Ionicons name={map[route.name]} size={size} color={color} />;
+          },
+          tabBarLabel: ({ color }) => (
+            <Text style={{ color, fontSize: 12, fontWeight: '600' }}>{route.name}</Text>
+          ),
+        })}
+      >
+        <Tab.Screen name="Home" component={HomeScreen} />
+        <Tab.Screen name="Trips" component={TripsScreen} />
+        <Tab.Screen name="Live" component={LiveScreen} />
+        <Tab.Screen name="Expenses" component={ExpensesScreen} />
+        <Tab.Screen name="Profile" component={ProfileScreen} />
+      </Tab.Navigator>
+
+      <AppGuideModal enabled={Boolean(user?.profile_complete)} />
+    </>
   );
 }
 
@@ -124,7 +134,7 @@ function BootScreen({ title, subtitle }: { title: string; subtitle: string }) {
         >
           <ActivityIndicator size="large" color={colors.accent} />
         </View>
-        <Text style={{ fontSize: 22, fontWeight: '800', color: colors.textPrimary, letterSpacing: -0.5 }}>
+        <Text style={{ fontSize: 21, fontWeight: '700', color: colors.textPrimary, letterSpacing: -0.4 }}>
           {title}
         </Text>
         <Text style={{ textAlign: 'center', color: colors.textSecondary, lineHeight: 21 }}>
@@ -162,11 +172,11 @@ export default function AppNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {token && user ? (
         !user.profile_complete ? (
-          // New users must complete their profile and then grant permissions before reaching the main app.
+          // New users complete their profile and then enter the main app directly.
           <>
             <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
-            <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
             <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
             <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
             <Stack.Screen name="TripCreate" component={TripCreateScreen} />
             <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
@@ -178,12 +188,10 @@ export default function AppNavigator() {
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
           </>
         ) : (
-          // Returning users are directed through the permissions setup before the main tabs so that
-          // required permissions are always granted.  Once permissions are accepted, the screen
-          // navigates to MainTabs and is not shown again until the app is reinstalled.
+          // Returning users go straight into the app. Permissions are requested feature-by-feature.
           <>
-            <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
             <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="PermissionsSetup" component={PermissionsSetupScreen} />
             <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
             <Stack.Screen name="TripCreate" component={TripCreateScreen} />
             <Stack.Screen name="TripOverview" component={TripOverviewScreen} />

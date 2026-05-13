@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ func SyncContacts(c *gin.Context) {
 			phones = append(phones, normalized)
 		}
 	}
+	log.Printf("contacts sync payload counts emails=%d phones=%d", len(emails), len(phones))
 
 	rows, err := db.DB.Query(`
 		SELECT
@@ -53,10 +55,27 @@ func SyncContacts(c *gin.Context) {
 			COALESCE(profile_image_url, '')
 		FROM users
 		WHERE id <> $1
+		  AND is_deleted = FALSE
+		  AND NOT EXISTS (
+				SELECT 1
+				FROM user_blocks ub
+				WHERE (ub.blocker_user_id = $1 AND ub.blocked_user_id = users.id)
+				   OR (ub.blocker_user_id = users.id AND ub.blocked_user_id = $1)
+		  )
 		  AND (
-				(array_length($2::text[], 1) IS NOT NULL AND LOWER(COALESCE(email, '')) = ANY($2::text[]))
+				(array_length($2::text[], 1) IS NOT NULL AND COALESCE(email, '') <> '' AND LOWER(COALESCE(email, '')) = ANY($2::text[]))
 				OR
-				(array_length($3::text[], 1) IS NOT NULL AND COALESCE(phone, '') = ANY($3::text[]))
+				(
+					array_length($3::text[], 1) IS NOT NULL
+					AND COALESCE(phone, '') <> ''
+					AND (
+						CASE
+							WHEN LENGTH(REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')) = 10
+								THEN '1' || REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')
+							ELSE REGEXP_REPLACE(COALESCE(phone, ''), '\D', '', 'g')
+						END
+					) = ANY($3::text[])
+				)
 		  )
 		ORDER BY name ASC, id ASC
 	`, userID, pq.Array(emails), pq.Array(phones))
@@ -100,7 +119,13 @@ func SyncContacts(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"friends": friends})
+	currentFriends, err := loadVisibleFriends(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch friends", "details": err.Error()})
+		return
+	}
+	log.Printf("contacts sync returned friends=%d", len(currentFriends))
+	c.JSON(http.StatusOK, gin.H{"friends": currentFriends})
 }
 
 func GetFriends(c *gin.Context) {
@@ -109,6 +134,16 @@ func GetFriends(c *gin.Context) {
 		return
 	}
 
+	friends, err := loadVisibleFriends(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch friends", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"friends": friends})
+}
+
+func loadVisibleFriends(userID int) ([]models.Friend, error) {
 	rows, err := db.DB.Query(`
 		SELECT
 			u.id,
@@ -121,11 +156,17 @@ func GetFriends(c *gin.Context) {
 		FROM friendships f
 		INNER JOIN users u ON u.id = f.friend_user_id
 		WHERE f.user_id = $1
+		  AND u.is_deleted = FALSE
+		  AND NOT EXISTS (
+				SELECT 1
+				FROM user_blocks ub
+				WHERE (ub.blocker_user_id = $1 AND ub.blocked_user_id = u.id)
+				   OR (ub.blocker_user_id = u.id AND ub.blocked_user_id = $1)
+		  )
 		ORDER BY u.name ASC, u.id ASC
 	`, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch friends", "details": err.Error()})
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -133,13 +174,12 @@ func GetFriends(c *gin.Context) {
 	for rows.Next() {
 		var friend models.Friend
 		if err := rows.Scan(&friend.ID, &friend.Name, &friend.Email, &friend.Phone, &friend.Username, &friend.HomeCity, &friend.ProfileImageURL); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read friends", "details": err.Error()})
-			return
+			return nil, err
 		}
 		friends = append(friends, friend)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"friends": friends})
+	return friends, rows.Err()
 }
 
 func SendSMSInvite(c *gin.Context) {

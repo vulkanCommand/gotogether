@@ -18,7 +18,7 @@ import PrimaryButton from '../components/PrimaryButton';
 import NotificationBell from '../components/NotificationBell';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { footerScrollPadding, radius, spacing } from '../theme/spacing';
 import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import {
   API_BASE_URL,
@@ -32,6 +32,7 @@ import {
 } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
+import { invalidateTripCaches } from '../services/resourceCache';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCompletion'>;
 
@@ -207,16 +208,21 @@ export default function TripCompletionScreen({ navigation }: Props) {
     tripDates,
     currentTrip?.destination ||
       (destination?.country ? `${destination.name}, ${destination.country}` : destination?.name ?? 'Destination pending'),
-  ].join(' • ');
+  ].join(' - ');
 
   const allExpenses = expenseGroups.flatMap((group) => group.expenses);
-  const tripSpendTotal = allExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const tripSpendTotal = allExpenses.reduce(
+    (sum, expense) =>
+      (expense.splitMethod || '').toLowerCase().includes('settlement') ? sum : sum + expense.amount,
+    0
+  );
   const totalEventCount = itineraryDays.reduce((sum, day) => sum + day.events.length, 0);
   const completedEventCount = itineraryDays.reduce(
     (sum, day) => sum + day.events.filter((event) => isCompletedEvent(event)).length,
     0
   );
   const canFinalizeTrip = canCompleteTrip && !isCompleted && Boolean(primaryPhoto);
+  const showMemoryCard = !isCompleted;
 
   const handleFinish = async () => {
     if (!canCompleteTrip) {
@@ -233,10 +239,12 @@ export default function TripCompletionScreen({ navigation }: Props) {
       setCompleting(true);
       if (currentTrip?.id) {
         await completeTrip(currentTrip.id);
-        await refreshTripState();
+        await invalidateTripCaches(currentTrip.id);
+        setCurrentTrip({ ...currentTrip, completed_at: currentTrip.completed_at || new Date().toISOString() });
       }
+
       resetTrip();
-      navigation.navigate('MainTabs', { screen: 'Trips', params: { initialSection: 'Completed' } });
+      navigation.navigate('MainTabs', { screen: 'Trips', params: { initialSection: 'Completed', refreshToken: Date.now() } });
     } catch (error: any) {
       Alert.alert('Complete failed', error?.message || 'Could not complete this trip');
     } finally {
@@ -277,49 +285,54 @@ export default function TripCompletionScreen({ navigation }: Props) {
           </View>
         </AppCard>
 
-        <AppCard style={styles.memoryCard}>
-          <View style={styles.memoryHeader}>
-            <View>
-              <Text style={styles.sectionEyebrow}>Memory photo</Text>
-              <Text style={styles.memoryTitle}>{primaryPhoto ? 'Your selected trip photo' : 'Add one photo to close the trip'}</Text>
+        {showMemoryCard ? (
+          <AppCard style={styles.memoryCard}>
+            <View style={styles.memoryHeader}>
+              <View>
+                <Text style={styles.sectionEyebrow}>Memory photo</Text>
+                <Text style={styles.memoryTitle}>{primaryPhoto ? 'Memory photo selected' : 'Add one photo'}</Text>
+              </View>
+              {primaryPhoto ? <Ionicons name="image-outline" size={20} color={colors.accent} /> : null}
             </View>
-            {primaryPhoto ? <Ionicons name="image-outline" size={22} color={colors.accent} /> : null}
-          </View>
 
-          {primaryPhoto ? (
-            <View style={styles.selectedPhotoWrap}>
-              <Image
-                source={{
-                  uri: `${API_BASE_URL}/api/trips/${currentTrip?.id}/photos/${primaryPhoto.id}/file`,
-                  headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-                }}
-                style={styles.selectedPhoto}
-              />
+            {primaryPhoto ? (
+              <View style={styles.selectedPhotoRow}>
+                <Image
+                  source={{
+                    uri: `${API_BASE_URL}/api/trips/${currentTrip?.id}/photos/${primaryPhoto.id}/file`,
+                    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+                  }}
+                  style={styles.selectedPhotoThumb}
+                />
+                <View style={styles.selectedPhotoCopy}>
+                  <Text style={styles.selectedPhotoTitle}>Memory photo selected</Text>
+                  <Text style={styles.selectedPhotoSubtitle}>This photo will be saved when you finish the trip.</Text>
+                </View>
+              </View>
+            ) : (
+              <Pressable style={styles.photoUploadCard} onPress={handleUploadPhoto} disabled={uploading}>
+                <View style={styles.uploadIconCircle}>
+                  <Ionicons name="image-outline" size={22} color={colors.accent} />
+                </View>
+                <Text style={styles.photoTitle}>{uploading ? 'Uploading photo...' : 'Add one photo'}</Text>
+                <Text style={styles.photoSubtitle}>Choose a memory to close this trip.</Text>
+              </Pressable>
+            )}
+
+            {primaryPhoto ? (
               <View style={styles.photoActionsRow}>
-                {!isCompleted ? (
-                  <Pressable style={styles.photoActionButton} onPress={handleUploadPhoto} disabled={uploading}>
-                    <Ionicons name="swap-horizontal-outline" size={17} color={colors.accent} />
-                    <Text style={styles.photoActionText}>{uploading ? 'Replacing...' : 'Replace'}</Text>
-                  </Pressable>
-                ) : null}
-                {!isCompleted ? (
-                  <Pressable style={styles.photoRemoveButton} onPress={handleRemovePhoto} disabled={removingPhoto}>
-                    <Ionicons name="trash-outline" size={17} color={colors.danger} />
-                    <Text style={styles.photoRemoveText}>{removingPhoto ? 'Removing...' : 'Remove'}</Text>
-                  </Pressable>
-                ) : null}
+                <Pressable style={styles.photoActionButton} onPress={handleUploadPhoto} disabled={uploading}>
+                  <Ionicons name="swap-horizontal-outline" size={16} color={colors.accent} />
+                  <Text style={styles.photoActionText}>{uploading ? 'Replacing...' : 'Replace'}</Text>
+                </Pressable>
+                <Pressable style={styles.photoRemoveButton} onPress={handleRemovePhoto} disabled={removingPhoto}>
+                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                  <Text style={styles.photoRemoveText}>{removingPhoto ? 'Removing...' : 'Remove'}</Text>
+                </Pressable>
               </View>
-            </View>
-          ) : (
-            <Pressable style={styles.photoUploadCard} onPress={handleUploadPhoto} disabled={uploading || isCompleted}>
-              <View style={styles.uploadIconCircle}>
-                <Ionicons name="image-outline" size={24} color={colors.accent} />
-              </View>
-              <Text style={styles.photoTitle}>{uploading ? 'Uploading photo...' : 'Add photo'}</Text>
-              <Text style={styles.photoSubtitle}>Choose one photo that captures this trip. No gallery, no extra complexity.</Text>
-            </Pressable>
-          )}
-        </AppCard>
+            ) : null}
+          </AppCard>
+        ) : null}
 
         <View style={styles.statsRow}>
           <StatCard value={String(members.length)} label="Crew" icon="people-outline" />
@@ -372,7 +385,7 @@ function SummaryRow({ label, value, isLast = false }: { label: string; value: st
 
 const styles = StyleSheet.create({
   scrollContent: {
-    paddingBottom: spacing.xl,
+    paddingBottom: footerScrollPadding,
     gap: spacing.md,
   },
   headerRow: {
@@ -383,14 +396,14 @@ const styles = StyleSheet.create({
   headerEyebrow: {
     color: colors.accent,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '500',
   },
   headerTitle: {
     marginTop: 4,
     color: colors.textPrimary,
-    fontSize: 30,
-    fontWeight: '900',
-    letterSpacing: -0.8,
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: -0.5,
   },
   heroCard: {
     padding: 0,
@@ -398,37 +411,37 @@ const styles = StyleSheet.create({
   },
   heroImage: {
     width: '100%',
-    height: 250,
+    height: 180,
     backgroundColor: '#E5E7EB',
   },
   heroImagePlaceholder: {
-    height: 250,
+    height: 160,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.accentSoft,
   },
   heroOverlay: {
-    padding: spacing.lg,
+    padding: 16,
   },
   heroLabel: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '500',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   heroTitle: {
-    marginTop: spacing.xs,
+    marginTop: 4,
     color: colors.textPrimary,
-    fontSize: 25,
-    fontWeight: '900',
+    fontSize: 22,
+    fontWeight: '600',
     letterSpacing: -0.5,
   },
   heroMeta: {
-    marginTop: 6,
+    marginTop: 4,
     color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 19,
   },
   memoryCard: {
     gap: spacing.md,
@@ -441,7 +454,7 @@ const styles = StyleSheet.create({
   sectionEyebrow: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
@@ -449,7 +462,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: colors.textPrimary,
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   photoUploadCard: {
     borderWidth: 2,
@@ -457,11 +470,11 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.lg,
     backgroundColor: colors.surfaceMuted,
-    minHeight: 170,
+    minHeight: 150,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.lg,
   },
   uploadIconCircle: {
     width: 54,
@@ -475,7 +488,7 @@ const styles = StyleSheet.create({
   photoTitle: {
     color: colors.textPrimary,
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '600',
     textAlign: 'center',
   },
   photoSubtitle: {
@@ -486,25 +499,45 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   selectedPhotoWrap: {
-    borderRadius: radius.lg,
+    display: 'none',
+  },
+  selectedPhotoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    overflow: 'hidden',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceMuted,
+    padding: 12,
   },
-  selectedPhoto: {
-    width: '100%',
-    height: 220,
+  selectedPhotoThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: 16,
     backgroundColor: '#E5E7EB',
+  },
+  selectedPhotoCopy: {
+    flex: 1,
+  },
+  selectedPhotoTitle: {
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  selectedPhotoSubtitle: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
   },
   photoActionsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
-    padding: spacing.md,
   },
   photoActionButton: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 42,
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
@@ -517,7 +550,7 @@ const styles = StyleSheet.create({
   photoActionText: {
     color: colors.accent,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   photoRemoveButton: {
     flex: 1,
@@ -534,7 +567,7 @@ const styles = StyleSheet.create({
   photoRemoveText: {
     color: colors.danger,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   statsRow: {
     flexDirection: 'row',
@@ -546,22 +579,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    paddingVertical: spacing.md,
+    minHeight: 82,
+    paddingVertical: 10,
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'center',
+    gap: 4,
   },
   statValue: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
   },
   statLabel: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '400',
   },
   summaryRow: {
-    paddingVertical: 14,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -571,13 +606,13 @@ const styles = StyleSheet.create({
   summaryRowLabel: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 4,
+    fontWeight: '600',
+    marginBottom: 3,
   },
   summaryRowValue: {
     color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '500',
   },
   actions: {
     gap: spacing.sm,

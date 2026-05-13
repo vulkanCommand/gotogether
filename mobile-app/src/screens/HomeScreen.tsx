@@ -1,18 +1,49 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
+import GTBadge from '../components/GTBadge';
+import GTButton from '../components/GTButton';
+import GTCard from '../components/GTCard';
+import GTEmptyState from '../components/GTEmptyState';
+import GTLoadingSkeleton from '../components/GTLoadingSkeleton';
+import GTSectionHeader from '../components/GTSectionHeader';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { useAuthStore } from '../store/authStore';
-import { ItineraryDay, isCompletedEvent, useTripStore } from '../store/tripStore';
-import { ApiNotification, ApiTrip, apiRequest, fetchNotifications, fetchTripDetails, fetchTrips, tripCoverFileUrl } from '../config/api';
-import { colors } from '../theme/colors';
-import { radius, spacing } from '../theme/spacing';
+import { ItineraryDay, useTripStore } from '../store/tripStore';
+import {
+  ApiActivityItem,
+  ApiTrip,
+  apiRequest,
+  fetchExpenseGroups,
+  fetchNotifications,
+  fetchRecentActivity,
+  fetchTripDetails,
+  fetchTrips,
+  tripCoverFileUrl,
+} from '../config/api';
+import { colors, gradients } from '../theme/colors';
+import { footerScrollPadding, radius, shadows, spacing } from '../theme/spacing';
+import { calculateOverallExpenseSummary, formatMoney, getBalanceDisplay } from '../utils/expenseCalculations';
+import { formatNotificationDisplay } from '../utils/notificationDisplay';
 import { prototypeImages } from '../utils/prototypeAssets';
 import { formatTripRange, isTripActive, isTripUpcoming, mapApiMembersToCrew, pickPrimaryTrip, tripTimelineStatus } from '../utils/tripFlow';
+import { CACHE_TTLS, cacheKeys, isCacheFresh, readCachedValue, writeCachedValue } from '../services/resourceCache';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Home'>,
@@ -23,187 +54,26 @@ type HomeActivityItem = {
   id: number | string;
   title: string;
   body: string;
+  type?: string;
+  tripId?: number;
 };
 
-function cleanText(value: string) {
-  return value.replace(/\s+/g, ' ').replace(/[.]+$/g, '').trim();
-}
+type ExpenseSnapshot = {
+  amount: number;
+  label: string;
+  headline: string;
+  isPositive: boolean;
+  isSettled: boolean;
+  tripName?: string;
+};
 
-function getNotificationTimestamp(item: ApiNotification) {
-  return (item as any).createdAt || (item as any).created_at || (item as any).created_at_text || '';
-}
-
-function formatActivityTimestamp(value?: string) {
-  if (!value) {
-    return '';
-  }
-
-  const parsedDate = new Date(value);
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return '';
-  }
-
-  const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
-  const day = String(parsedDate.getDate()).padStart(2, '0');
-  const year = parsedDate.getFullYear();
-
-  let hours = parsedDate.getHours();
-  const minutes = String(parsedDate.getMinutes()).padStart(2, '0');
-  const period = hours >= 12 ? 'PM' : 'AM';
-
-  hours = hours % 12;
-  hours = hours === 0 ? 12 : hours;
-
-  return `${month}/${day}/${year} ${hours}:${minutes}${period}`;
-}
-
-function appendTimestamp(body: string, value?: string) {
-  const timestamp = formatActivityTimestamp(value);
-
-  if (!timestamp) {
-    return body;
-  }
-
-  return `${body} ${timestamp}`;
-}
-
-function extractEventNameFromTargetTitle(targetTitle?: string) {
-  if (!targetTitle) {
-    return '';
-  }
-
-  const parts = targetTitle
-    .split('-')
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  return parts[parts.length - 1] || targetTitle.trim();
-}
-
-function extractEventNameFromAddedTitle(title: string) {
-  const match = title.match(/^(.+?)\s+added\s+to\s+events$/i);
-  return cleanText(match?.[1] || '');
-}
-
-function extractActorFromAddedBody(body: string) {
-  const match = body.match(/^event\s+added\s+by\s+(.+)$/i);
-  return cleanText(match?.[1] || '');
-}
-
-function normalizeActivityNotification(item: ApiNotification): HomeActivityItem {
-  const rawTitle = cleanText(String(item.title || ''));
-  const rawBody = cleanText(String(item.body || ''));
-  const targetEventName = extractEventNameFromTargetTitle(item.targetTitle);
-  const timestampValue = getNotificationTimestamp(item);
-
-  const titleLower = rawTitle.toLowerCase();
-  const bodyLower = rawBody.toLowerCase();
-
-  const isEventCompleted =
-    titleLower.includes('event completed') ||
-    (bodyLower.includes(' marked ') && bodyLower.includes(' complete')) ||
-    (bodyLower.includes(' marked ') && bodyLower.includes(' completed')) ||
-    bodyLower.includes(' was completed') ||
-    bodyLower.endsWith(' completed');
-
-  if (isEventCompleted) {
-    const markedCompleteMatch =
-      rawBody.match(/^(.+?)\s+marked\s+(.+?)\s+complete$/i) ||
-      rawBody.match(/^(.+?)\s+marked\s+(.+?)\s+completed$/i);
-
-    if (markedCompleteMatch) {
-      const actorName = cleanText(markedCompleteMatch[1] || 'Someone');
-      const eventName = cleanText(markedCompleteMatch[2] || targetEventName || 'Event');
-
-      return {
-        id: item.id,
-        title: `${eventName} Event Completed`,
-        body: appendTimestamp(`${actorName} marked as completed`, timestampValue),
-      };
-    }
-
-    const completedBodyMatch = rawBody.match(/^(.+?)\s+(?:was\s+)?completed$/i);
-
-    if (completedBodyMatch) {
-      const eventName = cleanText(completedBodyMatch[1] || targetEventName || 'Event');
-
-      return {
-        id: item.id,
-        title: `${eventName} Event Completed`,
-        body: appendTimestamp('Someone marked as completed', timestampValue),
-      };
-    }
-
-    return {
-      id: item.id,
-      title: `${targetEventName || 'Event'} Event Completed`,
-      body: appendTimestamp(rawBody || 'Someone marked as completed', timestampValue),
-    };
-  }
-
-  const isEventAdded =
-    titleLower.includes('event added') ||
-    titleLower.includes('added event') ||
-    titleLower.includes('new event') ||
-    titleLower.includes('added to events') ||
-    bodyLower.includes(' added ') ||
-    bodyLower.includes(' created ') ||
-    bodyLower.includes(' was added to the trip plan') ||
-    bodyLower.startsWith('event added by');
-
-  if (isEventAdded) {
-    const eventNameFromTitle = extractEventNameFromAddedTitle(rawTitle);
-    const actorNameFromBody = extractActorFromAddedBody(rawBody);
-
-    if (eventNameFromTitle || actorNameFromBody) {
-      return {
-        id: item.id,
-        title: `${eventNameFromTitle || targetEventName || 'Event'} added to Events`,
-        body: appendTimestamp(`Event added by ${actorNameFromBody || 'You'}`, timestampValue),
-      };
-    }
-
-    const wasAddedMatch = rawBody.match(/^(.+?)\s+was\s+added\s+to\s+the\s+trip\s+plan$/i);
-
-    if (wasAddedMatch) {
-      const eventName = cleanText(wasAddedMatch[1] || targetEventName || 'Event');
-
-      return {
-        id: item.id,
-        title: `${eventName} added to Events`,
-        body: appendTimestamp('Event added by You', timestampValue),
-      };
-    }
-
-    const addedByPersonMatch =
-      rawBody.match(/^(.+?)\s+added\s+(.+?)(?:\s+to\s+.+)?$/i) ||
-      rawBody.match(/^(.+?)\s+created\s+(.+?)(?:\s+to\s+.+|\s+on\s+.+|\s+for\s+.+)?$/i);
-
-    if (addedByPersonMatch) {
-      const actorName = cleanText(addedByPersonMatch[1] || 'You');
-      const eventName = cleanText(addedByPersonMatch[2] || targetEventName || 'Event');
-
-      return {
-        id: item.id,
-        title: `${eventName} added to Events`,
-        body: appendTimestamp(`Event added by ${actorName}`, timestampValue),
-      };
-    }
-
-    return {
-      id: item.id,
-      title: `${targetEventName || rawTitle || 'Event'} added to Events`,
-      body: appendTimestamp('Event added by You', timestampValue),
-    };
-  }
-
-  return {
-    id: item.id,
-    title: rawTitle || 'Trip activity',
-    body: appendTimestamp(rawBody || 'New activity was added', timestampValue),
-  };
-}
+type HomeCacheSnapshot = {
+  activities: ApiActivityItem[];
+  expenseSnapshot: ExpenseSnapshot | null;
+  primaryTripItinerary: ItineraryDay[];
+  trips: ApiTrip[];
+  unreadCount: number;
+};
 
 export default function HomeScreen({ navigation }: Props) {
   const user = useAuthStore((state) => state.user);
@@ -213,68 +83,135 @@ export default function HomeScreen({ navigation }: Props) {
   const setTripLead = useTripStore((state) => state.setTripLead);
 
   const [trips, setTrips] = useState<ApiTrip[]>([]);
-  const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [activities, setActivities] = useState<ApiActivityItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [primaryTripItinerary, setPrimaryTripItinerary] = useState<ItineraryDay[]>([]);
+  const [expenseSnapshot, setExpenseSnapshot] = useState<ExpenseSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
+  const lastFetchedRef = useRef(0);
 
-  const loadHome = useCallback(async (showSpinner = false) => {
+  const applyHomeSnapshot = useCallback((snapshot: HomeCacheSnapshot) => {
+    setTrips(snapshot.trips);
+    setActivities(snapshot.activities);
+    setUnreadCount(snapshot.unreadCount);
+    setPrimaryTripItinerary(snapshot.primaryTripItinerary);
+    setExpenseSnapshot(snapshot.expenseSnapshot);
+  }, []);
+
+  const loadHome = useCallback(async (showSpinner = false, force = false) => {
+    const cachedHome = await readCachedValue<HomeCacheSnapshot>(cacheKeys.home);
+
+    if (cachedHome && !hasLoadedRef.current) {
+      applyHomeSnapshot(cachedHome.value);
+      hasLoadedRef.current = true;
+      lastFetchedRef.current = cachedHome.updatedAt;
+      setLoading(false);
+    }
+
+    const shouldFetch = force || !cachedHome || !isCacheFresh(cachedHome.updatedAt, CACHE_TTLS.home);
+
+    if (!shouldFetch) {
+      setRefreshing(false);
+      return;
+    }
+
     try {
       if (showSpinner) {
         setLoading(true);
       }
 
-      const [tripResponse, notificationResponse] = await Promise.all([fetchTrips(), fetchNotifications()]);
+      const [tripResponse, activityResponse, notificationResponse] = await Promise.all([
+        fetchTrips(),
+        fetchRecentActivity(),
+        fetchNotifications(),
+      ]);
       const nextTrips = Array.isArray(tripResponse.trips) ? tripResponse.trips : [];
       const nextPrimaryTrip = pickPrimaryTrip(nextTrips);
+      const notifications = Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : [];
+      let nextDays: ItineraryDay[] = [];
+      let nextExpenseSnapshot: ExpenseSnapshot | null = null;
 
       setTrips(nextTrips);
-      setNotifications(Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : []);
+      setActivities(Array.isArray(activityResponse.activities) ? activityResponse.activities : []);
+      setUnreadCount(notifications.filter((item) => !item.readAt).length);
 
       if (nextPrimaryTrip?.id) {
         try {
-          const itineraryResponse = await apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${nextPrimaryTrip.id}/itinerary`);
-          setPrimaryTripItinerary(Array.isArray(itineraryResponse.days) ? itineraryResponse.days : []);
+          const [itineraryResponse, groupResponse, tripDetails] = await Promise.all([
+            apiRequest<{ days: ItineraryDay[] }>(`/api/trips/${nextPrimaryTrip.id}/itinerary`),
+            fetchExpenseGroups(nextPrimaryTrip.id),
+            fetchTripDetails(nextPrimaryTrip.id),
+          ]);
+          const resolvedDays = Array.isArray(itineraryResponse.days) ? itineraryResponse.days : [];
+          nextDays = resolvedDays;
+          setPrimaryTripItinerary(resolvedDays);
+
+          const summary = calculateOverallExpenseSummary(
+            groupResponse.groups ?? [],
+            mapApiMembersToCrew(tripDetails.members),
+            user?.id
+          );
+          const display = getBalanceDisplay(summary.netBalance);
+          nextExpenseSnapshot = {
+            amount: display.amount,
+            label: display.label,
+            headline: display.headline,
+            isPositive: display.isPositive,
+            isSettled: display.isSettled,
+            tripName: nextPrimaryTrip.name,
+          };
+          setExpenseSnapshot(nextExpenseSnapshot);
         } catch (error) {
-          console.log('Home itinerary load failed', error);
+          console.log('Home trip detail load failed', error);
           setPrimaryTripItinerary([]);
+          setExpenseSnapshot(null);
         }
       } else {
         setPrimaryTripItinerary([]);
+        setExpenseSnapshot(null);
       }
 
+      const nextSnapshot: HomeCacheSnapshot = {
+        trips: nextTrips,
+        activities: Array.isArray(activityResponse.activities) ? activityResponse.activities : [],
+        unreadCount: notifications.filter((item) => !item.readAt).length,
+        primaryTripItinerary: nextDays,
+        expenseSnapshot: nextExpenseSnapshot,
+      };
+
+      await writeCachedValue(cacheKeys.home, nextSnapshot);
       hasLoadedRef.current = true;
+      lastFetchedRef.current = Date.now();
     } catch (error) {
       console.log('Home load failed', error);
       if (!hasLoadedRef.current) {
         setTrips([]);
-        setNotifications([]);
+        setActivities([]);
+        setUnreadCount(0);
         setPrimaryTripItinerary([]);
+        setExpenseSnapshot(null);
       }
     } finally {
       if (showSpinner) {
         setLoading(false);
       }
+      setRefreshing(false);
     }
-  }, []);
+  }, [applyHomeSnapshot, user?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      loadHome(!hasLoadedRef.current);
+      const stale = Date.now() - lastFetchedRef.current > CACHE_TTLS.home;
+      loadHome(!hasLoadedRef.current, !hasLoadedRef.current ? false : stale);
     }, [loadHome])
   );
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
-
-    if (hour < 12) {
-      return 'Good morning';
-    }
-
-    if (hour < 18) {
-      return 'Good afternoon';
-    }
-
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
     return 'Good evening';
   }, []);
 
@@ -287,7 +224,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   const showNextEvent = Boolean(primaryTrip && isTripActive(primaryTrip));
 
-  const openTrip = async (trip: ApiTrip) => {
+  const openTrip = async (trip: ApiTrip, destination?: 'TripOverview' | 'Itinerary') => {
     try {
       const details = await fetchTripDetails(trip.id);
       const crew = mapApiMembersToCrew(details.members);
@@ -296,68 +233,55 @@ export default function HomeScreen({ navigation }: Props) {
       setCrew(crew);
       setTripLead(crew.find((member) => member.role === 'lead') ?? crew[0] ?? null);
 
-      navigation.navigate('TripOverview');
+      if (destination === 'Itinerary') {
+        navigation.navigate('Itinerary');
+      } else {
+        navigation.navigate(details.trip.completed_at ? 'TripCompletion' : 'TripOverview');
+      }
     } catch (error) {
       console.log('Open trip failed', error);
     }
   };
 
+  const handleRefresh = () => {
+    setRefreshing(true);
+    void loadHome(false, true);
+  };
+
   const activityItems = useMemo(
     () =>
-      notifications
+      activities
         .filter((item) => !item.requiresAction)
-        .slice(0, 3)
-        .map(normalizeActivityNotification),
-    [notifications]
-  );
-
-  const fallbackActivityItems = useMemo(() => {
-    return primaryTripItinerary
-      .flatMap((day) =>
-        day.events.map((event) => {
-          const statusLabel = isCompletedEvent(event)
-            ? `${event.title} Event Completed`
-            : event.status === 'active'
-              ? `${event.title} In Progress`
-              : `${event.title} Upcoming`;
-
-          const bodyLabel = isCompletedEvent(event)
-            ? 'Someone marked as completed'
-            : event.status === 'active'
-              ? `${day.title} • ${event.time}`
-              : `${day.title} • ${event.time}`;
-
+        .slice(0, 5)
+        .map((item) => {
+          const display = formatNotificationDisplay(item);
           return {
-            id: `${day.id}-${event.id}`,
-            title: statusLabel,
-            body: bodyLabel,
+            id: item.id,
+            title: display.title,
+            body: display.body,
+            type: display.type,
+            tripId: display.tripId,
           };
-        })
-      )
-      .slice(0, 3);
-  }, [primaryTripItinerary]);
+        }),
+    [activities]
+  );
 
   const nextEvent = useMemo(() => {
     for (const day of primaryTripItinerary) {
-      const activeEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'active');
-
+      const activeEvent = day.events.find((event) => !event.isCompleted && event.status === 'active');
       if (activeEvent) {
         return { day, event: activeEvent };
       }
-
-      const upcomingEvent = day.events.find((event) => !isCompletedEvent(event) && event.status === 'upcoming');
-
+      const upcomingEvent = day.events.find((event) => !event.isCompleted && event.status === 'upcoming');
       if (upcomingEvent) {
         return { day, event: upcomingEvent };
       }
     }
-
     return null;
   }, [primaryTripItinerary]);
 
   const openLocationOptions = async (query: string) => {
     const trimmedQuery = query.trim();
-
     if (!trimmedQuery) {
       return;
     }
@@ -390,31 +314,59 @@ export default function HomeScreen({ navigation }: Props) {
     ]);
   };
 
+  const handleActivityPress = async (item: HomeActivityItem) => {
+    if (!item.tripId) {
+      if (item.type?.includes('expense') || item.type?.includes('settlement')) {
+        navigation.navigate('MainTabs', { screen: 'Expenses' });
+      }
+      return;
+    }
+
+    if (item.type?.includes('expense') || item.type?.includes('settlement')) {
+      await openTrip({ ...(primaryTrip as ApiTrip), id: item.tripId } as ApiTrip);
+      navigation.navigate('MainTabs', { screen: 'Expenses' });
+      return;
+    }
+
+    if (item.type?.includes('itinerary')) {
+      await openTrip({ ...(primaryTrip as ApiTrip), id: item.tripId } as ApiTrip, 'Itinerary');
+      return;
+    }
+
+    await openTrip({ ...(primaryTrip as ApiTrip), id: item.tripId } as ApiTrip);
+  };
+
   return (
     <View style={styles.screen}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.accent} />}
+      >
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{greeting},</Text>
+          <View style={styles.headerCopy}>
+            <Text style={styles.greeting}>{greeting}</Text>
             <Text style={styles.name}>{user?.name || user?.email || 'Traveler'}</Text>
+            <Text style={styles.subcopy}>Your trips, plans, and crew updates all in one place.</Text>
           </View>
 
           <View style={styles.headerActions}>
             <Pressable onPress={() => navigation.navigate('CreateGroup')} style={styles.headerButton}>
               <Ionicons name="add" size={21} color={colors.accent} />
             </Pressable>
-
             <Pressable onPress={() => navigation.navigate('Notifications')} style={styles.headerButton}>
               <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
-              {notifications.length > 0 ? <View style={styles.dot} /> : null}
+              {unreadCount > 0 ? <View style={styles.dot} /> : null}
             </Pressable>
           </View>
         </View>
 
         {loading && trips.length === 0 ? (
-          <View style={styles.loadingCard}>
-            <ActivityIndicator color={colors.accent} />
-          </View>
+          <GTCard style={styles.heroSkeleton}>
+            <GTLoadingSkeleton height={18} width={86} radius={999} />
+            <GTLoadingSkeleton height={28} width="78%" style={{ marginTop: 18 }} />
+            <GTLoadingSkeleton height={14} width="54%" style={{ marginTop: 10 }} />
+          </GTCard>
         ) : primaryTrip ? (
           <Pressable onPress={() => openTrip(primaryTrip)} style={styles.activeCard}>
             <Image
@@ -427,120 +379,146 @@ export default function HomeScreen({ navigation }: Props) {
             />
             <View style={styles.activeOverlay} />
             <View style={styles.activeContent}>
-              <View style={styles.statusPill}>
-                <Text style={styles.statusPillText}>{tripTimelineStatus(primaryTrip)}</Text>
-              </View>
-
+              <GTBadge label={tripTimelineStatus(primaryTrip)} tone={tripTimelineStatus(primaryTrip) === 'Active' ? 'green' : 'blue'} />
               <Text style={styles.activeTitle}>{primaryTrip.name}</Text>
               <Text style={styles.activeMeta}>
-                {formatTripRange(primaryTrip.start_date, primaryTrip.end_date)} · {primaryTrip.members_count ?? 1} members
+                {formatTripRange(primaryTrip.start_date, primaryTrip.end_date)} - {primaryTrip.members_count ?? 1} members
               </Text>
             </View>
           </Pressable>
         ) : (
-          <Pressable onPress={() => navigation.navigate('CreateGroup')} style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Start your first trip</Text>
-            <Text style={styles.emptyCopy}>Create a group and the whole trip flow will open from there.</Text>
-          </Pressable>
+          <GTEmptyState
+            icon="airplane-outline"
+            title="Start your first trip"
+            body="Create a trip group and the whole planning flow opens from there."
+            actionLabel="Create trip"
+            onPressAction={() => navigation.navigate('CreateGroup')}
+          />
         )}
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Upcoming</Text>
-            <Pressable onPress={() => navigation.navigate('Trips')}>
-              <Text style={styles.sectionLink}>See all</Text>
-            </Pressable>
-          </View>
+        <View style={styles.quickGrid}>
+          <QuickActionTile title="Create Trip" icon="airplane-outline" onPress={() => navigation.navigate('CreateGroup')} />
+          <QuickActionTile title="Add Expense" icon="wallet-outline" onPress={() => navigation.navigate('MainTabs', { screen: 'Expenses' })} />
+          <QuickActionTile title="Invite Friends" icon="person-add-outline" onPress={() => navigation.navigate('CreateGroup')} />
+          <QuickActionTile title="Open Live" icon="navigate-outline" primary onPress={() => navigation.navigate('MainTabs', { screen: 'Live' })} />
+        </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalList}>
-            {upcomingTrips.length > 0 ? (
-              upcomingTrips.map((trip) => (
-                <Pressable key={trip.id} onPress={() => openTrip(trip)} style={styles.upcomingCard}>
-                  <Text style={styles.upcomingTitle}>{trip.name}</Text>
-                  <Text style={styles.upcomingMeta}>{formatTripRange(trip.start_date, trip.end_date)}</Text>
-                  <Text style={styles.upcomingSupport}>{trip.members_count ?? 1} members</Text>
-                </Pressable>
-              ))
+        <View style={styles.summaryGrid}>
+          <GTCard style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Net expenses</Text>
+            {expenseSnapshot ? (
+              <>
+                <Text style={[styles.summaryAmount, expenseSnapshot.isSettled ? styles.summaryAmountNeutral : expenseSnapshot.isPositive ? styles.summaryAmountPositive : styles.summaryAmountWarning]}>
+                  {expenseSnapshot.isSettled ? 'Settled up' : formatMoney(expenseSnapshot.amount)}
+                </Text>
+                <Text style={styles.summaryMeta} numberOfLines={2}>
+                  {expenseSnapshot.isSettled
+                    ? `${expenseSnapshot.tripName || 'This trip'} is balanced for you right now.`
+                    : `${expenseSnapshot.headline.toLowerCase()} on ${expenseSnapshot.tripName || 'your main trip'}.`}
+                </Text>
+              </>
             ) : (
-              <View style={styles.upcomingCard}>
-                <Text style={styles.upcomingTitle}>No upcoming trips yet</Text>
-                <Text style={styles.upcomingMeta}>Create a group to start planning one.</Text>
-              </View>
+              <>
+                <Text style={styles.summaryAmountNeutral}>No data yet</Text>
+                <Text style={styles.summaryMeta} numberOfLines={2}>Add expenses to see how much you owe or are owed.</Text>
+              </>
             )}
-          </ScrollView>
+          </GTCard>
+
+          <GTCard style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Notifications</Text>
+            <Text style={styles.summaryAmount}>{unreadCount}</Text>
+            <Text style={styles.summaryMeta} numberOfLines={2}>
+              {unreadCount > 0 ? 'Unread updates are waiting for you.' : 'You are all caught up right now.'}
+            </Text>
+          </GTCard>
         </View>
 
         {showNextEvent ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Next Event</Text>
+            <GTSectionHeader title="Next event" subtitle="Stay oriented during the trip." />
             {nextEvent ? (
-              <View style={styles.nextEventCard}>
+              <GTCard style={styles.nextEventCard}>
                 <View style={styles.nextEventHeader}>
-                  <View style={styles.nextEventBadge}>
-                    <Text style={styles.nextEventBadgeText}>{nextEvent.day.title}</Text>
-                  </View>
-
+                  <GTBadge label={nextEvent.day.title} tone="blue" />
                   <Text style={styles.nextEventTime}>{nextEvent.event.time}</Text>
                 </View>
-
                 <Text style={styles.nextEventTitle}>{nextEvent.event.title}</Text>
                 <Text style={styles.nextEventMeta}>{nextEvent.event.notes || nextEvent.event.location}</Text>
-
-                <Pressable style={styles.locationButton} onPress={() => openLocationOptions(nextEvent.event.location)}>
-                  <Ionicons name="location-outline" size={16} color={colors.accent} />
-                  <Text style={styles.locationButtonText}>Maps</Text>
-                </Pressable>
-              </View>
+                <View style={styles.nextEventActions}>
+                  <GTButton title="Open itinerary" compact variant="ghost" onPress={() => openTrip(primaryTrip!, 'Itinerary')} />
+                  <GTButton title="Maps" icon="location-outline" compact variant="secondary" onPress={() => openLocationOptions(nextEvent.event.location)} />
+                </View>
+              </GTCard>
             ) : (
-              <View style={styles.nextEventCard}>
-                <Text style={styles.nextEventTitle}>No itinerary event yet</Text>
-                <Text style={styles.nextEventMeta}>Your next stop will appear here after you add events to the trip.</Text>
-              </View>
+              <GTEmptyState
+                icon="calendar-outline"
+                title="No itinerary event yet"
+                body="Your next stop will appear here after you add events to the trip."
+                actionLabel="Add itinerary"
+                onPressAction={() => openTrip(primaryTrip!, 'Itinerary')}
+              />
             )}
           </View>
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <GTSectionHeader
+            title="Upcoming trips"
+            subtitle={"What's coming next for your crew."}
+            actionLabel="See all"
+            onPressAction={() => navigation.navigate('Trips')}
+          />
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalList}>
+            {upcomingTrips.length > 0 ? (
+              upcomingTrips.map((trip) => (
+                <Pressable key={trip.id} onPress={() => openTrip(trip)} style={styles.upcomingCard}>
+                  <GTBadge label={tripTimelineStatus(trip)} tone="blue" />
+                  <Text style={styles.upcomingTitle}>{trip.name}</Text>
+                  <Text style={styles.upcomingMeta}>{formatTripRange(trip.start_date, trip.end_date)}</Text>
+                  <Text style={styles.upcomingSupport}>{trip.members_count ?? 1} travelers</Text>
+                </Pressable>
+              ))
+            ) : (
+              <GTCard style={styles.noUpcomingCard}>
+                <Text style={styles.upcomingTitle}>No upcoming trips yet</Text>
+                <Text style={styles.upcomingMeta}>Your next getaway will show up here once you plan it.</Text>
+              </GTCard>
+            )}
+          </ScrollView>
+        </View>
+
+        <View style={styles.section}>
+          <GTSectionHeader
+            title="Recent activity"
+            subtitle="The latest motion across your trips."
+            actionLabel="Notifications"
+            onPressAction={() => navigation.navigate('Notifications')}
+          />
 
           <View style={styles.activityList}>
             {activityItems.length > 0 ? (
               activityItems.map((item) => (
-                <View key={item.id} style={styles.activityRow}>
-                  <View style={styles.activityAvatar}>
-                    <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
-                  </View>
-
-                  <View style={styles.activityCopy}>
-                    <Text style={styles.activityText}>{item.title}</Text>
-                    <Text style={styles.activitySubtext}>{item.body}</Text>
-                  </View>
-                </View>
-              ))
-            ) : fallbackActivityItems.length > 0 ? (
-              fallbackActivityItems.map((item) => (
-                <View key={item.id} style={styles.activityRow}>
-                  <View style={styles.activityAvatar}>
-                    <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
-                  </View>
-
-                  <View style={styles.activityCopy}>
-                    <Text style={styles.activityText}>{item.title}</Text>
-                    <Text style={styles.activitySubtext}>{item.body}</Text>
-                  </View>
-                </View>
+                <Pressable key={item.id} onPress={() => void handleActivityPress(item)}>
+                  <GTCard style={styles.activityCard}>
+                    <View style={styles.activityAvatar}>
+                      <Text style={styles.activityAvatarText}>{item.title.charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.activityCopy}>
+                      <Text style={styles.activityText}>{item.title}</Text>
+                      <Text style={styles.activitySubtext}>{item.body}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                  </GTCard>
+                </Pressable>
               ))
             ) : (
-              <View style={styles.activityRow}>
-                <View style={styles.activityAvatar}>
-                  <Text style={styles.activityAvatarText}>T</Text>
-                </View>
-
-                <View style={styles.activityCopy}>
-                  <Text style={styles.activityText}>Trip activity will appear here</Text>
-                  <Text style={styles.activitySubtext}>New events, expenses, and updates will show up as your crew uses the app.</Text>
-                </View>
-              </View>
+              <GTEmptyState
+                icon="sparkles-outline"
+                title="Trip activity will appear here"
+                body="New events, expenses, and crew updates will show up as people use the app."
+              />
             )}
           </View>
         </View>
@@ -556,26 +534,36 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 120,
+    paddingTop: 44,
+    paddingBottom: footerScrollPadding,
+    gap: spacing.md,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  headerCopy: {
+    flex: 1,
   },
   greeting: {
     fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
+    fontWeight: '500',
+    color: colors.accentStrong,
   },
   name: {
     marginTop: 2,
-    fontSize: 30,
-    fontWeight: '900',
+    fontSize: 28,
+    fontWeight: '700',
     color: colors.textPrimary,
-    letterSpacing: -0.8,
+    letterSpacing: -0.5,
+  },
+  subcopy: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
   },
   headerActions: {
     flexDirection: 'row',
@@ -583,38 +571,35 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    boxShadow: `0px 10px 24px ${colors.shadow}`,
   },
   dot: {
     position: 'absolute',
-    top: 9,
-    right: 10,
+    top: 11,
+    right: 12,
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.accent,
   },
-  loadingCard: {
-    minHeight: 180,
-    borderRadius: 24,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+  heroSkeleton: {
+    minHeight: 176,
+    justifyContent: 'flex-end',
   },
   activeCard: {
-    minHeight: 176,
-    borderRadius: 24,
+    minHeight: 184,
+    borderRadius: 28,
     overflow: 'hidden',
     position: 'relative',
+    boxShadow: `0px 20px 36px ${colors.shadowStrong}`,
   },
   activeImage: {
     ...StyleSheet.absoluteFillObject,
@@ -623,185 +608,202 @@ const styles = StyleSheet.create({
   },
   activeOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15,23,42,0.48)',
+    backgroundColor: 'rgba(15,23,42,0.42)',
   },
   activeContent: {
     padding: 20,
     justifyContent: 'flex-end',
     flex: 1,
-  },
-  statusPill: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.success,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginBottom: 8,
-  },
-  statusPillText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '800',
+    gap: 6,
   },
   activeTitle: {
     color: '#FFFFFF',
     fontSize: 24,
-    fontWeight: '900',
-    letterSpacing: -0.7,
+    fontWeight: '700',
+    letterSpacing: -0.5,
   },
   activeMeta: {
-    marginTop: 4,
-    color: 'rgba(255,255,255,0.76)',
-    fontSize: 12,
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 13,
+    fontWeight: '600',
   },
-  emptyCard: {
-    minHeight: 176,
-    borderRadius: 24,
-    backgroundColor: colors.surface,
+  quickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  quickActionPressable: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  quickActionTile: {
+    minHeight: 70,
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 20,
+    backgroundColor: colors.surface,
+    ...shadows.soft,
+  },
+  quickActionTilePrimary: {
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'transparent',
+  },
+  quickActionIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.accentSoft,
   },
-  emptyTitle: {
-    color: colors.textPrimary,
-    fontSize: 22,
-    fontWeight: '800',
+  quickActionIconWrapPrimary: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  emptyCopy: {
-    marginTop: 8,
+  quickActionCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  quickActionLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  quickActionLabelPrimary: {
+    color: '#FFFFFF',
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  summaryCard: {
+    flex: 1,
+    minHeight: 96,
+    padding: 16,
+    justifyContent: 'space-between',
+  },
+  summaryLabel: {
     color: colors.textSecondary,
-    lineHeight: 21,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.2,
+  },
+  summaryAmount: {
+    marginTop: 4,
+    color: colors.textPrimary,
+    fontSize: 21,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+  },
+  summaryAmountPositive: {
+    color: colors.success,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  summaryAmountWarning: {
+    color: colors.warning,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  summaryAmountNeutral: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  summaryMeta: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
   },
   section: {
-    marginTop: spacing.xl,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  sectionLink: {
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '700',
+    gap: spacing.md,
   },
   horizontalList: {
     gap: spacing.md,
   },
   upcomingCard: {
-    width: 208,
+    width: 214,
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: 16,
+    padding: 18,
+    gap: 10,
+    boxShadow: `0px 12px 28px ${colors.shadow}`,
+  },
+  noUpcomingCard: {
+    width: 250,
   },
   upcomingTitle: {
     color: colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
   },
   upcomingMeta: {
-    marginTop: 4,
     color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 19,
   },
   upcomingSupport: {
-    marginTop: 12,
     color: colors.textMuted,
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: '600',
   },
   nextEventCard: {
-    marginTop: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 16,
     gap: 10,
   },
   nextEventHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
-  },
-  nextEventBadge: {
-    borderRadius: radius.pill,
-    backgroundColor: '#E7F0FF',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  nextEventBadgeText: {
-    color: colors.accentStrong,
-    fontSize: 11,
-    fontWeight: '800',
+    gap: spacing.sm,
   },
   nextEventTime: {
-    color: colors.accent,
+    color: colors.accentStrong,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   nextEventTitle: {
     color: colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 18,
+    fontWeight: '600',
   },
   nextEventMeta: {
     color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 19,
   },
-  locationButton: {
+  nextEventActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: '#F8FAFC',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  locationButtonText: {
-    color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
-    maxWidth: 220,
+    gap: spacing.sm,
+    flexWrap: 'wrap',
   },
   activityList: {
-    gap: spacing.md,
-    marginTop: spacing.md,
+    gap: spacing.sm,
   },
-  activityRow: {
+  activityCard: {
     flexDirection: 'row',
-    gap: 12,
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: 14,
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   activityAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E7F0FF',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   activityAvatarText: {
     color: colors.accentStrong,
-    fontSize: 13,
-    fontWeight: '800',
+    fontSize: 14,
+    fontWeight: '600',
   },
   activityCopy: {
     flex: 1,
@@ -809,7 +811,7 @@ const styles = StyleSheet.create({
   activityText: {
     color: colors.textPrimary,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   activitySubtext: {
     marginTop: 4,
@@ -818,3 +820,55 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+
+function QuickActionTile({
+  title,
+  icon,
+  primary = false,
+  onPress,
+}: {
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  primary?: boolean;
+  onPress: () => void;
+}) {
+  const content = (
+    <View style={[styles.quickActionTile, primary && styles.quickActionTilePrimary]}>
+      <View style={[styles.quickActionIconWrap, primary && styles.quickActionIconWrapPrimary]}>
+        <Ionicons name={icon} size={21} color={primary ? '#FFFFFF' : colors.accentStrong} />
+      </View>
+      <View style={styles.quickActionCopy}>
+        <Text style={[styles.quickActionLabel, primary && styles.quickActionLabelPrimary]} numberOfLines={1}>
+          {title}
+        </Text>
+      </View>
+    </View>
+  );
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.quickActionPressable, pressed && { opacity: 0.94, transform: [{ scale: 0.99 }] }]}
+    >
+      {primary ? (
+        <LinearGradient
+          colors={[...gradients.primaryButton]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.quickActionTile}
+        >
+          <View style={[styles.quickActionIconWrap, styles.quickActionIconWrapPrimary]}>
+            <Ionicons name={icon} size={21} color="#FFFFFF" />
+          </View>
+          <View style={styles.quickActionCopy}>
+            <Text style={[styles.quickActionLabel, styles.quickActionLabelPrimary]} numberOfLines={1}>
+              {title}
+            </Text>
+          </View>
+        </LinearGradient>
+      ) : (
+        content
+      )}
+    </Pressable>
+  );
+}

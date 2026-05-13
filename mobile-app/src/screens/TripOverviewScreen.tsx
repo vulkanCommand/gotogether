@@ -5,12 +5,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import AppFooter from '../components/AppFooter';
+import GTCard from '../components/GTCard';
+import ReportModal from '../components/ReportModal';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import { apiRequest, ensureTripCoverFromDestination, fetchTripDetails, tripCoverFileUrl } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
-import { spacing } from '../theme/spacing';
+import { footerScrollPadding, spacing } from '../theme/spacing';
 import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripOverview'>;
@@ -33,6 +35,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
 
   const [loading, setLoading] = useState(false);
   const [coverLoading, setCoverLoading] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
 
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const itineraryDaysRef = useRef(itineraryDays);
@@ -149,19 +152,19 @@ export default function TripOverviewScreen({ navigation }: Props) {
     };
   }, [currentTrip?.id, currentTrip?.image_url, setCurrentTrip]);
 
+  const totalEvents = useMemo(
+    () => itineraryDays.reduce((sum, day) => sum + day.events.length, 0),
+    [itineraryDays]
+  );
+
   const milestones = useMemo<Milestone[]>(
     () => [
       { label: 'Dates', done: Boolean(currentTrip?.start_date && currentTrip?.end_date) },
       { label: 'Destination', done: Boolean(currentTrip?.destination) },
       { label: 'Lead', done: Boolean(tripLead?.name) },
-      { label: 'Itinerary', done: itineraryDays.length > 0 },
+      { label: 'Itinerary', done: totalEvents > 0 },
     ],
-    [currentTrip?.destination, currentTrip?.end_date, currentTrip?.start_date, itineraryDays.length, tripLead?.name]
-  );
-
-  const totalEvents = useMemo(
-    () => itineraryDays.reduce((sum, day) => sum + day.events.length, 0),
-    [itineraryDays]
+    [currentTrip?.destination, currentTrip?.end_date, currentTrip?.start_date, totalEvents, tripLead?.name]
   );
 
   const completedEvents = useMemo(
@@ -173,8 +176,8 @@ export default function TripOverviewScreen({ navigation }: Props) {
     [itineraryDays]
   );
 
-  const progressPercent = totalEvents > 0 ? Math.round((completedEvents / totalEvents) * 100) : 0;
-  const itineraryReady = milestones[milestones.length - 1]?.done;
+  const progressPercent = currentTrip?.completed_at ? 100 : totalEvents > 0 ? Math.round((completedEvents / totalEvents) * 100) : 0;
+  const itineraryReady = totalEvents > 0;
   const canFinishTrip = Boolean(currentTrip && !currentTrip.completed_at && progressPercent === 100 && totalEvents > 0);
 
   useEffect(() => {
@@ -242,6 +245,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.body}>
+          <GTCard style={styles.heroMetaCard}>
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>
               <Ionicons name="calendar-outline" size={12} color={colors.textSecondary} /> {travelRange}
@@ -263,8 +267,9 @@ export default function TripOverviewScreen({ navigation }: Props) {
 
             <Text style={styles.crewMeta}>{crew.length} members</Text>
           </View>
+          </GTCard>
 
-          <View style={styles.progressCard}>
+          <GTCard style={styles.progressCard}>
             <Text style={styles.progressTitle}>Trip Progress</Text>
 
             <View style={styles.milestoneRow}>
@@ -323,12 +328,20 @@ export default function TripOverviewScreen({ navigation }: Props) {
                 ) : null}
               </View>
             ) : null}
-          </View>
+          </GTCard>
 
           <View style={styles.actionGrid}>
             <Pressable onPress={() => navigation.navigate('Itinerary')} style={styles.actionCard}>
               <Ionicons name="time-outline" size={22} color={colors.accent} />
               <Text style={styles.actionText}>View Itinerary</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => navigation.navigate('MainTabs', { screen: 'Expenses' })}
+              style={styles.actionCard}
+            >
+              <Ionicons name="wallet-outline" size={22} color={colors.accent} />
+              <Text style={styles.actionText}>Expenses</Text>
             </Pressable>
 
             <Pressable
@@ -338,9 +351,17 @@ export default function TripOverviewScreen({ navigation }: Props) {
               <Ionicons name="location-outline" size={22} color="#FFFFFF" />
               <Text style={styles.actionTextPrimary}>Open Live</Text>
             </Pressable>
+
+            <Pressable
+              onPress={() => navigation.navigate('CreateGroup')}
+              style={[styles.actionCard, styles.actionCardInvite]}
+            >
+              <Ionicons name="person-add-outline" size={22} color={colors.accentStrong} />
+              <Text style={styles.actionText}>Invite</Text>
+            </Pressable>
           </View>
 
-          <View style={styles.summaryCard}>
+          <GTCard style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Trip lead</Text>
             <Text style={styles.summaryValue}>{tripLead?.name || crew[0]?.name || 'Pending'}</Text>
             <Text style={styles.summaryMeta}>
@@ -350,9 +371,22 @@ export default function TripOverviewScreen({ navigation }: Props) {
                   ? `${itineraryDays.length} itinerary day${itineraryDays.length === 1 ? '' : 's'} ready to explore.`
                   : 'Your trip is created. Add itinerary moments next.'}
             </Text>
-          </View>
+            {currentTrip ? (
+              <Pressable style={styles.reportLink} onPress={() => setReportVisible(true)}>
+                <Text style={styles.reportLinkText}>Report trip</Text>
+              </Pressable>
+            ) : null}
+          </GTCard>
         </View>
       </ScrollView>
+
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        contentType="trip"
+        contentId={currentTrip ? String(currentTrip.id) : undefined}
+        subjectLabel={currentTrip?.name || 'trip'}
+      />
 
       <AppFooter />
     </View>
@@ -365,7 +399,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    paddingBottom: 24,
+    paddingBottom: footerScrollPadding,
   },
   heroWrap: {
     position: 'relative',
@@ -398,7 +432,7 @@ const styles = StyleSheet.create({
   heroLoadingTitle: {
     color: colors.textPrimary,
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '600',
     textAlign: 'center',
   },
   heroLoadingMeta: {
@@ -430,10 +464,10 @@ const styles = StyleSheet.create({
     bottom: 18,
   },
   heroTitle: {
-    fontSize: 32,
-    fontWeight: '900',
+    fontSize: 28,
+    fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: -0.9,
+    letterSpacing: -0.6,
     textShadowColor: 'rgba(15,23,42,0.38)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 10,
@@ -445,9 +479,12 @@ const styles = StyleSheet.create({
   body: {
     marginTop: -36,
     paddingHorizontal: 20,
+    gap: spacing.lg,
+  },
+  heroMetaCard: {
+    marginTop: spacing.md,
   },
   metaRow: {
-    marginTop: spacing.md,
     gap: 8,
   },
   metaText: {
@@ -476,19 +513,14 @@ const styles = StyleSheet.create({
   avatarText: {
     color: colors.accentStrong,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   crewMeta: {
     color: colors.textSecondary,
     fontSize: 12,
   },
   progressCard: {
-    marginTop: spacing.xl,
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingTop: spacing.lg,
   },
   progressTitle: {
     fontSize: 13,
@@ -521,7 +553,7 @@ const styles = StyleSheet.create({
   milestoneNumber: {
     color: colors.textSecondary,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   milestoneLine: {
     flex: 1,
@@ -555,8 +587,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   progressPercent: {
-    fontSize: 28,
-    fontWeight: '900',
+    fontSize: 24,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   progressSummaryText: {
@@ -587,45 +619,44 @@ const styles = StyleSheet.create({
   finishTripButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   actionGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.md,
-    marginTop: spacing.lg,
   },
   actionCard: {
-    flex: 1,
+    width: '47%',
     borderRadius: 20,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 20,
-    alignItems: 'center',
+    minHeight: 78,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    alignItems: 'flex-start',
     justifyContent: 'center',
-    gap: 6,
+    gap: 8,
   },
   actionCardPrimary: {
     backgroundColor: colors.accent,
     borderColor: colors.accent,
   },
+  actionCardInvite: {
+    backgroundColor: colors.accentSoft,
+  },
   actionText: {
     color: colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
   },
   actionTextPrimary: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
   },
   summaryCard: {
-    marginTop: spacing.lg,
-    borderRadius: 20,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
   },
   summaryLabel: {
     fontSize: 12,
@@ -635,12 +666,26 @@ const styles = StyleSheet.create({
   summaryValue: {
     marginTop: 6,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   summaryMeta: {
     marginTop: 6,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  reportLink: {
+    marginTop: spacing.md,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  reportLinkText: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
