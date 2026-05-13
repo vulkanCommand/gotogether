@@ -24,6 +24,7 @@ import { invalidateTripCaches } from '../services/resourceCache';
 import { buildEqualSplitPreview, formatMoney, getExpenseGroupDisplayName } from '../utils/expenseCalculations';
 import { colors } from '../theme/colors';
 import { shadows, spacing, typography } from '../theme/spacing';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddExpense'>;
 type SplitMode = 'Equal split' | 'Custom split';
@@ -208,16 +209,27 @@ export default function AddExpenseScreen({ navigation, route }: Props) {
       return;
     }
 
+    const titleValidation = validateUserText(title, { required: true, maxLength: 120 });
+    const notesValidation = validateUserText(notes, { maxLength: 500 });
+    if (titleValidation.reason === 'required') {
+      Alert.alert('Expense incomplete', 'Add description, amount, group, and a valid split before saving.');
+      return;
+    }
+    if (!titleValidation.ok || !notesValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+      return;
+    }
+
     try {
       setSaving(true);
       const payload = {
-        title: title.trim(),
+        title: titleValidation.value,
         amount: amountValue,
         paidByUserId,
         expenseGroupId,
         linkedEventId,
         splitMethod,
-        notes: notes.trim(),
+        notes: notesValidation.value,
         splitPreview,
       };
 

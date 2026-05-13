@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import AppFooter from '../components/AppFooter';
 import GTCard from '../components/GTCard';
+import ReportModal from '../components/ReportModal';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { isCompletedEvent, useTripStore } from '../store/tripStore';
 import { apiRequest, ensureTripCoverFromDestination, fetchTripDetails, tripCoverFileUrl } from '../config/api';
@@ -34,6 +35,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
 
   const [loading, setLoading] = useState(false);
   const [coverLoading, setCoverLoading] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
 
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const itineraryDaysRef = useRef(itineraryDays);
@@ -369,9 +371,22 @@ export default function TripOverviewScreen({ navigation }: Props) {
                   ? `${itineraryDays.length} itinerary day${itineraryDays.length === 1 ? '' : 's'} ready to explore.`
                   : 'Your trip is created. Add itinerary moments next.'}
             </Text>
+            {currentTrip ? (
+              <Pressable style={styles.reportLink} onPress={() => setReportVisible(true)}>
+                <Text style={styles.reportLinkText}>Report trip</Text>
+              </Pressable>
+            ) : null}
           </GTCard>
         </View>
       </ScrollView>
+
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        contentType="trip"
+        contentId={currentTrip ? String(currentTrip.id) : undefined}
+        subjectLabel={currentTrip?.name || 'trip'}
+      />
 
       <AppFooter />
     </View>
@@ -658,5 +673,19 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: colors.textSecondary,
     lineHeight: 20,
+  },
+  reportLink: {
+    marginTop: spacing.md,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  reportLinkText: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

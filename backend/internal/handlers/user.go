@@ -48,8 +48,15 @@ func UpdateMe(c *gin.Context) {
 	req.HomeCity = strings.TrimSpace(req.HomeCity)
 	req.Bio = strings.TrimSpace(req.Bio)
 
-	if req.Name == "" {
+	nameValidation := validateUserText(req.Name, textValidationOptions{Required: true, MaxLength: 60})
+	req.Name = nameValidation.Value
+
+	if nameValidation.Empty {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+	if nameValidation.TooLong || nameValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 

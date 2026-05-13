@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { signOut } from '@react-native-firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,11 +12,11 @@ import Constants from 'expo-constants';
 import NotificationBell from '../components/NotificationBell';
 import Screen from '../components/Screen';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { deleteMyAccount, unregisterPushToken } from '../config/api';
+import { deleteMyAccount, getBlockedUsers, unblockUser, unregisterPushToken } from '../config/api';
 import { firebaseAuth } from '../config/firebase';
 import { clearStoredPushToken, getStoredPushToken } from '../config/pushNotifications';
 import { useAuthStore } from '../store/authStore';
-import { useFriendStore } from '../store/friendStore';
+import { Friend, useFriendStore } from '../store/friendStore';
 import { useTripStore } from '../store/tripStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
@@ -35,6 +35,9 @@ export default function SettingsScreen({ navigation }: Props) {
     photos: 'Unknown',
     notifications: 'Unknown',
   });
+  const [blockedUsersVisible, setBlockedUsersVisible] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState<Friend[]>([]);
+  const [blockedUsersLoading, setBlockedUsersLoading] = useState(false);
 
   const appVersion = Constants.expoConfig?.version || '1.0.0';
 
@@ -61,6 +64,42 @@ export default function SettingsScreen({ navigation }: Props) {
   React.useEffect(() => {
     void refreshPermissionStatus();
   }, [refreshPermissionStatus]);
+
+  const loadBlockedUsers = useCallback(async () => {
+    try {
+      setBlockedUsersLoading(true);
+      const response = await getBlockedUsers();
+      setBlockedUsers(response.users ?? []);
+    } catch (error) {
+      console.log('Blocked users load failed', error);
+      Alert.alert('Blocked users unavailable', 'Could not load blocked users right now.');
+    } finally {
+      setBlockedUsersLoading(false);
+    }
+  }, []);
+
+  const openBlockedUsers = () => {
+    setBlockedUsersVisible(true);
+    void loadBlockedUsers();
+  };
+
+  const handleUnblockUser = (blockedUser: Friend) => {
+    Alert.alert('Unblock user?', `Allow ${blockedUser.name || blockedUser.email || 'this user'} to appear again in discovery and invite suggestions?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Unblock',
+        onPress: async () => {
+          try {
+            await unblockUser(blockedUser.id);
+            setBlockedUsers((current) => current.filter((item) => item.id !== blockedUser.id));
+            Alert.alert('User unblocked', `${blockedUser.name || blockedUser.email || 'This user'} can appear again in discovery.`);
+          } catch {
+            Alert.alert('Unblock failed', 'Could not unblock this user. Please try again.');
+          }
+        },
+      },
+    ]);
+  };
 
   const handleSignOut = async () => {
     Alert.alert('Sign out', 'Sign out from this device?', [
@@ -93,7 +132,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const handleDeleteAccount = async () => {
     Alert.alert(
       'Delete account',
-      'This will permanently remove your profile and saved backend data. This action cannot be undone.',
+      'Deleting your account will remove or anonymize your profile and sign-in information. Some shared trip, itinerary, and expense records may remain visible to other trip members where needed for group history and expense records.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -167,6 +206,13 @@ export default function SettingsScreen({ navigation }: Props) {
             subtitle="Trip updates, itinerary changes, and activity alerts."
             onPress={() => navigation.navigate('Notifications')}
           />
+
+          <SettingsRow
+            icon="ban-outline"
+            title="Blocked Users"
+            subtitle="Manage who is hidden from discovery and new trip invites."
+            onPress={openBlockedUsers}
+          />
         </View>
 
         <View style={styles.sectionCard}>
@@ -205,19 +251,25 @@ export default function SettingsScreen({ navigation }: Props) {
             icon="shield-checkmark-outline"
             title="Privacy Policy"
             subtitle="See how GoTogether handles your data."
-            onPress={() => void Linking.openURL('https://gotogether.app/privacy')}
+            onPress={() => void Linking.openURL('https://www.durgakalyan.com/gotogether-privacy')}
           />
           <SettingsRow
             icon="document-text-outline"
             title="Terms of Service"
             subtitle="Read the app terms and usage guidelines."
-            onPress={() => void Linking.openURL('https://gotogether.app/terms')}
+            onPress={() => void Linking.openURL('https://www.durgakalyan.com/gotogether-terms')}
           />
           <SettingsRow
             icon="help-circle-outline"
             title="Support"
             subtitle="Get help, report bugs, or ask account questions."
-            onPress={() => void Linking.openURL('mailto:support@gotogether.app')}
+            onPress={() => void Linking.openURL('https://www.durgakalyan.com/gotogether-support')}
+          />
+          <SettingsRow
+            icon="trash-bin-outline"
+            title="Account Deletion Help"
+            subtitle="Learn what happens when you delete your account."
+            onPress={() => void Linking.openURL('https://www.durgakalyan.com/gotogether-delete-account')}
           />
           <SettingsRow
             icon="phone-portrait-outline"
@@ -244,13 +296,59 @@ export default function SettingsScreen({ navigation }: Props) {
 
             <View style={styles.rowCopy}>
               <Text style={styles.dangerTitle}>Delete account</Text>
-              <Text style={styles.rowSubtitle}>Permanently remove your profile and backend data.</Text>
+              <Text style={styles.rowSubtitle}>
+                Remove or anonymize your sign-in details while some shared trip history may remain for other members.
+              </Text>
             </View>
 
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
       </ScrollView>
+
+      <Modal transparent visible={blockedUsersVisible} animationType="fade" onRequestClose={() => setBlockedUsersVisible(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setBlockedUsersVisible(false)}>
+          <Pressable style={styles.modalCard} onPress={() => undefined}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Blocked Users</Text>
+              <Pressable style={styles.modalCloseButton} onPress={() => setBlockedUsersVisible(false)}>
+                <Ionicons name="close" size={18} color={colors.textPrimary} />
+              </Pressable>
+            </View>
+
+            {blockedUsersLoading ? (
+              <View style={styles.modalLoadingState}>
+                <ActivityIndicator color={colors.accent} />
+              </View>
+            ) : blockedUsers.length > 0 ? (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.blockedList}>
+                {blockedUsers.map((blockedUser) => (
+                  <View key={blockedUser.id} style={styles.blockedRow}>
+                    <View style={styles.blockedAvatar}>
+                      <Text style={styles.blockedAvatarText}>
+                        {(blockedUser.name || blockedUser.email || 'U').slice(0, 1).toUpperCase()}
+                      </Text>
+                    </View>
+
+                    <View style={styles.blockedCopy}>
+                      <Text style={styles.blockedName}>{blockedUser.name || blockedUser.email || 'Blocked user'}</Text>
+                      <Text style={styles.blockedMeta}>{blockedUser.phone || blockedUser.email || 'Hidden from discovery'}</Text>
+                    </View>
+
+                    <Pressable style={styles.unblockButton} onPress={() => handleUnblockUser(blockedUser)}>
+                      <Text style={styles.unblockButtonText}>Unblock</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.modalEmptyState}>
+                <Text style={styles.modalEmptyTitle}>No blocked users.</Text>
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Screen>
   );
 }
@@ -425,5 +523,108 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 15,
     fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 20,
+    maxHeight: '78%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  modalTitle: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalLoadingState: {
+    paddingVertical: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockedList: {
+    paddingTop: spacing.md,
+    gap: spacing.sm,
+  },
+  blockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.lg,
+    padding: 14,
+  },
+  blockedAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockedAvatarText: {
+    color: colors.accentStrong,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  blockedCopy: {
+    flex: 1,
+  },
+  blockedName: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  blockedMeta: {
+    marginTop: 3,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  unblockButton: {
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.surface,
+  },
+  unblockButtonText: {
+    color: colors.accentStrong,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalEmptyState: {
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.lg,
+    alignItems: 'center',
+  },
+  modalEmptyTitle: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

@@ -54,6 +54,12 @@ func SyncContacts(c *gin.Context) {
 		FROM users
 		WHERE id <> $1
 		  AND is_deleted = FALSE
+		  AND NOT EXISTS (
+				SELECT 1
+				FROM user_blocks ub
+				WHERE (ub.blocker_user_id = $1 AND ub.blocked_user_id = users.id)
+				   OR (ub.blocker_user_id = users.id AND ub.blocked_user_id = $1)
+		  )
 		  AND (
 				(array_length($2::text[], 1) IS NOT NULL AND COALESCE(email, '') <> '' AND LOWER(COALESCE(email, '')) = ANY($2::text[]))
 				OR
@@ -123,6 +129,12 @@ func GetFriends(c *gin.Context) {
 		INNER JOIN users u ON u.id = f.friend_user_id
 		WHERE f.user_id = $1
 		  AND u.is_deleted = FALSE
+		  AND NOT EXISTS (
+				SELECT 1
+				FROM user_blocks ub
+				WHERE (ub.blocker_user_id = $1 AND ub.blocked_user_id = u.id)
+				   OR (ub.blocker_user_id = u.id AND ub.blocked_user_id = $1)
+		  )
 		ORDER BY u.name ASC, u.id ASC
 	`, userID)
 	if err != nil {

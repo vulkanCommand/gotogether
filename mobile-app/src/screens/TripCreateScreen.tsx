@@ -12,6 +12,7 @@ import { ApiTrip, apiRequest, ensureTripCoverFromDestination } from '../config/a
 import { useAuthStore } from '../store/authStore';
 import { formatTripDate } from '../utils/tripFlow';
 import { cacheKeys, invalidateCacheKey } from '../services/resourceCache';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TripCreate'>;
 
@@ -207,12 +208,27 @@ export default function TripCreateScreen({ navigation }: Props) {
       return;
     }
 
-    if (step === 1 && !customName.trim()) {
-      Alert.alert('Select destination', 'Choose a destination or add a custom one first.');
-      return;
-    }
-
     if (step < 2) {
+      if (step === 1) {
+        const destinationNameValidation = validateUserText(customName, { required: true, maxLength: 74 });
+        if (destinationNameValidation.reason === 'required') {
+          Alert.alert('Select destination', 'Choose a destination or add a custom one first.');
+          return;
+        }
+        if (!destinationNameValidation.ok) {
+          Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+          return;
+        }
+
+        const destinationValue = customRegion.trim()
+          ? `${destinationNameValidation.value}, ${customRegion.trim()}`
+          : destinationNameValidation.value;
+        const destinationValidation = validateUserText(destinationValue, { required: true, maxLength: 120 });
+        if (!destinationValidation.ok) {
+          Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+          return;
+        }
+      }
       setStep((current) => current + 1);
       return;
     }
@@ -226,6 +242,32 @@ export default function TripCreateScreen({ navigation }: Props) {
       return;
     }
 
+    const destinationNameValidation = validateUserText(customName, { required: true, maxLength: 74 });
+    if (destinationNameValidation.reason === 'required') {
+      Alert.alert('Select destination', 'Choose a destination or add a custom one first.');
+      return;
+    }
+    if (!destinationNameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+      return;
+    }
+
+    const destinationRegion = customRegion.trim();
+    const tripNameValidation = validateUserText(`${destinationNameValidation.value} Trip`, { required: true, maxLength: 80 });
+    if (!tripNameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+      return;
+    }
+
+    const destinationValidation = validateUserText(
+      destinationRegion ? `${destinationNameValidation.value}, ${destinationRegion}` : destinationNameValidation.value,
+      { required: true, maxLength: 120 }
+    );
+    if (!destinationValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+      return;
+    }
+
     try {
       setSaving(true);
       setCreatingStage('Creating trip...');
@@ -233,10 +275,8 @@ export default function TripCreateScreen({ navigation }: Props) {
       const created = await apiRequest<{ trip: ApiTrip }>('/api/trips', {
         method: 'POST',
         body: JSON.stringify({
-          name: `${selectedDestination.name} Trip`,
-          destination: selectedDestination.region
-            ? `${selectedDestination.name}, ${selectedDestination.region}`
-            : selectedDestination.name,
+          name: tripNameValidation.value,
+          destination: destinationValidation.value,
           start_date: startDate,
           end_date: endDate,
           available_dates: sortedDates,
@@ -247,8 +287,8 @@ export default function TripCreateScreen({ navigation }: Props) {
 
       const destinationOption: DestinationOption = {
         id: selectedDestination.id,
-        name: selectedDestination.name,
-        country: selectedDestination.region,
+        name: destinationNameValidation.value,
+        country: destinationRegion,
         votes: [],
       };
 

@@ -82,8 +82,14 @@ func CreateExpenseGroup(c *gin.Context) {
 	}
 
 	name := strings.TrimSpace(req.Name)
-	if name == "" {
+	nameValidation := validateUserText(name, textValidationOptions{Required: true, MaxLength: 80})
+	name = nameValidation.Value
+	if nameValidation.Empty {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "group name is required"})
+		return
+	}
+	if nameValidation.TooLong || nameValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 
@@ -158,8 +164,16 @@ func CreateTripExpense(c *gin.Context) {
 	req.PaidBy = strings.TrimSpace(req.PaidBy)
 	req.SplitMethod = normalizeSplitMethod(req.SplitMethod)
 	req.Notes = strings.TrimSpace(req.Notes)
-	if req.Title == "" || req.Amount <= 0 {
+	titleValidation := validateUserText(req.Title, textValidationOptions{Required: true, MaxLength: 120})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	req.Title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || req.Amount <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "title and positive amount are required"})
+		return
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 
@@ -293,8 +307,16 @@ func UpdateTripExpense(c *gin.Context) {
 	req.PaidBy = strings.TrimSpace(req.PaidBy)
 	req.SplitMethod = normalizeSplitMethod(req.SplitMethod)
 	req.Notes = strings.TrimSpace(req.Notes)
-	if req.Title == "" || req.Amount <= 0 {
+	titleValidation := validateUserText(req.Title, textValidationOptions{Required: true, MaxLength: 120})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	req.Title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || req.Amount <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "title and positive amount are required"})
+		return
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 

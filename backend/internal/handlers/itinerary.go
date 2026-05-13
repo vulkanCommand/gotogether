@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -446,8 +447,16 @@ func UpdateItineraryEvent(c *gin.Context) {
 	title := strings.TrimSpace(req.Title)
 	timeLabel := strings.TrimSpace(req.Time)
 	location := strings.TrimSpace(req.Location)
-	if title == "" || timeLabel == "" {
+	titleValidation := validateUserText(title, textValidationOptions{Required: true, MaxLength: 100})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || timeLabel == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "event title and time are required"})
+		return
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		c.JSON(http.StatusBadRequest, gin.H{"error": friendlyTextValidationMessage})
 		return
 	}
 	if location == "" {
@@ -458,7 +467,7 @@ func UpdateItineraryEvent(c *gin.Context) {
 		UPDATE itinerary_events
 		SET title = $1, time_label = $2, location = $3, location_is_mapped = $4, notes = $5, attendee_summary = $6
 		WHERE id = $7
-	`, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), strings.Join(req.Attendees, "||"), eventID); err != nil {
+	`, title, timeLabel, location, req.LocationIsMapped, req.Notes, strings.Join(req.Attendees, "||"), eventID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update event", "details": err.Error()})
 		return
 	}
@@ -875,18 +884,58 @@ func loadTripItinerary(tripID int) ([]models.ItineraryDayPayload, error) {
 	}
 
 	for index := range days {
+		sort.SliceStable(days[index].Events, func(first, second int) bool {
+			firstMinutes := parseItineraryTimeSortValue(days[index].Events[first].Time)
+			secondMinutes := parseItineraryTimeSortValue(days[index].Events[second].Time)
+			if firstMinutes != secondMinutes {
+				return firstMinutes < secondMinutes
+			}
+			return days[index].Events[first].Title < days[index].Events[second].Title
+		})
 		days[index].Status = dayCompletionStatus(days[index])
 	}
 
 	return days, nil
 }
 
+func parseItineraryTimeSortValue(value string) int {
+	label := strings.TrimSpace(strings.ToUpper(value))
+	var hours, minutes int
+	var meridiem string
+	if _, err := fmt.Sscanf(label, "%d:%d %2s", &hours, &minutes, &meridiem); err != nil {
+		return int(^uint(0) >> 1)
+	}
+
+	if minutes < 0 || minutes > 59 || hours < 1 || hours > 12 {
+		return int(^uint(0) >> 1)
+	}
+
+	if meridiem == "AM" && hours == 12 {
+		hours = 0
+	} else if meridiem == "PM" && hours < 12 {
+		hours += 12
+	}
+
+	if meridiem != "AM" && meridiem != "PM" {
+		return int(^uint(0) >> 1)
+	}
+
+	return hours*60 + minutes
+}
+
 func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayload) (models.ItineraryEventPayload, error) {
 	title := strings.TrimSpace(req.Title)
 	timeLabel := strings.TrimSpace(req.Time)
 	location := strings.TrimSpace(req.Location)
-	if title == "" || timeLabel == "" {
+	titleValidation := validateUserText(title, textValidationOptions{Required: true, MaxLength: 100})
+	notesValidation := validateUserText(req.Notes, textValidationOptions{MaxLength: 500})
+	title = titleValidation.Value
+	req.Notes = notesValidation.Value
+	if titleValidation.Empty || timeLabel == "" {
 		return models.ItineraryEventPayload{}, fmt.Errorf("event title and time are required")
+	}
+	if titleValidation.TooLong || titleValidation.Unsafe || notesValidation.TooLong || notesValidation.Unsafe {
+		return models.ItineraryEventPayload{}, fmt.Errorf(friendlyTextValidationMessage)
 	}
 	if location == "" {
 		location = "Location TBD"
@@ -929,7 +978,7 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 		INSERT INTO itinerary_events (itinerary_day_id, title, time_label, location, location_is_mapped, notes, status, is_completed, attendee_summary, event_order)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id
-	`, dayID, title, timeLabel, location, req.LocationIsMapped, strings.TrimSpace(req.Notes), status, isCompleted, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
+	`, dayID, title, timeLabel, location, req.LocationIsMapped, req.Notes, status, isCompleted, strings.Join(req.Attendees, "||"), nextOrder).Scan(&eventID)
 	if err != nil {
 		return models.ItineraryEventPayload{}, err
 	}
@@ -941,7 +990,7 @@ func insertItineraryEvent(tripID int, dayID int, req models.ItineraryEventPayloa
 		Time:             timeLabel,
 		Location:         location,
 		LocationIsMapped: req.LocationIsMapped,
-		Notes:            strings.TrimSpace(req.Notes),
+		Notes:            req.Notes,
 		Attendees:        req.Attendees,
 		Status:           status,
 		IsCompleted:      isCompleted,

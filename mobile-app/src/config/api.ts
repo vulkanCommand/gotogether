@@ -153,6 +153,8 @@ export type ApiSMSInviteResult = {
   message_sid: string;
 };
 
+export type ReportContentType = 'user' | 'trip' | 'event' | 'expense' | 'photo' | 'other';
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
   let data: any = {};
@@ -322,8 +324,37 @@ export async function fetchFriends() {
   return apiRequest<{ friends: Friend[] }>('/api/friends');
 }
 
+export async function blockUser(userId: number) {
+  return apiRequest<{ blocked: boolean }>(`/api/users/${userId}/block`, {
+    method: 'POST',
+  });
+}
+
+export async function unblockUser(userId: number) {
+  return apiRequest<{ unblocked: boolean }>(`/api/users/${userId}/block`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getBlockedUsers() {
+  return apiRequest<{ users: Friend[]; restricted_users?: Friend[] }>('/api/users/blocked');
+}
+
 export async function sendSMSInvite(payload: { phone: string; name?: string }) {
   return apiRequest<ApiSMSInviteResult>('/api/friends/invite-sms', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createReport(payload: {
+  reported_user_id?: number;
+  content_type: ReportContentType;
+  content_id?: string;
+  reason: string;
+  details?: string;
+}) {
+  return apiRequest<{ ok: boolean; message: string }>('/api/reports', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

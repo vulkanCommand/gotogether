@@ -27,6 +27,7 @@ import { useAuthStore } from '../store/authStore';
 import { useFriendStore } from '../store/friendStore';
 import { calculateOverallExpenseSummary, formatMoney, getBalanceDisplay } from '../utils/expenseCalculations';
 import { cacheKeys, readCachedValue, writeCachedValue } from '../services/resourceCache';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Profile'>,
@@ -106,8 +107,14 @@ export default function ProfileScreen({ navigation }: Props) {
       : null;
 
   const saveProfile = async () => {
-    if (!name.trim()) {
+    const nameValidation = validateUserText(name, { required: true, maxLength: 60 });
+
+    if (nameValidation.reason === 'required') {
       Alert.alert('Missing name', 'Please enter your name.');
+      return;
+    }
+    if (!nameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
       return;
     }
 
@@ -115,8 +122,8 @@ export default function ProfileScreen({ navigation }: Props) {
       setSaving(true);
 
       const response = await updateMyProfile({
-        name: name.trim(),
-        username: user?.username?.trim() || name.trim().replace(/\s+/g, '').toLowerCase(),
+        name: nameValidation.value,
+        username: user?.username?.trim() || nameValidation.value.replace(/\s+/g, '').toLowerCase(),
         phone: phone.trim(),
         home_city: user?.home_city ?? '',
         bio: user?.bio ?? '',

@@ -15,6 +15,7 @@ import { radius, spacing } from '../theme/spacing';
 import { updateMyProfile, updateMyProfileImage } from '../config/api';
 import { useAuthStore } from '../store/authStore';
 import { formatPhoneForDisplay } from '../utils/phone';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CompleteProfile'>;
 
@@ -45,15 +46,21 @@ export default function CompleteProfileScreen({ navigation }: Props) {
   };
 
   const handleSave = async () => {
-    if (!name.trim()) {
+    const nameValidation = validateUserText(name, { required: true, maxLength: 60 });
+
+    if (nameValidation.reason === 'required') {
       Alert.alert('Missing details', 'Your name is required.');
+      return;
+    }
+    if (!nameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
       return;
     }
 
     try {
       setSaving(true);
       const response = await updateMyProfile({
-        name: name.trim(),
+        name: nameValidation.value,
         phone: user?.phone ?? '',
       });
       let updatedUser = response.user;

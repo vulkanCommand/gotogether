@@ -236,6 +236,34 @@ var schemaStatements = []string{
 		confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE (trip_id, user_id)
 	)`,
+	`CREATE TABLE IF NOT EXISTS reports (
+		id SERIAL PRIMARY KEY,
+		reporter_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		reported_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		content_type TEXT NOT NULL,
+		content_id TEXT,
+		reason TEXT NOT NULL,
+		details TEXT,
+		status TEXT NOT NULL DEFAULT 'open',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
+	`CREATE TABLE IF NOT EXISTS user_blocks (
+		id SERIAL PRIMARY KEY,
+		blocker_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		blocked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (blocker_user_id, blocked_user_id)
+	)`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS reported_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS content_type TEXT`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS content_id TEXT`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS reason TEXT`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS details TEXT`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open'`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+	`ALTER TABLE reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+	`ALTER TABLE user_blocks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
 	`CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))`,
 	`CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone)`,
 	`CREATE INDEX IF NOT EXISTS idx_friendships_user_id ON friendships (user_id)`,
@@ -250,6 +278,10 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_trip_completion_confirmations_trip ON trip_completion_confirmations (trip_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_member_setup_trip_user ON trip_member_setup (trip_id, user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_destination_cover_cache_key ON destination_cover_cache (destination_key)`,
+	`CREATE INDEX IF NOT EXISTS idx_reports_reporter_user_id ON reports (reporter_user_id, created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_reports_status ON reports (status, created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_user_blocks_blocker ON user_blocks (blocker_user_id, blocked_user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks (blocked_user_id, blocker_user_id)`,
 }
 
 func ensureSchema(db *sql.DB) error {

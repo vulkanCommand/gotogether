@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import AppFooter from '../components/AppFooter';
 import AppGuideModal from '../components/AppGuideModal';
+import ActiveTripBootstrap from '../components/ActiveTripBootstrap';
 
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -61,6 +62,8 @@ function MainTabs() {
 
   return (
     <>
+      <ActiveTripBootstrap />
+
       <Tab.Navigator
         tabBar={() => <AppFooter />}
         screenOptions={({ route }) => ({

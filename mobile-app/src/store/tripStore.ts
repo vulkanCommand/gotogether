@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 export type CrewMember = {
@@ -94,6 +95,33 @@ export type CurrentTrip = {
   completion_requested?: boolean;
 };
 
+export const SELECTED_TRIP_STORAGE_KEY = 'gotogether:selectedTripId:v1';
+
+export async function readStoredSelectedTripId() {
+  try {
+    const raw = await AsyncStorage.getItem(SELECTED_TRIP_STORAGE_KEY);
+    const parsed = Number(raw);
+
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch (error) {
+    console.log('Selected trip restore failed', error);
+    return null;
+  }
+}
+
+export async function writeStoredSelectedTripId(tripId: number | null) {
+  try {
+    if (!tripId) {
+      await AsyncStorage.removeItem(SELECTED_TRIP_STORAGE_KEY);
+      return;
+    }
+
+    await AsyncStorage.setItem(SELECTED_TRIP_STORAGE_KEY, String(tripId));
+  } catch (error) {
+    console.log('Selected trip persist failed', error);
+  }
+}
+
 type TripStore = {
   currentTrip: CurrentTrip | null;
   crew: CrewMember[];
@@ -187,7 +215,10 @@ export const useTripStore = create<TripStore>((set, get) => ({
   currentTrip: null,
   ...initialPlannerState,
 
-  setCurrentTrip: (currentTrip) => set({ currentTrip }),
+  setCurrentTrip: (currentTrip) => {
+    void writeStoredSelectedTripId(currentTrip?.id ?? null);
+    set({ currentTrip });
+  },
 
   setCrew: (crew) =>
     set({
@@ -381,5 +412,8 @@ export const useTripStore = create<TripStore>((set, get) => ({
     })),
 
   resetPlannerState: () => set({ ...initialPlannerState }),
-  resetTrip: () => set({ currentTrip: null, ...initialPlannerState }),
+  resetTrip: () => {
+    void writeStoredSelectedTripId(null);
+    set({ currentTrip: null, ...initialPlannerState });
+  },
 }));

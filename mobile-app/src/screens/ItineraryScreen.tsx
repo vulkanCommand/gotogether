@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import AppFooter from '../components/AppFooter';
+import ReportModal from '../components/ReportModal';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { colors } from '../theme/colors';
 import { footerScrollPadding, radius, spacing } from '../theme/spacing';
@@ -34,6 +35,7 @@ import {
   apiRequest,
 } from '../config/api';
 import { formatTripDate, formatTripRange } from '../utils/tripFlow';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Itinerary'>;
 
@@ -206,6 +208,42 @@ const getDayDateKey = (day: ItineraryDay, tripStart?: string) => {
   return parsed ? formatLocalDateKey(parsed) : null;
 };
 
+const parseEventTimeSortValue = (value?: string) => {
+  const label = value?.trim() ?? '';
+  const match = label.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const meridiem = match[3].toUpperCase();
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes < 0 || minutes > 59 || hours < 1 || hours > 12) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  if (meridiem === 'AM' && hours === 12) {
+    hours = 0;
+  } else if (meridiem === 'PM' && hours < 12) {
+    hours += 12;
+  }
+
+  return hours * 60 + minutes;
+};
+
+const sortEventsByTime = (events: ItineraryEvent[] = []) =>
+  [...events].sort((first, second) => {
+    const firstMinutes = parseEventTimeSortValue(first.time);
+    const secondMinutes = parseEventTimeSortValue(second.time);
+
+    if (firstMinutes !== secondMinutes) {
+      return firstMinutes - secondMinutes;
+    }
+
+    return first.title.localeCompare(second.title);
+  });
+
 const sortDaysByDate = (days: ItineraryDay[] = [], tripStart?: string) => {
   const sortedDays = [...days].sort((first, second) => {
     const firstDate = parseDayDateLabel(first.dateLabel, tripStart);
@@ -225,7 +263,7 @@ const sortDaysByDate = (days: ItineraryDay[] = [], tripStart?: string) => {
 
   return sortedDays.map((day) => ({
     ...day,
-    events: Array.isArray(day.events) ? day.events : [],
+    events: sortEventsByTime(Array.isArray(day.events) ? day.events : []),
   }));
 };
 
@@ -297,6 +335,7 @@ export default function ItineraryScreen({ navigation }: Props) {
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [locationResults, setLocationResults] = useState<ApiPlaceResult[]>([]);
   const [searchingLocations, setSearchingLocations] = useState(false);
+  const [reportEvent, setReportEvent] = useState<ItineraryEvent | null>(null);
   const hasFetchedRef = useRef(false);
   const lastFetchedRef = useRef(0);
 
@@ -484,8 +523,15 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const saveEvent = async () => {
-    if (!currentTrip?.id || !selectedDay || !eventTitle.trim() || !time.trim()) {
+    const titleValidation = validateUserText(eventTitle, { required: true, maxLength: 100 });
+    const notesValidation = validateUserText(notes, { maxLength: 500 });
+
+    if (!currentTrip?.id || !selectedDay || titleValidation.reason === 'required' || !time.trim()) {
       Alert.alert('Missing details', 'Add at least an event title and time.');
+      return;
+    }
+    if (!titleValidation.ok || !notesValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
       return;
     }
 
@@ -506,20 +552,20 @@ export default function ItineraryScreen({ navigation }: Props) {
 
       if (editingEventId) {
         await updateItineraryEvent(currentTrip.id, editingEventId, {
-          title: eventTitle.trim(),
+          title: titleValidation.value,
           time: time.trim(),
           location: location.trim() || 'Location TBD',
           locationIsMapped,
-          notes: notes.trim(),
+          notes: notesValidation.value,
           attendees: [],
         });
       } else {
         await createItineraryEvent(currentTrip.id, targetDay.id, {
-          title: eventTitle.trim(),
+          title: titleValidation.value,
           time: time.trim(),
           location: location.trim() || 'Location TBD',
           locationIsMapped,
-          notes: notes.trim(),
+          notes: notesValidation.value,
           attendees: [],
         });
       }
@@ -562,23 +608,16 @@ export default function ItineraryScreen({ navigation }: Props) {
   };
 
   const openEventActions = (event: ItineraryEvent) => {
-    if (!canManageItinerary) {
-      return;
-    }
-
-    if (isCompletedEvent(event)) {
-      Alert.alert('Event completed', 'Completed events are locked and can no longer be edited or deleted.');
-      return;
-    }
-
     const actionButtons: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [
-      { text: 'Edit', onPress: () => openEditEvent(event) },
+      { text: 'Report', style: 'destructive', onPress: () => setReportEvent(event) },
     ];
 
-    actionButtons.push(
-      { text: 'Delete', style: 'destructive', onPress: () => deleteEventAction(event) },
-      { text: 'Cancel', style: 'cancel' }
-    );
+    if (canManageItinerary && !isCompletedEvent(event)) {
+      actionButtons.unshift({ text: 'Edit', onPress: () => openEditEvent(event) });
+      actionButtons.push({ text: 'Delete', style: 'destructive', onPress: () => deleteEventAction(event) });
+    }
+
+    actionButtons.push({ text: 'Cancel', style: 'cancel' });
 
     Alert.alert(event.title, 'Choose an action for this event.', actionButtons);
   };
@@ -709,11 +748,9 @@ export default function ItineraryScreen({ navigation }: Props) {
                         </View>
                       </View>
 
-                      {canManageItinerary && !done ? (
-                        <Pressable style={styles.eventMenuButton} onPress={() => openEventActions(event)}>
-                          <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
-                        </Pressable>
-                      ) : null}
+                      <Pressable style={styles.eventMenuButton} onPress={() => openEventActions(event)}>
+                        <Ionicons name="ellipsis-horizontal" size={18} color={colors.textSecondary} />
+                      </Pressable>
                     </View>
                     <Text style={[styles.eventLocation, done && styles.eventMetaDone]}>
                       <Ionicons name="location-outline" size={12} color={colors.textMuted} /> {event.location}
@@ -878,6 +915,14 @@ export default function ItineraryScreen({ navigation }: Props) {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
+
+      <ReportModal
+        visible={Boolean(reportEvent)}
+        onClose={() => setReportEvent(null)}
+        contentType="event"
+        contentId={reportEvent?.id}
+        subjectLabel={reportEvent?.title || 'event'}
+      />
 
       <AppFooter />
     </View>

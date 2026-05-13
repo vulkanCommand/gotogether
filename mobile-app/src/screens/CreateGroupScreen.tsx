@@ -7,11 +7,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useTripStore } from '../store/tripStore';
-import { useFriendStore } from '../store/friendStore';
+import { Friend, useFriendStore } from '../store/friendStore';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme/colors';
 import { radius, spacing } from '../theme/spacing';
-import { fetchFriends, syncDeviceContacts } from '../config/api';
+import { blockUser, fetchFriends, getBlockedUsers, syncDeviceContacts } from '../config/api';
 import { collectDeviceContactLookupPayload, DeviceInviteContact } from '../utils/contacts';
 import { formatPhoneForDisplay, formatPhoneForFirebase } from '../utils/phone';
 
@@ -29,12 +29,14 @@ export default function CreateGroupScreen({ navigation }: Props) {
   const [inviting, setInviting] = useState(false);
   const [syncingFriends, setSyncingFriends] = useState(false);
   const [deviceContacts, setDeviceContacts] = useState<DeviceInviteContact[]>([]);
+  const [restrictedUsers, setRestrictedUsers] = useState<Friend[]>([]);
 
   const refreshFriends = useCallback(async () => {
     try {
       setSyncingFriends(true);
-      const response = await fetchFriends();
+      const [response, blockedResponse] = await Promise.all([fetchFriends(), getBlockedUsers()]);
       setFriends(response.friends);
+      setRestrictedUsers(blockedResponse.restricted_users ?? blockedResponse.users ?? []);
     } catch (error) {
       console.log('Friend refresh failed', error);
     } finally {
@@ -59,8 +61,9 @@ export default function CreateGroupScreen({ navigation }: Props) {
         emails: contacts.emails,
         phones: contacts.phones,
       });
-      const response = await fetchFriends();
+      const [response, blockedResponse] = await Promise.all([fetchFriends(), getBlockedUsers()]);
       setFriends(response.friends);
+      setRestrictedUsers(blockedResponse.restricted_users ?? blockedResponse.users ?? []);
     } catch (error) {
       console.log('Device contact sync failed', error);
     } finally {
@@ -94,9 +97,21 @@ export default function CreateGroupScreen({ navigation }: Props) {
     const normalizedSearch = search.trim().toLowerCase();
     const friendEmailSet = new Set(friends.map((friend) => friend.email?.trim().toLowerCase()).filter(Boolean));
     const friendPhoneSet = new Set(friends.map((friend) => formatPhoneForFirebase(friend.phone)).filter(Boolean));
+    const restrictedEmailSet = new Set(
+      restrictedUsers.map((restrictedUser) => restrictedUser.email?.trim().toLowerCase()).filter(Boolean)
+    );
+    const restrictedPhoneSet = new Set(
+      restrictedUsers.map((restrictedUser) => formatPhoneForFirebase(restrictedUser.phone)).filter(Boolean)
+    );
 
     return deviceContacts
       .filter((contact) => {
+        const matchesRestrictedUser =
+          contact.emails.some((email) => restrictedEmailSet.has(email)) ||
+          contact.phones.some((phone) => restrictedPhoneSet.has(phone));
+        if (matchesRestrictedUser) {
+          return false;
+        }
         const hasUnsyncedChannel =
           contact.emails.some((email) => !friendEmailSet.has(email)) ||
           contact.phones.some((phone) => !friendPhoneSet.has(phone));
@@ -116,11 +131,42 @@ export default function CreateGroupScreen({ navigation }: Props) {
         invitePhone: contact.phones.find((phone) => !friendPhoneSet.has(phone)) || '',
       }))
       .filter((contact) => Boolean(contact.invitePhone));
-  }, [deviceContacts, friends, search]);
+  }, [deviceContacts, friends, restrictedUsers, search]);
 
   const toggle = (id: number) => {
     setSelectedIds((current) =>
       current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+    );
+  };
+
+  const confirmBlockUser = (friendId: number, friendName: string) => {
+    Alert.alert(
+      'Block this user?',
+      'You won’t see each other in contact search or invite suggestions. Existing shared trip history will remain.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(friendId);
+              setFriends(friends.filter((friend) => friend.id !== friendId));
+              setRestrictedUsers((current) => {
+                if (current.some((item) => item.id === friendId)) {
+                  return current;
+                }
+                const blockedFriend = friends.find((friend) => friend.id === friendId);
+                return blockedFriend ? [...current, blockedFriend] : current;
+              });
+              setSelectedIds((current) => current.filter((id) => id !== friendId));
+              Alert.alert('User blocked', `${friendName} has been blocked.`);
+            } catch {
+              Alert.alert('Block failed', 'Could not block this user. Please try again.');
+            }
+          },
+        },
+      ]
     );
   };
 
@@ -240,6 +286,7 @@ export default function CreateGroupScreen({ navigation }: Props) {
               <Pressable
                 key={friend.id}
                 onPress={() => toggle(friend.id)}
+                onLongPress={() => confirmBlockUser(friend.id, friend.name || friend.email || 'This user')}
                 style={[styles.friendRow, isSelected && styles.friendRowSelected]}
               >
                 <View style={styles.friendAvatar}>

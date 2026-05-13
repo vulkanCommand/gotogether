@@ -18,6 +18,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import ReportModal from '../components/ReportModal';
 import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 import { CurrentTrip, ExpenseGroup, ExpenseItem, useTripStore } from '../store/tripStore';
 import { useAuthStore } from '../store/authStore';
@@ -35,6 +36,7 @@ import {
   groupExpensesByMonth,
   isSettlementExpense,
 } from '../utils/expenseCalculations';
+import { TEXT_SAFETY_ERROR_MESSAGE, validateUserText } from '../utils/textSafety';
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<MainTabParamList, 'Expenses'>,
@@ -133,6 +135,7 @@ export default function ExpensesScreen({ navigation }: Props) {
   // Search modal state to allow filtering groups when tapping the search icon.
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [reportExpense, setReportExpense] = useState<ExpenseItem | null>(null);
   const hasLoadedRef = useRef(false);
   const lastFetchedRef = useRef(0);
 
@@ -356,8 +359,18 @@ export default function ExpensesScreen({ navigation }: Props) {
       return;
     }
 
+    const groupNameValidation = validateUserText(newGroupName, { required: true, maxLength: 80 });
+    if (groupNameValidation.reason === 'required') {
+      Alert.alert('Choose a trip first', 'Open a trip expense group first, then create another group inside that trip.');
+      return;
+    }
+    if (!groupNameValidation.ok) {
+      Alert.alert('Edit text', TEXT_SAFETY_ERROR_MESSAGE);
+      return;
+    }
+
     try {
-      await createExpenseGroup(tripForGroup.id, { name: newGroupName.trim() });
+      await createExpenseGroup(tripForGroup.id, { name: groupNameValidation.value });
       setNewGroupName('');
       setShowGroupModal(false);
       await invalidateTripCaches(tripForGroup.id);
@@ -593,6 +606,7 @@ export default function ExpensesScreen({ navigation }: Props) {
                       onLongPress={() =>
                         Alert.alert(expense.title, 'Choose an action', [
                           { text: 'Edit', onPress: () => editExpense(expense) },
+                          { text: 'Report', style: 'destructive', onPress: () => setReportExpense(expense) },
                           { text: 'Delete', style: 'destructive', onPress: () => deleteExpense(expense) },
                           { text: 'Cancel', style: 'cancel' },
                         ])
@@ -859,6 +873,14 @@ export default function ExpensesScreen({ navigation }: Props) {
           </View>
         </View>
       </Modal>
+
+      <ReportModal
+        visible={Boolean(reportExpense)}
+        onClose={() => setReportExpense(null)}
+        contentType="expense"
+        contentId={reportExpense?.id}
+        subjectLabel={reportExpense?.title || 'expense'}
+      />
     </View>
   );
 }
