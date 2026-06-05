@@ -27,7 +27,8 @@
       }
     },
     "android": {
-      "package": "com.gotogether.app",
+      "package": "com.vulkancommander.gotogether",
+      "versionCode": 2,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

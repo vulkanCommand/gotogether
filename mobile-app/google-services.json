@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:501556960072:android:3e7897f878011a02eb717d",
+        "mobilesdk_app_id": "1:501556960072:android:f2d2ea7564bc350aeb717d",
         "android_client_info": {
-          "package_name": "com.gotogether.app"
+          "package_name": "com.vulkancommander.gotogether"
         }
       },
       "oauth_client": [
