@@ -45,7 +45,15 @@ export type ApiTripDetails = {
     can_edit_trip: boolean;
     can_edit_itinerary: boolean;
     can_complete_trip: boolean;
+    can_delete_trip?: boolean;
+    can_remove_members?: boolean;
   };
+};
+
+export type ApiTripInvite = {
+  token: string;
+  invite_url: string;
+  app_url?: string;
 };
 
 export type ApiTripCoverResult = {
@@ -387,6 +395,34 @@ export async function updateTrip(
 
 export async function deleteTrip(tripId: number) {
   return apiRequest<{ deleted: boolean }>(`/api/trips/${tripId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function createTripInvite(tripId: number) {
+  return apiRequest<ApiTripInvite>(`/api/trips/${tripId}/invite`, {
+    method: 'POST',
+  });
+}
+
+export async function acceptTripInvite(token: string) {
+  return apiRequest<{ accepted: boolean; trip_id: number; already_member?: boolean }>(
+    `/api/trips/invites/${encodeURIComponent(token)}/accept`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function addTripMembers(tripId: number, userIds: number[]) {
+  return apiRequest<{ added: boolean; added_user_ids: number[] }>(`/api/trips/${tripId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ user_ids: userIds }),
+  });
+}
+
+export async function removeTripMember(tripId: number, userId: number) {
+  return apiRequest<{ removed: boolean }>(`/api/trips/${tripId}/members/${userId}`, {
     method: 'DELETE',
   });
 }

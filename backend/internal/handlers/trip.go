@@ -468,9 +468,11 @@ func GetTripByID(c *gin.Context) {
 		},
 		"members": members,
 		"permissions": gin.H{
-			"can_edit_trip":      trip.ViewerRole == "lead",
-			"can_edit_itinerary": trip.ViewerRole == "lead",
-			"can_complete_trip":  trip.ViewerRole == "lead",
+			"can_edit_trip":      true,
+			"can_edit_itinerary": true,
+			"can_complete_trip":  true,
+			"can_delete_trip":    trip.CreatedBy == userID,
+			"can_remove_members": trip.CreatedBy == userID,
 		},
 	})
 }
@@ -486,7 +488,7 @@ func UpdateTrip(c *gin.Context) {
 		return
 	}
 
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -643,7 +645,7 @@ func DeleteTrip(c *gin.Context) {
 		return
 	}
 
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripCreatorAccess(c, tripID, userID) {
 		return
 	}
 
@@ -664,7 +666,7 @@ func CompleteTrip(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 

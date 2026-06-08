@@ -22,7 +22,7 @@ func GenerateTripItineraryDraft(c *gin.Context) {
 		return
 	}
 
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 

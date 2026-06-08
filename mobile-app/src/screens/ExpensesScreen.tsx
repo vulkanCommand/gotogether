@@ -549,6 +549,7 @@ export default function ExpensesScreen({ navigation }: Props) {
 
     const balanceDisplay = getBalanceDisplay(selectedGroupSummary.netBalance);
     const memberCount = Math.max(selectedSection.trip.members_count ?? 0, selectedGroupSummary.memberTotals.length);
+    const canDeleteExpenses = selectedSection.trip.created_by === user?.id;
 
     return (
       <>
@@ -604,12 +605,22 @@ export default function ExpensesScreen({ navigation }: Props) {
                       key={expense.id}
                       style={[styles.activityRow, index === monthGroup.expenses.length - 1 && styles.activityRowLast]}
                       onLongPress={() =>
-                        Alert.alert(expense.title, 'Choose an action', [
-                          { text: 'Edit', onPress: () => editExpense(expense) },
-                          { text: 'Report', style: 'destructive', onPress: () => setReportExpense(expense) },
-                          { text: 'Delete', style: 'destructive', onPress: () => deleteExpense(expense) },
-                          { text: 'Cancel', style: 'cancel' },
-                        ])
+                        Alert.alert(
+                          expense.title,
+                          'Choose an action',
+                          [
+                            { text: 'Edit', onPress: () => editExpense(expense) },
+                            { text: 'Report', style: 'destructive', onPress: () => setReportExpense(expense) },
+                            canDeleteExpenses
+                              ? { text: 'Delete', style: 'destructive', onPress: () => deleteExpense(expense) }
+                              : null,
+                            { text: 'Cancel', style: 'cancel' },
+                          ].filter(Boolean) as Array<{
+                            text: string;
+                            style?: 'default' | 'cancel' | 'destructive';
+                            onPress?: () => void;
+                          }>
+                        )
                       }
                     >
                       <View style={styles.activityDateWrap}>

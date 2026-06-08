@@ -52,6 +52,14 @@ CREATE TABLE IF NOT EXISTS trip_members (
     UNIQUE (trip_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS trip_invites (
+    id SERIAL PRIMARY KEY,
+    trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS trip_destination_votes (
     id SERIAL PRIMARY KEY,
     trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,

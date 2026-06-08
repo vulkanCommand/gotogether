@@ -340,11 +340,10 @@ export default function ItineraryScreen({ navigation }: Props) {
   const lastFetchedRef = useRef(0);
 
   const canManageItinerary = Boolean(
-    currentTrip &&
-      !currentTrip.completed_at &&
-      (currentTrip.viewer_role === 'lead' ||
-        currentTrip.lead_user_id === Number(user?.id) ||
-        currentTrip.created_by === Number(user?.id))
+    currentTrip && !currentTrip.completed_at
+  );
+  const canDeleteItinerary = Boolean(
+    currentTrip && !currentTrip.completed_at && currentTrip.created_by === Number(user?.id)
   );
 
   const fetchItinerary = useCallback(async (force = false) => {
@@ -614,6 +613,9 @@ export default function ItineraryScreen({ navigation }: Props) {
 
     if (canManageItinerary && !isCompletedEvent(event)) {
       actionButtons.unshift({ text: 'Edit', onPress: () => openEditEvent(event) });
+    }
+
+    if (canDeleteItinerary && !isCompletedEvent(event)) {
       actionButtons.push({ text: 'Delete', style: 'destructive', onPress: () => deleteEventAction(event) });
     }
 

@@ -64,7 +64,8 @@ export default function TripCompletionScreen({ navigation }: Props) {
   const [completing, setCompleting] = useState(false);
 
   const destination = selectedDestination();
-  const canCompleteTrip = currentTrip?.viewer_role === 'lead';
+  const canCompleteTrip = Boolean(currentTrip && !currentTrip.completed_at);
+  const canRemovePhoto = Boolean(currentTrip?.created_by && user?.id && currentTrip.created_by === user.id);
   const isCompleted = Boolean(currentTrip?.completed_at);
   const primaryPhoto = photos[0] ?? null;
 
@@ -226,7 +227,7 @@ export default function TripCompletionScreen({ navigation }: Props) {
 
   const handleFinish = async () => {
     if (!canCompleteTrip) {
-      Alert.alert('Trip lead only', 'Only the trip lead can finish this trip.');
+      Alert.alert('Trip unavailable', 'This trip cannot be finished right now.');
       navigation.navigate('MainTabs', { screen: 'Trips' });
       return;
     }
@@ -325,10 +326,12 @@ export default function TripCompletionScreen({ navigation }: Props) {
                   <Ionicons name="swap-horizontal-outline" size={16} color={colors.accent} />
                   <Text style={styles.photoActionText}>{uploading ? 'Replacing...' : 'Replace'}</Text>
                 </Pressable>
-                <Pressable style={styles.photoRemoveButton} onPress={handleRemovePhoto} disabled={removingPhoto}>
-                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
-                  <Text style={styles.photoRemoveText}>{removingPhoto ? 'Removing...' : 'Remove'}</Text>
-                </Pressable>
+                {canRemovePhoto ? (
+                  <Pressable style={styles.photoRemoveButton} onPress={handleRemovePhoto} disabled={removingPhoto}>
+                    <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                    <Text style={styles.photoRemoveText}>{removingPhoto ? 'Removing...' : 'Remove'}</Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
           </AppCard>

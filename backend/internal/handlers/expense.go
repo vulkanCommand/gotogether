@@ -469,7 +469,7 @@ func DeleteTripExpense(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripAccess(c, tripID, userID) {
+	if !ensureTripCreatorAccess(c, tripID, userID) {
 		return
 	}
 

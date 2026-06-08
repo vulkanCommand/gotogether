@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Image, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,8 +9,18 @@ import GTCard from '../components/GTCard';
 import ReportModal from '../components/ReportModal';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { isCompletedEvent, useTripStore } from '../store/tripStore';
-import { apiRequest, ensureTripCoverFromDestination, fetchTripDetails, tripCoverFileUrl } from '../config/api';
+import {
+  addTripMembers,
+  apiRequest,
+  createTripInvite,
+  ensureTripCoverFromDestination,
+  fetchFriends,
+  fetchTripDetails,
+  removeTripMember,
+  tripCoverFileUrl,
+} from '../config/api';
 import { useAuthStore } from '../store/authStore';
+import { Friend } from '../store/friendStore';
 import { colors } from '../theme/colors';
 import { footerScrollPadding, spacing } from '../theme/spacing';
 import { formatTripRange, mapApiMembersToCrew } from '../utils/tripFlow';
@@ -32,10 +42,17 @@ export default function TripOverviewScreen({ navigation }: Props) {
   const setTripLead = useTripStore((state) => state.setTripLead);
   const setItineraryDays = useTripStore((state) => state.setItineraryDays);
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
 
   const [loading, setLoading] = useState(false);
   const [coverLoading, setCoverLoading] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [inviteVisible, setInviteVisible] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState('');
+  const [inviteAppUrl, setInviteAppUrl] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [selectedFriendIds, setSelectedFriendIds] = useState<number[]>([]);
 
   const progressAnimation = useRef(new Animated.Value(0)).current;
   const itineraryDaysRef = useRef(itineraryDays);
@@ -189,6 +206,12 @@ export default function TripOverviewScreen({ navigation }: Props) {
   }, [progressAnimation, progressPercent]);
 
   const hasHeroImage = Boolean(currentTrip?.image_url && token);
+  const isTripCreator = Boolean(currentTrip?.created_by && user?.id && currentTrip.created_by === user.id);
+  const crewUserIdSet = useMemo(() => new Set(crew.map((member) => Number(member.id))), [crew]);
+  const availableFriends = useMemo(
+    () => friends.filter((friend) => !crewUserIdSet.has(friend.id)),
+    [crewUserIdSet, friends]
+  );
 
   const heroSource =
     currentTrip?.image_url && token
@@ -212,6 +235,95 @@ export default function TripOverviewScreen({ navigation }: Props) {
     navigation.navigate('MainTabs', {
       screen: 'Home',
     });
+  };
+
+  const openInviteModal = async () => {
+    if (!currentTrip?.id) {
+      return;
+    }
+
+    setInviteVisible(true);
+    setInviteBusy(true);
+
+    try {
+      const [invite, friendResponse] = await Promise.all([
+        createTripInvite(currentTrip.id),
+        fetchFriends(),
+      ]);
+      setInviteUrl(invite.invite_url);
+      setInviteAppUrl(invite.app_url || '');
+      setFriends(friendResponse.friends);
+    } catch (error: any) {
+      Alert.alert('Invite unavailable', error?.message || 'Could not load invite options right now.');
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const shareInviteLink = async () => {
+    if (!inviteUrl) {
+      return;
+    }
+
+    try {
+      await Share.share({
+        message: `Join ${currentTrip?.name || 'my trip'} on GoTogether: ${inviteAppUrl || inviteUrl}`,
+        url: inviteUrl,
+      });
+    } catch (error: any) {
+      Alert.alert('Share failed', error?.message || 'Could not open sharing right now.');
+    }
+  };
+
+  const toggleFriend = (friendId: number) => {
+    setSelectedFriendIds((current) =>
+      current.includes(friendId) ? current.filter((id) => id !== friendId) : [...current, friendId]
+    );
+  };
+
+  const addSelectedFriends = async () => {
+    if (!currentTrip?.id || selectedFriendIds.length === 0) {
+      return;
+    }
+
+    try {
+      setInviteBusy(true);
+      await addTripMembers(currentTrip.id, selectedFriendIds);
+      setSelectedFriendIds([]);
+      await hydrateTrip();
+      const friendResponse = await fetchFriends();
+      setFriends(friendResponse.friends);
+      Alert.alert('Members added', 'Selected friends were added to this trip.');
+    } catch (error: any) {
+      Alert.alert('Add failed', error?.message || 'Could not add members right now.');
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const confirmRemoveMember = (memberId: string, memberName: string) => {
+    if (!currentTrip?.id) {
+      return;
+    }
+
+    Alert.alert('Remove member?', `Remove ${memberName} from this trip?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setInviteBusy(true);
+            await removeTripMember(currentTrip.id, Number(memberId));
+            await hydrateTrip();
+          } catch (error: any) {
+            Alert.alert('Remove failed', error?.message || 'Could not remove this member right now.');
+          } finally {
+            setInviteBusy(false);
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -353,7 +465,7 @@ export default function TripOverviewScreen({ navigation }: Props) {
             </Pressable>
 
             <Pressable
-              onPress={() => navigation.navigate('CreateGroup')}
+              onPress={openInviteModal}
               style={[styles.actionCard, styles.actionCardInvite]}
             >
               <Ionicons name="person-add-outline" size={22} color={colors.accentStrong} />
@@ -387,6 +499,107 @@ export default function TripOverviewScreen({ navigation }: Props) {
         contentId={currentTrip ? String(currentTrip.id) : undefined}
         subjectLabel={currentTrip?.name || 'trip'}
       />
+
+      <Modal transparent visible={inviteVisible} animationType="slide" onRequestClose={() => setInviteVisible(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setInviteVisible(false)}>
+          <Pressable style={styles.inviteModalCard} onPress={() => undefined}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Invite People</Text>
+                <Text style={styles.modalSubtitle}>Share a trip link or add connected friends.</Text>
+              </View>
+              <Pressable style={styles.modalCloseButton} onPress={() => setInviteVisible(false)}>
+                <Ionicons name="close" size={18} color={colors.textPrimary} />
+              </Pressable>
+            </View>
+
+            <View style={styles.inviteLinkBox}>
+              <Text numberOfLines={2} style={styles.inviteLinkText}>
+                {inviteUrl || 'Preparing invite link...'}
+              </Text>
+              <Pressable style={styles.shareButton} onPress={shareInviteLink} disabled={!inviteUrl || inviteBusy}>
+                <Ionicons name="share-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.shareButtonText}>Share</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.sectionTitle}>Add Friends</Text>
+            <ScrollView style={styles.friendPicker} showsVerticalScrollIndicator={false}>
+              {inviteBusy && availableFriends.length === 0 ? (
+                <View style={styles.inlineLoading}>
+                  <ActivityIndicator color={colors.accent} />
+                  <Text style={styles.inlineLoadingText}>Loading invite options...</Text>
+                </View>
+              ) : null}
+
+              {availableFriends.map((friend) => {
+                const selected = selectedFriendIds.includes(friend.id);
+
+                return (
+                  <Pressable
+                    key={friend.id}
+                    style={[styles.friendRow, selected && styles.friendRowSelected]}
+                    onPress={() => toggleFriend(friend.id)}
+                  >
+                    <View style={styles.friendAvatar}>
+                      <Text style={styles.friendAvatarText}>{(friend.name || friend.email).charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <Text numberOfLines={1} style={styles.friendName}>
+                      {friend.name || friend.email}
+                    </Text>
+                    <View style={[styles.friendCheck, selected && styles.friendCheckSelected]}>
+                      {selected ? <Ionicons name="checkmark" size={12} color="#FFFFFF" /> : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+
+              {!inviteBusy && availableFriends.length === 0 ? (
+                <Text style={styles.emptyInviteText}>No connected friends available to add right now.</Text>
+              ) : null}
+            </ScrollView>
+
+            <Pressable
+              style={[styles.addMembersButton, selectedFriendIds.length === 0 && styles.addMembersButtonDisabled]}
+              onPress={addSelectedFriends}
+              disabled={selectedFriendIds.length === 0 || inviteBusy}
+            >
+              <Text style={styles.addMembersButtonText}>
+                {selectedFriendIds.length > 0 ? `Add ${selectedFriendIds.length} Selected` : 'Select Friends to Add'}
+              </Text>
+            </Pressable>
+
+            <Text style={styles.sectionTitle}>Trip Members</Text>
+            <View style={styles.memberManageList}>
+              {crew.map((member) => {
+                const isCreatorMember = currentTrip?.created_by === Number(member.id);
+                const canRemoveMember = isTripCreator && !isCreatorMember;
+
+                return (
+                  <View key={member.id} style={styles.memberManageRow}>
+                    <View style={styles.memberManageAvatar}>
+                      <Text style={styles.memberManageAvatarText}>{member.name.charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.memberManageCopy}>
+                      <Text numberOfLines={1} style={styles.memberManageName}>{member.name}</Text>
+                      <Text style={styles.memberManageMeta}>{isCreatorMember ? 'Trip creator' : member.role || 'Member'}</Text>
+                    </View>
+                    {canRemoveMember ? (
+                      <Pressable
+                        style={styles.removeMemberButton}
+                        onPress={() => confirmRemoveMember(member.id, member.name)}
+                        disabled={inviteBusy}
+                      >
+                        <Ionicons name="remove-circle-outline" size={20} color={colors.danger} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <AppFooter />
     </View>
@@ -687,5 +900,210 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 13,
     fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.48)',
+    justifyContent: 'flex-end',
+  },
+  inviteModalCard: {
+    maxHeight: '86%',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 28,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  modalTitle: {
+    color: colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    marginTop: 4,
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inviteLinkBox: {
+    marginTop: spacing.lg,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    padding: 12,
+    gap: spacing.sm,
+  },
+  inviteLinkText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  shareButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 14,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  shareButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  sectionTitle: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  friendPicker: {
+    maxHeight: 178,
+  },
+  inlineLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: 12,
+  },
+  inlineLoadingText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  friendRow: {
+    minHeight: 54,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  friendRowSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  friendAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  friendAvatarText: {
+    color: colors.accentStrong,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  friendName: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  friendCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  friendCheckSelected: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  emptyInviteText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingVertical: 12,
+  },
+  addMembersButton: {
+    marginTop: spacing.sm,
+    borderRadius: 16,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+  },
+  addMembersButtonDisabled: {
+    backgroundColor: colors.textMuted,
+  },
+  addMembersButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  memberManageList: {
+    gap: 8,
+  },
+  memberManageRow: {
+    minHeight: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+  },
+  memberManageAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberManageAvatarText: {
+    color: colors.accentStrong,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  memberManageCopy: {
+    flex: 1,
+  },
+  memberManageName: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  memberManageMeta: {
+    marginTop: 2,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  removeMemberButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -291,6 +291,29 @@ func ensureTripLeadAccess(c *gin.Context, tripID int, userID int) bool {
 	return true
 }
 
+func ensureTripCreatorAccess(c *gin.Context, tripID int, userID int) bool {
+	var createdBy int
+	err := db.DB.QueryRow(`SELECT created_by FROM trips WHERE id = $1`, tripID).Scan(&createdBy)
+	if err != nil {
+		if sqlErrNoRows(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "trip not found"})
+			return false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "failed to verify trip creator access",
+			"details": err.Error(),
+		})
+		return false
+	}
+
+	if createdBy != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the trip creator can do this"})
+		return false
+	}
+
+	return true
+}
+
 func rollbackQuietly(tx *sql.Tx) {
 	if tx != nil {
 		_ = tx.Rollback()

@@ -91,6 +91,7 @@ const getTripsForSection = (allTrips: ApiTrip[], section: TripSection) => {
 
 export default function TripsScreen({ navigation, route }: Props) {
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
   const setCurrentTrip = useTripStore((state) => state.setCurrentTrip);
   const setCrew = useTripStore((state) => state.setCrew);
   const setTripLead = useTripStore((state) => state.setTripLead);
@@ -592,9 +593,11 @@ export default function TripsScreen({ navigation, route }: Props) {
                   <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save changes'}</Text>
                 </Pressable>
 
-                <Pressable onPress={confirmDeleteTrip} style={styles.deleteButton} disabled={saving}>
-                  <Text style={styles.deleteButtonText}>Delete trip</Text>
-                </Pressable>
+                {editingTrip?.created_by === user?.id ? (
+                  <Pressable onPress={confirmDeleteTrip} style={styles.deleteButton} disabled={saving}>
+                    <Text style={styles.deleteButtonText}>Delete trip</Text>
+                  </Pressable>
+                ) : null}
               </ScrollView>
             </Pressable>
           </KeyboardAvoidingView>

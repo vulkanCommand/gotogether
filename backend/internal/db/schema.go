@@ -69,6 +69,13 @@ var schemaStatements = []string{
 		joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE (trip_id, user_id)
 	)`,
+	`CREATE TABLE IF NOT EXISTS trip_invites (
+		id SERIAL PRIMARY KEY,
+		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+		token TEXT NOT NULL UNIQUE,
+		created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`,
 	`CREATE TABLE IF NOT EXISTS trip_destination_votes (
 		id SERIAL PRIMARY KEY,
 		trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
@@ -277,6 +284,8 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_event_completion_confirmations_event ON event_completion_confirmations (event_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_completion_confirmations_trip ON trip_completion_confirmations (trip_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_trip_member_setup_trip_user ON trip_member_setup (trip_id, user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_trip_invites_trip_id ON trip_invites (trip_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_trip_invites_token ON trip_invites (token)`,
 	`CREATE INDEX IF NOT EXISTS idx_destination_cover_cache_key ON destination_cover_cache (destination_key)`,
 	`CREATE INDEX IF NOT EXISTS idx_reports_reporter_user_id ON reports (reporter_user_id, created_at DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_reports_status ON reports (status, created_at DESC)`,

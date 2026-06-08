@@ -163,7 +163,6 @@ func GetTripPhotoFile(c *gin.Context) {
 	}
 }
 
-
 func DeleteTripPhoto(c *gin.Context) {
 	userID, ok := getOrCreateAuthenticatedUserID(c)
 	if !ok {
@@ -173,7 +172,7 @@ func DeleteTripPhoto(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripAccess(c, tripID, userID) {
+	if !ensureTripCreatorAccess(c, tripID, userID) {
 		return
 	}
 
@@ -214,7 +213,7 @@ func UpdateTripCover(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -259,7 +258,7 @@ func DeleteTripCover(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripCreatorAccess(c, tripID, userID) {
 		return
 	}
 

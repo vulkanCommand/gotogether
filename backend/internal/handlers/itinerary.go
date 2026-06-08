@@ -74,7 +74,7 @@ func SaveTripItinerary(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -121,7 +121,7 @@ func CreateItineraryDay(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -179,7 +179,7 @@ func UpdateItineraryDay(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -223,7 +223,7 @@ func DeleteItineraryDay(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripCreatorAccess(c, tripID, userID) {
 		return
 	}
 
@@ -275,7 +275,7 @@ func CreateItineraryEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -314,7 +314,7 @@ func ReorderItineraryDayEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -431,7 +431,7 @@ func UpdateItineraryEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -491,7 +491,7 @@ func DeleteItineraryEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripCreatorAccess(c, tripID, userID) {
 		return
 	}
 
@@ -543,7 +543,7 @@ func CompleteItineraryEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 
@@ -745,7 +745,7 @@ func UndoCompleteItineraryEvent(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ensureTripLeadAccess(c, tripID, userID) {
+	if !ensureTripAccess(c, tripID, userID) {
 		return
 	}
 

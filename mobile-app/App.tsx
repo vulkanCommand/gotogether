@@ -28,6 +28,15 @@ const navTheme = {
 
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
+const linking = {
+  prefixes: ['gotogether://', 'https://gotogether.app'],
+  config: {
+    screens: {
+      TripInvite: 'trip-invite/:token',
+    },
+  },
+};
+
 function AuthBootstrap() {
   const setSession = useAuthStore((state) => state.setSession);
   const clearSession = useAuthStore((state) => state.clearSession);
@@ -115,7 +124,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <NavigationContainer theme={navTheme} ref={navigationRef}>
+        <NavigationContainer theme={navTheme} ref={navigationRef} linking={linking}>
           <AuthBootstrap />
           <PushBootstrap />
           <StatusBar style="dark" />

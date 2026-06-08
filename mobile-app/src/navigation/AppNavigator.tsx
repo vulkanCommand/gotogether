@@ -23,6 +23,7 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import CreateGroupScreen from '../screens/CreateGroupScreen';
 import TripCreateScreen from '../screens/TripCreateScreen';
 import TripOverviewScreen from '../screens/TripOverviewScreen';
+import TripInviteScreen from '../screens/TripInviteScreen';
 import TripSetupScreen from '../screens/TripSetupScreen';
 import ItineraryScreen from '../screens/ItineraryScreen';
 import AddExpenseScreen from '../screens/AddExpenseScreen';
@@ -38,6 +39,7 @@ export type RootStackParamList = {
   CreateGroup: undefined;
   TripCreate: undefined;
   TripOverview: undefined;
+  TripInvite: { token?: string };
   TripSetup: undefined;
   Itinerary: undefined;
   AddExpense: { tripId?: number; groupId?: number; eventId?: string; expenseId?: string } | undefined;
@@ -180,6 +182,7 @@ export default function AppNavigator() {
             <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
             <Stack.Screen name="TripCreate" component={TripCreateScreen} />
             <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
+            <Stack.Screen name="TripInvite" component={TripInviteScreen} />
             <Stack.Screen name="TripSetup" component={TripSetupScreen} />
             <Stack.Screen name="Itinerary" component={ItineraryScreen} />
             <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
@@ -195,6 +198,7 @@ export default function AppNavigator() {
             <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
             <Stack.Screen name="TripCreate" component={TripCreateScreen} />
             <Stack.Screen name="TripOverview" component={TripOverviewScreen} />
+            <Stack.Screen name="TripInvite" component={TripInviteScreen} />
             <Stack.Screen name="TripSetup" component={TripSetupScreen} />
             <Stack.Screen name="Itinerary" component={ItineraryScreen} />
             <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
@@ -207,6 +211,7 @@ export default function AppNavigator() {
         <>
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="TripInvite" component={TripInviteScreen} />
         </>
       )}
     </Stack.Navigator>
