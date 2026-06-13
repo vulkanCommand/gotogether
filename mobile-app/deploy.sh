@@ -16,6 +16,27 @@ MERGE_TO_MAIN=0
 SKIP_ROOT_CHECKS=0
 COMMIT_MESSAGE=""
 
+log_time() {
+  date +"%H:%M:%S"
+}
+
+scene() {
+  printf '\n[%s] ==== %s ====\n' "$(log_time)" "$1"
+}
+
+signal() {
+  printf '[%s] %-12s %s\n' "$(log_time)" "$1" "$2"
+}
+
+warn() {
+  printf '[%s] %-12s %s\n' "$(log_time)" "CAUTION" "$1" >&2
+}
+
+fail() {
+  printf '[%s] %-12s %s\n' "$(log_time)" "ABORT" "$1" >&2
+  exit 1
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -61,8 +82,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -m|--message)
       if [[ $# -lt 2 ]]; then
-        echo "Missing value for $1" >&2
-        exit 1
+        fail "Missing value for $1"
       fi
       COMMIT_MESSAGE="$2"
       shift 2
@@ -72,7 +92,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "Unknown argument: $1" >&2
+      warn "Unknown argument: $1"
       usage >&2
       exit 1
       ;;
@@ -82,8 +102,7 @@ done
 require_command() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "Required command not found: $cmd" >&2
-    exit 1
+    fail "Required command not found: $cmd"
   fi
 }
 
@@ -93,18 +112,17 @@ run_npm_script_if_ready() {
   local label="$3"
 
   if [[ ! -f "${dir}/package.json" ]]; then
-    echo "==> Skipping ${label}: no package.json"
+    signal "SKIP" "${label}: no package.json"
     return
   fi
 
   if [[ ! -d "${dir}/node_modules" ]]; then
-    echo "==> Skipping ${label}: node_modules is not installed in ${dir}"
+    signal "SKIP" "${label}: node_modules is not installed in ${dir}"
     return
   fi
 
   if ! npm --prefix "$dir" run "$script_name" --if-present; then
-    echo "==> ${label} failed" >&2
-    exit 1
+    fail "${label} failed"
   fi
 }
 
@@ -116,8 +134,7 @@ cd "$ROOT_DIR"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$BRANCH" == "HEAD" ]]; then
-  echo "Detached HEAD is not supported for deploys. Switch to a branch first." >&2
-  exit 1
+  fail "Detached HEAD is not supported for deploys. Switch to a branch first."
 fi
 
 timestamp_message() {
@@ -152,70 +169,76 @@ protect_sensitive_files() {
     [[ -z "$path" ]] && continue
     case "$path" in
       .env|.env.*|backend/.env|backend/.env.*|backend/firebase-admin.json|*service-account*.json|*service_account*.json)
-        echo "Refusing to deploy because a sensitive file is modified or untracked: $path" >&2
+        warn "Refusing to deploy because a sensitive file is modified or untracked: $path"
         matched=1
         ;;
     esac
   done < <(collect_changed_files)
 
   if [[ $matched -ne 0 ]]; then
-    echo "Move those secret/local changes out of the commit or add safer handling first." >&2
-    exit 1
+    fail "Move those secret/local changes out of the commit or add safer handling first."
   fi
 }
 
 run_checks() {
   local backend_changed="$1"
 
-  echo "==> Running checks"
+  scene "VERIFY WORKTREE"
   if [[ $SKIP_ROOT_CHECKS -eq 0 && -f "${ROOT_DIR}/package.json" ]]; then
+    signal "CHECK" "root lint"
     run_npm_script_if_ready "$ROOT_DIR" "lint" "root lint"
+    signal "CHECK" "root tests"
     run_npm_script_if_ready "$ROOT_DIR" "test" "root test"
   fi
   if [[ ! -d "${MOBILE_DIR}/node_modules" ]]; then
-    echo "mobile-app/node_modules is missing. Run 'cd mobile-app && npm install' first." >&2
-    exit 1
+    fail "mobile-app/node_modules is missing. Run 'cd mobile-app && npm install' first."
   fi
+  signal "CHECK" "mobile TypeScript"
   (cd "$MOBILE_DIR" && npm exec tsc -- --noEmit)
 
   if [[ "$backend_changed" -eq 1 ]]; then
+    signal "CHECK" "backend Go tests"
     (cd "$BACKEND_DIR" && go test ./...)
   else
-    echo "==> No backend changes detected; skipping Go tests"
+    signal "SKIP" "No backend changes detected; skipping Go tests"
   fi
 }
 
 commit_local_changes_if_needed() {
   if [[ -z "$(collect_changed_files)" ]]; then
-    echo "==> No local changes to commit"
+    signal "CLEAN" "No local changes to commit"
     return
   fi
 
-  echo "==> Committing local changes"
+  scene "CAPTURE CHANGES"
+  signal "STAGE" "Adding safe local changes"
   git add -A
   if git diff --cached --quiet; then
-    echo "==> Nothing staged after add"
+    signal "CLEAN" "Nothing staged after add"
     return
   fi
+  signal "COMMIT" "$COMMIT_MESSAGE"
   git commit -m "$COMMIT_MESSAGE"
 }
 
 rebase_current_branch() {
-  echo "==> Fetching origin"
+  scene "SYNC WITH ORIGIN"
+  signal "FETCH" "origin"
   git fetch origin
 
   if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
     local upstream
     upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')"
-    echo "==> Rebasing ${BRANCH} onto ${upstream} with autostash"
+    signal "REBASE" "${BRANCH} onto ${upstream} with autostash"
     git rebase --autostash "$upstream"
   else
-    echo "==> No upstream configured for ${BRANCH}; will set it on push"
+    signal "NOTICE" "No upstream configured for ${BRANCH}; will set it on push"
   fi
 }
 
 push_branch() {
-  echo "==> Pushing branch ${BRANCH}"
+  scene "PUSH TO GITHUB"
+  signal "PUSH" "${BRANCH}"
   if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
     git push
   else
@@ -228,11 +251,12 @@ merge_branch_into_main() {
     return
   fi
   if [[ "$BRANCH" == "main" ]]; then
-    echo "==> Already on main; skipping temporary merge worktree"
+    signal "SKIP" "Already on main; skipping temporary merge worktree"
     return
   fi
 
-  echo "==> Merging ${BRANCH} into origin/main with a temporary worktree"
+  scene "MERGE TO MAIN"
+  signal "WORKTREE" "Merging ${BRANCH} into origin/main"
   local merge_dir
   merge_dir="$(mktemp -d "${TMPDIR:-/tmp}/gotogether-main-merge.XXXXXX")"
 
@@ -252,16 +276,17 @@ merge_branch_into_main() {
 }
 
 deploy_backend() {
-  echo "==> Setting gcloud project to ${PROJECT_ID}"
+  scene "CLOUD RUN DEPLOY"
+  signal "PROJECT" "${PROJECT_ID}"
   gcloud config set project "$PROJECT_ID" >/dev/null
 
-  echo "==> Building backend image"
+  signal "BUILD" "${IMAGE}"
   gcloud builds submit \
     --tag "$IMAGE" \
     --project "$PROJECT_ID" \
     "$BACKEND_DIR"
 
-  echo "==> Deploying Cloud Run service ${SERVICE}"
+  signal "DEPLOY" "service=${SERVICE} region=${REGION}"
   gcloud run deploy "$SERVICE" \
     --image "$IMAGE" \
     --region "$REGION" \
@@ -269,24 +294,27 @@ deploy_backend() {
     --allow-unauthenticated \
     --project "$PROJECT_ID"
 
-  echo "==> Backend health"
+  signal "HEALTH" "${HEALTH_URL}"
   curl -fsS "$HEALTH_URL"
   echo
 }
 
-echo "==> Branch: ${BRANCH}"
+scene "GOTOGETHER DEPLOY SEQUENCE"
+signal "BRANCH" "$BRANCH"
 rebase_current_branch
+scene "SECRET SCAN"
+signal "SCAN" "Checking tracked and untracked changes"
 protect_sensitive_files
 
 BACKEND_CHANGED=0
 if has_backend_changes; then
   BACKEND_CHANGED=1
-  echo "==> Backend changes detected; Cloud Run deploy will run after push"
+  signal "TARGET" "Backend changes detected; Cloud Run deploy armed"
   for cmd in gcloud go curl; do
     require_command "$cmd"
   done
 else
-  echo "==> No backend changes detected; Cloud Run deploy will be skipped"
+  signal "TARGET" "No backend changes detected; GitHub push only"
 fi
 
 run_checks "$BACKEND_CHANGED"
@@ -297,7 +325,9 @@ merge_branch_into_main
 if [[ "$BACKEND_CHANGED" -eq 1 ]]; then
   deploy_backend
 else
-  echo "==> No backend changes detected; skipping Cloud Run deploy"
+  scene "CLOUD RUN DEPLOY"
+  signal "SKIP" "No backend changes detected; skipping Cloud Run deploy"
 fi
 
-echo "==> Deploy flow complete"
+scene "SEQUENCE COMPLETE"
+signal "DONE" "Deploy flow complete"
