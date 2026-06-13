@@ -1,324 +1,168 @@
 # GoTogether
 
-GoTogether is a mobile-first group trip coordination app for friends, families, and travel groups. It helps a group create a trip, invite members, plan together, track the itinerary, share live trip context, split expenses, and complete the trip as a group.
+<p align="center">
+  <img src="docs/app-store-images/10.png" alt="GoTogether onboarding preview" width="360" />
+</p>
 
-The product is live on the Apple App Store. Android support is configured in the app and the project is planning for a Google Play Store launch.
+<p align="center">
+  <strong>Plan trips together. Without the chaos.</strong>
+</p>
 
-## Product Status
+<p align="center">
+  GoTogether is a mobile-first group trip planning app that keeps the whole crew aligned from the first idea to the final memory.
+</p>
 
-- iOS: live on the Apple App Store.
-- Android: configured with an Android package and production app bundle build, with Play Store launch planned.
-- Backend: deployed to Google Cloud Run.
-- Primary API: `https://gotogether-backend-501556960072.us-central1.run.app`.
-- Primary app link domain: `https://gotogether.app`.
+<p align="center">
+  <a href="https://apps.apple.com/us/app/gotogether-trip-planner/id6767730138"><strong>Live on the App Store</strong></a>
+  &nbsp;|&nbsp;
+  Play Store launch planned
+  &nbsp;|&nbsp;
+  Backend deployed on Google Cloud Run
+</p>
 
-## Repository Structure
+<p align="center">
+  <img alt="Expo" src="https://img.shields.io/badge/Expo-54-000020?style=for-the-badge&logo=expo&logoColor=white" />
+  <img alt="React Native" src="https://img.shields.io/badge/React%20Native-0.81-61DAFB?style=for-the-badge&logo=react&logoColor=0B1220" />
+  <img alt="Go" src="https://img.shields.io/badge/Go-API-00ADD8?style=for-the-badge&logo=go&logoColor=white" />
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Cloud%20SQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" />
+  <img alt="Firebase" src="https://img.shields.io/badge/Firebase-Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=111827" />
+  <img alt="Google Cloud" src="https://img.shields.io/badge/Google%20Cloud-Run-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white" />
+</p>
 
-```text
-.
-|-- mobile-app/        Expo React Native app used for the production mobile app
-|-- backend/           Go API service for auth, trips, invites, media, expenses, and notifications
-|-- src/               Older Vite/React prototype and UI reference surface
-|-- public/            Static assets for the Vite prototype
-|-- PROJECT_STATE.md   Older project state snapshot
-`-- README.md          Project documentation
-```
+## The Experience
+
+GoTogether turns messy group chats into one shared travel workspace. A trip starts with dates, destination, and crew. From there, everyone can see what is happening, build the itinerary, track live progress, split expenses, and close out the journey with a clean trip summary.
+
+It is built for the real shape of group travel: people join late, plans change, expenses move around, and everyone needs the same source of truth.
+
+<p align="center">
+  <img src="docs/app-store-images/9.png" alt="GoTogether home screen" width="260" />
+  <img src="docs/app-store-images/8.png" alt="GoTogether trips screen" width="260" />
+  <img src="docs/app-store-images/7.png" alt="GoTogether trip overview" width="260" />
+</p>
+
+## Product Highlights
+
+| What users do | How GoTogether helps |
+| --- | --- |
+| Plan a trip together | Create a shared trip hub for dates, destination, members, and trip progress. |
+| Keep the crew aligned | Invite members manually or with reusable group-style invite links. |
+| Build the itinerary | Add days, stops, locations, notes, mapped places, and mark events complete on the go. |
+| See live context | Check where the crew is, what stop is next, and open maps from the Live tab. |
+| Split trip costs | Track who paid, who owes, expense groups, split previews, and open balances. |
+| Stay updated | Receive trip updates, expense movement, and crew activity through notifications. |
+| Finish the journey | Complete trips with confirmation tracking and a memorable summary. |
+
+<p align="center">
+  <img src="docs/app-store-images/6.png" alt="GoTogether itinerary planning" width="260" />
+  <img src="docs/app-store-images/5.png" alt="GoTogether live location" width="260" />
+  <img src="docs/app-store-images/4.png" alt="GoTogether expense tracking" width="260" />
+</p>
+
+## Feature Set
+
+**Trip planning**
+
+- Current, upcoming, and completed trip views.
+- Shared trip overview with crew, dates, destination, progress, and quick actions.
+- Trip setup workflow for availability, destination decisions, and trip lead selection.
+- Reusable invite links plus manual member adding.
+- Member-wide collaboration for planning, with creator-only delete/remove actions.
+
+**Itinerary and live travel**
+
+- Day-by-day itinerary builder with events, locations, notes, and completion state.
+- Event completion and undo-completion for real-time trip progress.
+- AI-assisted itinerary draft generation.
+- Live location updates and crew location views.
+- Destination briefs, cover images, and place search support.
+
+**Expenses and memories**
+
+- Expense groups for organizing shared costs.
+- Expense creation, editing, splitting, settlement visibility, and payer tracking.
+- Linked itinerary expenses for context around meals, events, and stops.
+- Trip photo uploads and profile image support.
+- Trip completion flow with summary-style wrap-up.
+
+**Trust, activity, and account**
+
+- Firebase-backed authentication.
+- Profile setup and account deletion.
+- Contacts sync and friend discovery.
+- Push notifications and in-app activity feed.
+- Reporting and blocking tools for user safety.
+
+<p align="center">
+  <img src="docs/app-store-images/3.png" alt="GoTogether expense balances" width="260" />
+  <img src="docs/app-store-images/2.png" alt="GoTogether notifications" width="260" />
+  <img src="docs/app-store-images/1.png" alt="GoTogether trip completion" width="260" />
+</p>
 
 ## Tech Stack
 
-### Mobile App
+| Layer | Stack |
+| --- | --- |
+| Mobile app | Expo SDK 54, React Native 0.81, React 19, TypeScript |
+| Navigation | React Navigation native stack and bottom tabs |
+| State | Zustand |
+| Auth | Firebase Authentication with backend ID token verification |
+| Push | Expo Notifications |
+| Native capabilities | Contacts, Location, Image Picker, Haptics, Device, Maps |
+| Backend | Go 1.25 with Gin |
+| Database | PostgreSQL on Google Cloud SQL |
+| Storage | Google Cloud Storage for profile images, trip covers, and trip photos |
+| Cloud runtime | Google Cloud Run with Cloud Build and Artifact Registry |
+| External services | Twilio SMS, Google Places, OpenStreetMap, OpenAI, Pexels, Unsplash |
+| Release | EAS Build and App Store Connect |
+| Prototype surface | Vite, React, Tailwind CSS, shadcn/ui, Radix UI |
 
-- Expo SDK 54
-- React Native 0.81
-- React 19
-- TypeScript
-- React Navigation with native stack and bottom tabs
-- Zustand for app state
-- Firebase Authentication through React Native Firebase
-- Expo Notifications for push notifications
-- Expo Contacts, Location, Image Picker, Haptics, Font, and Device APIs
-- React Native Maps
-- EAS Build and Submit
-
-### Backend
-
-- Go 1.25
-- Gin HTTP framework
-- PostgreSQL
-- Firebase Admin SDK for ID token verification
-- Google Cloud Run for hosting
-- Google Cloud Build and Artifact Registry for container deployment
-- Google Cloud Storage for uploaded profile, trip cover, and trip photo files
-- Twilio integration for SMS invites
-- OpenAI integration for itinerary and destination/media assistance
-- Google Places/OpenStreetMap support for destination and place search workflows
-
-### Prototype Web Surface
-
-- Vite
-- React 18
-- TypeScript
-- Tailwind CSS
-- shadcn/ui and Radix UI components
-- React Router
-- TanStack Query
-- Vitest and Playwright configuration
-
-## Core Features
-
-- Firebase sign-in and backend-authenticated sessions.
-- User profile setup, profile editing, profile image upload, and account deletion.
-- Trip creation with name, destination, dates, members, cover image, and setup status.
-- Group trip member management with both manual add and reusable invite-link flows.
-- Deep links for trip invites using `gotogether://trip-invite/:token` and `https://gotogether.app/trip-invite/:token`.
-- Shared trip editing for members, with destructive actions such as trip deletion and member removal kept creator-only.
-- Trip setup workflow for availability, destination voting, and trip lead selection.
-- Trip overview with crew, readiness, permissions, itinerary, expense, live, and completion context.
-- Itinerary planning with days, events, event reorder, mapped locations, event completion, and undo-completion.
-- AI-assisted itinerary draft generation.
-- Expense groups, expense creation, editing, deletion, split previews, payer selection, and itinerary-event linking.
-- Live trip location updates and crew location fetching.
-- Trip completion workflow with confirmation tracking.
-- Notifications, recent activity, read/clear actions, and action acceptance.
-- Contacts sync, friend discovery, and SMS invite support.
-- Destination cover image management, automatic destination cover lookup, and destination brief generation.
-- Trip photo upload, retrieval, and deletion.
-- Reporting and blocking tools for trust and safety.
-- Push token registration and unregistering for mobile notifications.
-
-## Mobile App Navigation
-
-Main tabs:
-
-- Home
-- Trips
-- Live
-- Expenses
-- Profile
-
-Stack screens:
-
-- Onboarding
-- Login
-- CompleteProfile
-- PermissionsSetup
-- CreateGroup
-- TripCreate
-- TripOverview
-- TripInvite
-- TripSetup
-- Itinerary
-- AddExpense
-- TripCompletion
-- Settings
-- Notifications
-
-## Backend API Areas
-
-The backend exposes authenticated `/api` routes plus a public health check.
-
-- `GET /health`
-- User profile: `/api/me`, profile images, push tokens
-- Social graph: contacts sync, friends, SMS invites
-- Notifications and recent activity
-- Reports, blocks, and unblocks
-- Trips: create, list, detail, update, delete, completion
-- Trip invites and members
-- Trip setup status
-- Itinerary days and events
-- Expenses and expense groups
-- Live locations
-- Trip covers, destination briefs, and trip photos
-
-## Database Areas
-
-The backend manages schema migrations in `backend/internal/db/schema.go` and the initial SQL schema in `backend/db-schema/init.sql`.
-
-Main data areas include:
-
-- Users
-- Trips
-- Trip members
-- Trip invites
-- Destination votes
-- Itinerary days and events
-- Expense groups, expenses, and expense splits
-- Trip photos and destination cover cache
-- Friendships
-- Live locations
-- Member setup status
-- Push tokens
-- SMS invites
-- Notifications
-- Event and trip completion confirmations
-- Reports
-- User blocks
-
-## Configuration
-
-### Mobile App
-
-The mobile app uses `mobile-app/src/config/api.ts`.
+## Architecture
 
 ```text
-EXPO_PUBLIC_API_BASE_URL
+Expo React Native App
+        |
+        | Firebase ID token
+        v
+Go API on Google Cloud Run
+        |
+        | PostgreSQL data
+        v
+Google Cloud SQL
+        |
+        | media assets
+        v
+Google Cloud Storage
 ```
 
-If unset, the app falls back to:
+The mobile app talks to a Go API deployed on Cloud Run. Firebase handles identity, while the backend owns trip data, permissions, invites, itinerary, expenses, notifications, reports, media references, and integration workflows.
+
+## Services And Deployment Footprint
+
+- **Apple App Store:** iOS app is publicly listed as GoTogether Trip Planner.
+- **Google Play Store:** Android package is configured and Play Store launch is planned.
+- **Google Cloud Run:** production backend hosting.
+- **Google Cloud SQL:** PostgreSQL persistence for users, trips, members, itinerary, expenses, notifications, reports, and safety data.
+- **Google Cloud Storage:** uploaded profile images, trip covers, and trip memories.
+- **Firebase:** authentication and mobile Firebase configuration.
+- **Expo/EAS:** native mobile builds and App Store release pipeline.
+- **Twilio:** SMS invite support.
+- **OpenAI:** AI-assisted planning and destination/media workflows.
+- **Google Places, OpenStreetMap, Pexels, Unsplash:** destination, place, and cover-image enrichment.
+
+## Repository Map
 
 ```text
-https://gotogether-backend-501556960072.us-central1.run.app
+.
+|-- mobile-app/        Production Expo React Native app
+|-- backend/           Go API service and database schema
+|-- src/               Original Vite/React prototype surface
+|-- docs/              README visuals and project presentation assets
+`-- PROJECT_STATE.md   Historical project notes
 ```
 
-Firebase client files are present in the mobile app:
+## Why This Project Stands Out
 
-- `mobile-app/GoogleService-Info.plist`
-- `mobile-app/google-services.json`
+GoTogether is not just a UI prototype. It is a released mobile product with native app distribution, authenticated users, a real backend, cloud deployment, database persistence, media storage, notifications, SMS invites, AI-assisted planning, and a clear product loop from trip creation to trip completion.
 
-### Backend
-
-Common backend environment variables:
-
-```text
-PORT
-DATABASE_URL
-INSTANCE_CONNECTION_NAME
-DB_SOCKET_DIR
-DB_HOST
-DB_PORT
-DB_USER
-DB_PASSWORD
-DB_NAME
-DB_SSLMODE
-FIREBASE_ADMIN_JSON
-FIREBASE_ADMIN_JSON_PATH
-GOOGLE_APPLICATION_CREDENTIALS
-TRIP_PHOTOS_BUCKET
-TWILIO_ACCOUNT_SID
-TWILIO_AUTH_TOKEN
-TWILIO_FROM_NUMBER
-APP_INVITE_URL
-OPENAI_API_KEY
-OPENAI_TEXT_MODEL
-OPENAI_IMAGE_MODEL
-OPENAI_IMAGE_SIZE
-OPENAI_IMAGE_QUALITY
-GOOGLE_PLACES_API_KEY
-PEXELS_API_KEY
-UNSPLASH_ACCESS_KEY
-ENABLE_OPENAI_DESTINATION_COVER_FALLBACK
-```
-
-`APP_INVITE_URL` defaults to `https://gotogether.app` when unset.
-
-## Local Development
-
-### Mobile App
-
-```bash
-cd mobile-app
-npm install
-npm run start
-```
-
-Useful commands:
-
-```bash
-npm run ios
-npm run android
-npm run web
-npm run start:tunnel
-```
-
-### Backend
-
-```bash
-cd backend
-go mod download
-go run ./cmd/server
-```
-
-The server listens on `PORT` or `8080` by default.
-
-### Prototype Web Surface
-
-```bash
-npm install
-npm run dev
-```
-
-## Validation
-
-Recommended checks before deployment:
-
-```bash
-cd backend
-go test ./...
-```
-
-```bash
-cd mobile-app
-npx tsc --noEmit
-```
-
-For the older Vite prototype:
-
-```bash
-npm run lint
-npm run test
-npm run build
-```
-
-## Build And Release
-
-### iOS
-
-The app is configured for iOS with:
-
-- Bundle identifier: `com.gdkalyan.gotogether`
-- App version: `1.0.1`
-- Build number: `16`
-- EAS `testflight` profile configured for store distribution
-
-### Android
-
-The app is configured for Android with:
-
-- Package: `com.vulkancommander.gotogether`
-- Version code: `2`
-- Production build type: Android App Bundle (`app-bundle`)
-- Play Store launch planned
-
-### Backend Deployment
-
-The backend Dockerfile builds the Go API and exposes port `8080`.
-
-The currently preferred deploy helper is:
-
-```bash
-cd mobile-app
-./deploy.sh
-```
-
-On Windows, use Git Bash explicitly if PowerShell resolves `bash` to WSL:
-
-```powershell
-& "C:\Program Files\Git\bin\bash.exe" mobile-app/deploy.sh
-```
-
-The deploy helper runs checks, commits local changes if needed, pushes the branch, builds the backend image, deploys to Cloud Run, and checks `/health`.
-
-## Important Product Rules
-
-- Trip invite links are reusable.
-- Trip invite links do not expire for now.
-- Members can edit and add trip content after joining a trip.
-- Delete and remove actions are reserved for the trip creator.
-- Manual member add and share-link onboarding are both supported.
-
-## Notes For Future Work
-
-- Keep the mobile app as the production surface.
-- Treat the Vite app as a prototype/reference unless it is intentionally revived.
-- Keep backend route changes aligned with both `backend/internal/db/schema.go` and `backend/db-schema/init.sql` when schema changes are needed.
-- Preserve the App Store release status and Play Store launch planning in release documentation.
+It shows full-stack product execution across mobile UX, backend architecture, cloud infrastructure, release engineering, and the practical details that make collaborative apps feel alive.

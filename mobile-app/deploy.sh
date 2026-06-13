@@ -26,12 +26,13 @@ Run this from mobile-app/.
 What it does:
   1. fetches + rebases the current branch on its upstream using autostash
   2. blocks obvious secret file changes from being committed
-  3. runs repo checks
-  4. commits local changes if needed
-  5. pushes the current branch
-  6. optionally merges the current branch into main with a temporary worktree
-  7. builds and deploys the backend to Cloud Run without replacing env vars
-  8. checks backend health
+  3. checks whether local changes include backend/ files
+  4. runs repo checks, including Go tests only when backend changed
+  5. commits local changes if needed
+  6. pushes the current branch
+  7. optionally merges the current branch into main with a temporary worktree
+  8. deploys the backend to Cloud Run only when backend/ changed
+  9. checks backend health only after a backend deploy
 
 Flags:
   --merge-main         Also merge the current branch into origin/main and push main.
@@ -107,7 +108,7 @@ run_npm_script_if_ready() {
   fi
 }
 
-for cmd in git gcloud go npm curl; do
+for cmd in git npm; do
   require_command "$cmd"
 done
 
@@ -133,6 +134,18 @@ collect_changed_files() {
   } | sed '/^$/d' | sort -u
 }
 
+has_backend_changes() {
+  while IFS= read -r path; do
+    case "$path" in
+      backend/*)
+        return 0
+        ;;
+    esac
+  done < <(collect_changed_files)
+
+  return 1
+}
+
 protect_sensitive_files() {
   local matched=0
   while IFS= read -r path; do
@@ -152,6 +165,8 @@ protect_sensitive_files() {
 }
 
 run_checks() {
+  local backend_changed="$1"
+
   echo "==> Running checks"
   if [[ $SKIP_ROOT_CHECKS -eq 0 && -f "${ROOT_DIR}/package.json" ]]; then
     run_npm_script_if_ready "$ROOT_DIR" "lint" "root lint"
@@ -162,7 +177,12 @@ run_checks() {
     exit 1
   fi
   (cd "$MOBILE_DIR" && npm exec tsc -- --noEmit)
-  (cd "$BACKEND_DIR" && go test ./...)
+
+  if [[ "$backend_changed" -eq 1 ]]; then
+    (cd "$BACKEND_DIR" && go test ./...)
+  else
+    echo "==> No backend changes detected; skipping Go tests"
+  fi
 }
 
 commit_local_changes_if_needed() {
@@ -257,10 +277,27 @@ deploy_backend() {
 echo "==> Branch: ${BRANCH}"
 rebase_current_branch
 protect_sensitive_files
-run_checks
+
+BACKEND_CHANGED=0
+if has_backend_changes; then
+  BACKEND_CHANGED=1
+  echo "==> Backend changes detected; Cloud Run deploy will run after push"
+  for cmd in gcloud go curl; do
+    require_command "$cmd"
+  done
+else
+  echo "==> No backend changes detected; Cloud Run deploy will be skipped"
+fi
+
+run_checks "$BACKEND_CHANGED"
 commit_local_changes_if_needed
 push_branch
 merge_branch_into_main
-deploy_backend
+
+if [[ "$BACKEND_CHANGED" -eq 1 ]]; then
+  deploy_backend
+else
+  echo "==> No backend changes detected; skipping Cloud Run deploy"
+fi
 
 echo "==> Deploy flow complete"
