@@ -24,10 +24,10 @@ Usage:
 Run this from mobile-app/.
 
 What it does:
-  1. blocks obvious secret file changes from being committed
-  2. runs repo checks
-  3. commits local changes if needed
-  4. fetches + rebases the current branch on its upstream
+  1. fetches + rebases the current branch on its upstream using autostash
+  2. blocks obvious secret file changes from being committed
+  3. runs repo checks
+  4. commits local changes if needed
   5. pushes the current branch
   6. optionally merges the current branch into main with a temporary worktree
   7. builds and deploys the backend to Cloud Run without replacing env vars
@@ -187,8 +187,8 @@ rebase_current_branch() {
   if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
     local upstream
     upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')"
-    echo "==> Rebasing ${BRANCH} onto ${upstream}"
-    git rebase "$upstream"
+    echo "==> Rebasing ${BRANCH} onto ${upstream} with autostash"
+    git rebase --autostash "$upstream"
   else
     echo "==> No upstream configured for ${BRANCH}; will set it on push"
   fi
@@ -255,10 +255,10 @@ deploy_backend() {
 }
 
 echo "==> Branch: ${BRANCH}"
+rebase_current_branch
 protect_sensitive_files
 run_checks
 commit_local_changes_if_needed
-rebase_current_branch
 push_branch
 merge_branch_into_main
 deploy_backend
