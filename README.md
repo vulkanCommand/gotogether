@@ -166,3 +166,7 @@ The mobile app talks to a Go API deployed on Cloud Run. Firebase handles identit
 GoTogether is not just a UI prototype. It is a released mobile product with native app distribution, authenticated users, a real backend, cloud deployment, database persistence, media storage, notifications, SMS invites, AI-assisted planning, and a clear product loop from trip creation to trip completion.
 
 It shows full-stack product execution across mobile UX, backend architecture, cloud infrastructure, release engineering, and the practical details that make collaborative apps feel alive.
+
+## License
+
+This project is open source under the [MIT License](LICENSE).
