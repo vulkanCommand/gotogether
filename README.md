@@ -158,8 +158,19 @@ The mobile app talks to a Go API deployed on Cloud Run. Firebase handles identit
 |-- backend/           Go API service and database schema
 |-- src/               Original Vite/React prototype surface
 |-- docs/              README visuals and project presentation assets
+|-- deploy.sh          Safe GitHub sync helper for local changes
 `-- PROJECT_STATE.md   Historical project notes
 ```
+
+## Developer Workflow
+
+To safely push local changes to GitHub from the repo root:
+
+```bash
+./deploy.sh -m "Describe your change"
+```
+
+The script fetches and rebases with autostash, blocks obvious secret files, runs available checks, commits local changes, and pushes the current branch. It does not deploy the backend or mobile app.
 
 ## Why This Project Stands Out
 
