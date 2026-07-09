@@ -20,7 +20,7 @@ export default function Features() {
             Everything a group trip needs, nothing it doesn't.
           </h2>
           <p className="mt-4 text-muted-foreground">
-            Built for the real shape of group travel — from the first idea to the final memory.
+            Built for the real shape of group travel from the first idea to the final memory.
           </p>
         </Reveal>
 

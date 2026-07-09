@@ -29,7 +29,7 @@ export default function Hero() {
 
           <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-muted-foreground lg:mx-0 lg:text-lg">
             GoTogether helps friends organize trips, create plans, add people, and track shared
-            expenses — all in one calm, beautiful place.
+            expenses all in one calm, beautiful place.
           </p>
 
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
