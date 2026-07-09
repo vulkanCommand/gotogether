@@ -18,15 +18,15 @@ export default function MemoriesSection() {
             <span className="text-gradient">A better whole trip.</span>
           </h2>
           <p className="mt-5 max-w-lg text-base leading-relaxed text-muted-foreground">
-            GoTogether keeps every part of the journey organized — so the experience feels easier
+            GoTogether keeps every part of the journey organized, so the experience feels easier
             before you leave, calmer while you're together, and warmer to look back on.
           </p>
 
           <ul className="mt-8 space-y-3 text-sm text-foreground">
             {[
-              "Before — align on dates, destination, and who's in.",
-              "During — one shared itinerary, live crew status, split costs.",
-              "After — a clean summary and shared memories to keep.",
+              "Before align on dates, destination, and who's in.",
+              "During one shared itinerary, live crew status, split costs.",
+              "After a clean summary and shared memories to keep.",
             ].map((item) => (
               <li key={item} className="flex items-start gap-3">
                 <span className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full gradient-primary" />

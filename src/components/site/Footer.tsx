@@ -22,7 +22,7 @@ export default function Footer() {
               </a>
             </li>
             <li>
-              <span className="text-muted-foreground">Google Play — coming soon</span>
+              <span className="text-muted-foreground">Google Play coming soon</span>
             </li>
           </ul>
         </div>
