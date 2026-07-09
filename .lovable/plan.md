@@ -1,65 +1,56 @@
-## GoTogether Marketing Website — Plan
 
-Transform the current prototype (13 in-app screens) into a single polished marketing landing page. The mobile app UI code and routes will be removed — this site's only job is to explain GoTogether and drive iOS downloads.
+## 1. Branding & metadata cleanup
 
-### Visual identity (reuses existing tokens)
+The current `index.html` already uses GoTogether title, description, canonical, OG, Twitter, and JSON-LD tags — no Lovable strings remain in user-facing code. Remaining branding gaps to close:
 
-- Keep the current `index.css` HSL tokens and `tailwind.config.ts` as-is — they already define the exact palette (Deep Indigo, Electric Blue `#3A86FF`, Soft Violet `#7B61FF`, Off-white bg, Emerald/Amber/Red). Only additions:
-  - A darker hero-gradient token (indigo → electric blue) matching uploaded screenshot 1.
-  - A subtle "aurora" radial-gradient utility for background blobs seen in the mockups.
-- Typography: Inter (already loaded). Large tight-tracking display headings, medium body, Swiss-style generous whitespace.
-- Motion: lightweight CSS + Tailwind (`animate-fade-in`, `animate-slide-up`, existing `animate-pulse-soft`) plus scroll-triggered reveal via IntersectionObserver — no framer-motion needed.
+- Generate a branded **1200×630 Open Graph image** (deep-indigo gradient with GoTogether wordmark + app icon) and add it to `public/og-image.png`.
+- Reference it in `index.html` as `og:image` and `twitter:image` using a relative `/og-image.png` path. Note the caveat: social crawlers need an absolute URL, so the preview image only fully works once the site is published on a real domain (Lovable hosting also auto-injects an OG image at serve time as a fallback). I'll call this out to you in chat, not in the tags.
+- Add **`apple-touch-icon`** (180×180) generated from the app icon → `public/apple-touch-icon.png`.
+- Add **`<meta name="theme-color">`** matching the deep-indigo brand.
+- Add a small `<meta name="apple-mobile-web-app-title" content="GoTogether">`.
+- Confirm no Lovable strings remain anywhere in `src/`, `index.html`, or `public/` (already verified — only infra references in `bun.lock` which are internal).
 
-### Assets
+## 2. Mobile & tablet performance
 
-- Import the 9 uploaded App Store screenshots (`user-uploads://1.png … 10.png` minus 9) as Lovable Assets via the `lovable-assets` CLI so they aren't copied into the repo. Each becomes an `*.asset.json` pointer under `src/assets/screenshots/`.
-- Use `user-uploads://icon.png` as the GoTogether app icon (nav logo mark + hero badge + favicon).
-- Delete the now-unused prototype images (`trip-hero.jpg`, `destination-*.jpg`, `onboarding-illustration.png`).
+Focused, low-risk optimizations — no layout redesign.
 
-### Page structure (single route `/`)
+- **Images**
+  - Add explicit `width`/`height` to `PhoneFrame` `<img>` to prevent CLS.
+  - Add `decoding="async"` everywhere and keep `loading="lazy"` for below-the-fold screenshots; hero screenshots stay `eager` with `fetchpriority="high"` on the primary one.
+  - Preload the primary hero screenshot in `index.html` (`<link rel="preload" as="image">`).
+- **Hero on small screens**
+  - Secondary tilted phone is already `hidden lg:block` — keep.
+  - Reduce aurora blob count/size below `md` (they trigger large paint work on mobile GPUs); scope the existing blobs with `hidden md:block` on the two heaviest and keep one lighter blob on mobile.
+- **CSS**
+  - Add `content-visibility: auto` + `contain-intrinsic-size` to `Features`, `HowItWorks`, `Screenshots`, `MemoriesSection`, `DownloadCTA` sections so offscreen content is skipped during initial paint on mobile.
+  - Respect `prefers-reduced-motion` for the `Reveal` component and the aurora animation.
+- **Fonts**
+  - Verify Inter is loaded with `display=swap` and only the weights actually used (400/500/600/700). Trim if extra weights are pulled.
+- **Tap targets & safe areas**
+  - Ensure buttons and nav links are ≥44px tall on mobile; add `padding-bottom: env(safe-area-inset-bottom)` to the sticky footer/CTA if needed.
+- **Viewport**
+  - Update viewport meta to `width=device-width, initial-scale=1, viewport-fit=cover` for iOS notch safe areas.
 
-1. **Sticky glass navbar** — icon + "GoTogether" wordmark left, anchor links (Features, How It Works, Screenshots, Download) center, `Download on iOS` gradient button right. Mobile: hamburger → sheet.
-2. **Hero** — Two-column on desktop, stacked on mobile.
-   - Left: eyebrow badge "Now live on the iOS App Store", H1 "Plan trips together. Remember them forever.", subtext, App Store black button + muted "Google Play — coming soon" chip.
-   - Right: hero phone (screenshot 1 — onboarding) tilted slightly, with soft indigo→violet aurora blobs behind it (matching the uploaded marketing frames).
-3. **Announcement strip** — thin full-width band: "🎉 Now live on the App Store · Android in testing".
-4. **Features grid** — 6 cards (Plan trips, Add people, Organize plans, Track expenses, Keep memories, Group coordination), lucide icons, hover lift, gradient icon backgrounds.
-5. **How It Works** — 3 numbered steps in a horizontal connected timeline (desktop) / vertical (mobile): Create a trip → Invite your friends → Plan, split, enjoy.
-6. **Screenshots showcase** — horizontal scroll / grid of 6 phone mockups using the uploaded screenshots (Home, Trips, Trip Overview, Itinerary, Live, Expenses) with captions.
-7. **Travel + Memories** — warm emotional section with the Trip Completion screenshot (10.png) beside copy about "before, during, and after the journey" and a soft gradient background.
-8. **Final CTA** — full-bleed gradient panel: "Ready to plan your next trip together?" + App Store button + coming-soon Play chip.
-9. **Footer** — logo + tagline "Group trip planning made simple." + App Store / Play Store (disabled) links + © 2026 GoTogether.
+## Out of scope
 
-### Reusable components (new)
+- No new sections, copy changes, or restructuring.
+- No route changes, backend, or Lovable Cloud.
+- No changes to `mobile-app/` or `backend/` folders.
 
-- `src/components/site/Navbar.tsx`
-- `src/components/site/Hero.tsx`
-- `src/components/site/AnnouncementStrip.tsx`
-- `src/components/site/Features.tsx`
-- `src/components/site/HowItWorks.tsx`
-- `src/components/site/Screenshots.tsx`
-- `src/components/site/MemoriesSection.tsx`
-- `src/components/site/DownloadCTA.tsx`
-- `src/components/site/Footer.tsx`
-- `src/components/site/PhoneFrame.tsx` — reusable rounded device frame with notch, subtle bezel shadow, accepts an image src.
-- `src/components/site/AppStoreButton.tsx` — official-style black pill with Apple glyph.
-- `src/components/site/PlayComingSoonBadge.tsx` — muted disabled variant.
+## Technical notes
 
-### File changes
+- OG image generated with `imagegen` (premium tier for legible wordmark), saved directly to `public/og-image.png` (kept in-repo because it must be served at a stable, non-CDN path for og tags and is small).
+- Apple touch icon derived from the existing `gotogether-icon` asset via `imagegen` at 180×180, saved to `public/apple-touch-icon.png`.
+- All image tweaks are prop-level; no component API changes.
+- CSS additions live in `src/index.css` under a new `@layer utilities` block; existing tokens untouched.
 
-- **Rewrite `src/App.tsx`** — remove `BrowserRouter`, all app routes, `BottomNav`, `AppShell`. Render a single `<LandingPage />` inside `TooltipProvider` + toasters.
-- **Rewrite `src/pages/Index.tsx`** as the landing page composition (Navbar + sections + Footer). Route it as `/` via a minimal `Routes` (kept only so `NotFound` still works and the SPA fallback stays sane).
-- **Delete** all `src/pages/*Screen.tsx` files (13 files), `src/components/BottomNav.tsx`, `src/components/AppShell.tsx`, `src/components/NavLink.tsx`, plus stale `src/App.css`.
-- **`index.html`** — update `<title>` to "GoTogether – Trip Planner for Friends", meta description, `og:title`, `og:description`, `og:type=website`, `twitter:card=summary_large_image`. Update favicon to the uploaded icon (converted to a small asset). Add Organization JSON-LD.
-- **`src/index.css`** — add hero-gradient + aurora utilities alongside existing tokens (no color changes).
-- **`README.md`** — leave untouched (it's the real project README).
+## Files to change
 
-### Out of scope
-
-- No routing beyond `/` and `*` (NotFound). No auth, no forms, no backend, no Lovable Cloud.
-- The `mobile-app/` and `backend/` folders are the real product — untouched.
-- No og:image generated (per head-metadata guidance); Lovable hosting will inject one.
-
-### Deliverable
-
-A single-scroll marketing site at `/` that looks and feels like the uploaded App Store marketing frames — same palette, same phone-mockup vibe, Swiss spacing — with a clear iOS download path and a "Play Store coming soon" secondary state throughout.
+- `index.html` — add og:image, twitter:image, apple-touch-icon, theme-color, updated viewport, hero image preload.
+- `public/og-image.png` — new.
+- `public/apple-touch-icon.png` — new.
+- `src/index.css` — reduced-motion rules, `content-visibility` utility, mobile-scoped aurora tweaks.
+- `src/components/site/PhoneFrame.tsx` — width/height, decoding, fetchpriority prop.
+- `src/components/site/Hero.tsx` — mark primary phone high priority, hide heavy blobs below md.
+- `src/components/site/Screenshots.tsx`, `Features.tsx`, `HowItWorks.tsx`, `MemoriesSection.tsx`, `DownloadCTA.tsx` — add `content-visibility` class to section wrappers.
+- `src/components/site/Reveal.tsx` — respect reduced motion.
