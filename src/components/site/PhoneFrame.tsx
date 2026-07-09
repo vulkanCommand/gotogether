@@ -5,9 +5,16 @@ type Props = {
   alt: string;
   className?: string;
   loading?: "eager" | "lazy";
+  fetchPriority?: "high" | "low" | "auto";
 };
 
-export default function PhoneFrame({ src, alt, className, loading = "lazy" }: Props) {
+export default function PhoneFrame({
+  src,
+  alt,
+  className,
+  loading = "lazy",
+  fetchPriority = "auto",
+}: Props) {
   return (
     <div className={cn("relative mx-auto", className)}>
       <div className="relative rounded-[2.5rem] bg-foreground p-2 shadow-float ring-1 ring-foreground/10">
@@ -16,6 +23,10 @@ export default function PhoneFrame({ src, alt, className, loading = "lazy" }: Pr
             src={src}
             alt={alt}
             loading={loading}
+            decoding="async"
+            width={390}
+            height={844}
+            {...({ fetchpriority: fetchPriority } as Record<string, string>)}
             className="block h-auto w-full select-none"
             draggable={false}
           />

@@ -4,7 +4,7 @@ import Reveal from "./Reveal";
 
 export default function DownloadCTA() {
   return (
-    <section id="download" className="relative px-5 py-20 md:py-28 lg:px-8">
+    <section id="download" className="relative px-5 py-20 md:py-28 lg:px-8 cv-auto">
       <div className="mx-auto max-w-5xl">
         <Reveal>
           <div className="relative overflow-hidden rounded-3xl gradient-hero px-6 py-14 text-center shadow-float sm:px-12 sm:py-20">
