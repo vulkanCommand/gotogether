@@ -8,8 +8,8 @@ export default function Hero() {
   return (
     <section id="top" className="relative overflow-hidden pt-32 pb-16 md:pt-40 md:pb-24">
       <div className="aurora-blob left-[-10%] top-[10%] h-[500px] w-[500px] bg-accent/40" />
-      <div className="aurora-blob right-[-15%] top-[30%] h-[600px] w-[600px] bg-violet/40" />
-      <div className="aurora-blob left-[20%] bottom-[-10%] h-[400px] w-[400px] bg-accent/20" />
+      <div className="aurora-blob right-[-15%] top-[30%] hidden h-[600px] w-[600px] bg-violet/40 md:block" />
+      <div className="aurora-blob left-[20%] bottom-[-10%] hidden h-[400px] w-[400px] bg-accent/20 md:block" />
 
       <div className="relative mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-5 lg:grid-cols-[1.05fr_1fr] lg:gap-16 lg:px-8">
         <div className="text-center lg:text-left animate-fade-in">
@@ -51,6 +51,7 @@ export default function Hero() {
             src={screenshot1.url}
             alt="GoTogether onboarding screen"
             loading="eager"
+            fetchPriority="high"
             className="w-[260px] rotate-[4deg] sm:w-[300px] lg:w-[340px]"
           />
         </div>

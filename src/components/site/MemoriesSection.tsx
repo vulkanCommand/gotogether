@@ -4,7 +4,7 @@ import Reveal from "./Reveal";
 
 export default function MemoriesSection() {
   return (
-    <section className="relative overflow-hidden py-20 md:py-28">
+    <section className="relative overflow-hidden py-20 md:py-28 cv-auto">
       <div className="absolute inset-0 gradient-warm" aria-hidden />
       <div className="aurora-blob left-[-10%] top-[10%] h-[420px] w-[420px] bg-violet/30" />
       <div className="aurora-blob right-[-10%] bottom-[-10%] h-[420px] w-[420px] bg-accent/25" />

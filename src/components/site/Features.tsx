@@ -12,7 +12,7 @@ const FEATURES = [
 
 export default function Features() {
   return (
-    <section id="features" className="relative py-20 md:py-28">
+    <section id="features" className="relative py-20 md:py-28 cv-auto">
       <div className="mx-auto max-w-6xl px-5 lg:px-8">
         <Reveal className="mx-auto max-w-2xl text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Features</p>
