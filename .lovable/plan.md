@@ -1,56 +1,72 @@
+## Goal
 
-## 1. Branding & metadata cleanup
+Bring the four legal/support pages currently hosted on durgakalyan.com into the GoTogether marketing site, using the site's existing Swiss/premium design system (deep indigo, electric blue, violet, Inter, off-white bg). The Support page acts as the hub and links to the other three.
 
-The current `index.html` already uses GoTogether title, description, canonical, OG, Twitter, and JSON-LD tags — no Lovable strings remain in user-facing code. Remaining branding gaps to close:
+## New routes
 
-- Generate a branded **1200×630 Open Graph image** (deep-indigo gradient with GoTogether wordmark + app icon) and add it to `public/og-image.png`.
-- Reference it in `index.html` as `og:image` and `twitter:image` using a relative `/og-image.png` path. Note the caveat: social crawlers need an absolute URL, so the preview image only fully works once the site is published on a real domain (Lovable hosting also auto-injects an OG image at serve time as a fallback). I'll call this out to you in chat, not in the tags.
-- Add **`apple-touch-icon`** (180×180) generated from the app icon → `public/apple-touch-icon.png`.
-- Add **`<meta name="theme-color">`** matching the deep-indigo brand.
-- Add a small `<meta name="apple-mobile-web-app-title" content="GoTogether">`.
-- Confirm no Lovable strings remain anywhere in `src/`, `index.html`, or `public/` (already verified — only infra references in `bun.lock` which are internal).
+Added to `src/App.tsx` (BrowserRouter — Lovable hosting handles SPA fallback):
 
-## 2. Mobile & tablet performance
+- `/support` → Support hub
+- `/privacy` → Privacy Policy
+- `/terms` → Terms of Service
+- `/delete-account` → Account Deletion instructions
 
-Focused, low-risk optimizations — no layout redesign.
+All four pages get proper `<title>`, meta description, canonical, and a single H1 via a small `SEO` helper (or inline `useEffect`) — no new dependency needed.
 
-- **Images**
-  - Add explicit `width`/`height` to `PhoneFrame` `<img>` to prevent CLS.
-  - Add `decoding="async"` everywhere and keep `loading="lazy"` for below-the-fold screenshots; hero screenshots stay `eager` with `fetchpriority="high"` on the primary one.
-  - Preload the primary hero screenshot in `index.html` (`<link rel="preload" as="image">`).
-- **Hero on small screens**
-  - Secondary tilted phone is already `hidden lg:block` — keep.
-  - Reduce aurora blob count/size below `md` (they trigger large paint work on mobile GPUs); scope the existing blobs with `hidden md:block` on the two heaviest and keep one lighter blob on mobile.
-- **CSS**
-  - Add `content-visibility: auto` + `contain-intrinsic-size` to `Features`, `HowItWorks`, `Screenshots`, `MemoriesSection`, `DownloadCTA` sections so offscreen content is skipped during initial paint on mobile.
-  - Respect `prefers-reduced-motion` for the `Reveal` component and the aurora animation.
-- **Fonts**
-  - Verify Inter is loaded with `display=swap` and only the weights actually used (400/500/600/700). Trim if extra weights are pulled.
-- **Tap targets & safe areas**
-  - Ensure buttons and nav links are ≥44px tall on mobile; add `padding-bottom: env(safe-area-inset-bottom)` to the sticky footer/CTA if needed.
-- **Viewport**
-  - Update viewport meta to `width=device-width, initial-scale=1, viewport-fit=cover` for iOS notch safe areas.
+## Page structure (shared shell)
+
+Each legal page reuses `Navbar` and `Footer` and wraps content in a shared `LegalLayout` component:
+
+- Centered `max-w-3xl` article
+- Page title (H1), "Last updated: May 2026" subline
+- Prose content styled with existing tokens (no `prose` plugin needed — use Tailwind spacing + `text-muted-foreground` / `text-foreground`)
+- Back-to-home link at bottom
+
+Content is copied verbatim from the fetched pages but broken into readable paragraphs, short section headings, and bullet lists (the source is one giant paragraph — restructuring for readability, not rewording).
+
+### Support (`/support`) — hub
+
+- Intro line + contact email `gdkalyan2109@gmail.com` (mailto)
+- "We can help with" bullet list (sign-in/OTP, trips, friends, itinerary, live updates, expenses, profile, deletion, bug reports)
+- Response time note (24–48h)
+- Card grid linking to the three other pages:
+  - Privacy Policy → `/privacy`
+  - Terms of Service → `/terms`
+  - Delete your account → `/delete-account`
+
+### Privacy (`/privacy`)
+
+Sections: Overview · Information we collect · How we use it · Permissions · Sharing & service providers · Shared trip visibility · Account deletion · Contact · Updates.
+
+### Terms (`/terms`)
+
+Sections: Acceptable use · Your responsibility · Prohibited conduct · Permissions · Shared trip visibility · Changes to the service · Account deletion · Disclaimer & liability · Contact.
+
+### Delete Account (`/delete-account`)
+
+Sections: In-app steps (Profile/Settings → Delete Account) · What gets removed vs retained · Email fallback with `gdkalyan2109@gmail.com` and 24–48h response note.
+
+## Footer & Navbar updates
+
+- `Footer.tsx`: add a fourth column "Legal & Support" with links to `/support`, `/privacy`, `/terms`, `/delete-account`. Adjust grid to `sm:grid-cols-2 lg:grid-cols-4`.
+- `Navbar.tsx`: no top-nav change (keeps landing focus). Add a subtle "Support" link inside the mobile menu only — optional, small.
+
+## Files
+
+New:
+- `src/pages/Support.tsx`
+- `src/pages/Privacy.tsx`
+- `src/pages/Terms.tsx`
+- `src/pages/DeleteAccount.tsx`
+- `src/components/site/LegalLayout.tsx` (shared shell + SEO head handling)
+
+Edited:
+- `src/App.tsx` — register 4 new routes
+- `src/components/site/Footer.tsx` — add Legal & Support column
+- `src/components/site/Navbar.tsx` — optional mobile-menu "Support" link
 
 ## Out of scope
 
-- No new sections, copy changes, or restructuring.
-- No route changes, backend, or Lovable Cloud.
-- No changes to `mobile-app/` or `backend/` folders.
-
-## Technical notes
-
-- OG image generated with `imagegen` (premium tier for legible wordmark), saved directly to `public/og-image.png` (kept in-repo because it must be served at a stable, non-CDN path for og tags and is small).
-- Apple touch icon derived from the existing `gotogether-icon` asset via `imagegen` at 180×180, saved to `public/apple-touch-icon.png`.
-- All image tweaks are prop-level; no component API changes.
-- CSS additions live in `src/index.css` under a new `@layer utilities` block; existing tokens untouched.
-
-## Files to change
-
-- `index.html` — add og:image, twitter:image, apple-touch-icon, theme-color, updated viewport, hero image preload.
-- `public/og-image.png` — new.
-- `public/apple-touch-icon.png` — new.
-- `src/index.css` — reduced-motion rules, `content-visibility` utility, mobile-scoped aurora tweaks.
-- `src/components/site/PhoneFrame.tsx` — width/height, decoding, fetchpriority prop.
-- `src/components/site/Hero.tsx` — mark primary phone high priority, hide heavy blobs below md.
-- `src/components/site/Screenshots.tsx`, `Features.tsx`, `HowItWorks.tsx`, `MemoriesSection.tsx`, `DownloadCTA.tsx` — add `content-visibility` class to section wrappers.
-- `src/components/site/Reveal.tsx` — respect reduced motion.
+- No CMS, no backend, no forms (contact is a `mailto:` link — matches the source).
+- No copy rewrites beyond restructuring the single-paragraph source into readable sections.
+- No changes to the mobile app or backend folders.
